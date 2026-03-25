@@ -5,7 +5,6 @@
 ![ESP32](https://img.shields.io/badge/ESP32-Dual--Core-blue?logo=espressif)
 ![Platform](https://img.shields.io/badge/Platform-Arduino%2FIDF-orange)
 ![Backend](https://img.shields.io/badge/Backend-Google%20Apps%20Script-green?logo=google)
-![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 ---
 
