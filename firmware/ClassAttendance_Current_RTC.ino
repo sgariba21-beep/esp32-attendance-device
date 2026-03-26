@@ -8,8 +8,8 @@
 
 /* ========= CONFIG - EDIT THESE ========== */
 // WiFi
-const char* WIFI_SSID = "OLAG-STUDENTS-WiFi";
-const char* WIFI_PASS = "TABLETconnect";
+const char* WIFI_SSID = "";
+const char* WIFI_PASS = "";
 
 // Central Apps Script endpoint (single router web app)
 const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxg_Dj_i-JrmNfHblrzBaxaxzwWArAsgzKSz0QNhfjhltZmwSYiZqXgY8FqCJYatfVM4g/exec";
