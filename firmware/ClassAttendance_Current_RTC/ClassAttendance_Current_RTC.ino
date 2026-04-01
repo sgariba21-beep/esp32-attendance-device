@@ -7,9 +7,6 @@
 */
 
 /* ========= CONFIG - EDIT THESE ========== */
-// WiFi
-const char* WIFI_SSID = "";
-const char* WIFI_PASS = "";
 
 // Central Apps Script endpoint (single router web app)
 const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxg_Dj_i-JrmNfHblrzBaxaxzwWArAsgzKSz0QNhfjhltZmwSYiZqXgY8FqCJYatfVM4g/exec";
@@ -44,9 +41,12 @@ const char* CLASS_NAME = "2 Science 2";
 #define SCAN_COOLDOWN_MS 60000UL  // minimum ms between accepted scans per finger
 #define ENROLL_POLL_MS 10000UL  // normal poll interval
 #define ENROLL_POLL_FAST_MS 2000UL  // fast poll interval after a job is found
-#define ENROLL_MODE_TIMEOUT_MS 120000UL // 2 minutes enrollment mode if triggered by master
 #define QUEUE_FILE "/queue.txt"
 #define FID_MAP_FILE "/fid_map.csv" // csv lines: fid,uniqueId,role,name
+#define WIFI_CREDS_FILE "/wifi_creds.json"
+#define AP_SSID         "Attendance-Setup"
+#define AP_PASS         "setup1234"
+#define DNS_PORT        53
 
 /* ============ TEACHER ID-RANGE CONFIG ============ */
 /* Edit these to match how you enroll teacher fingerprints.
@@ -67,9 +67,6 @@ const char* TEACHERS_IDS_FALLBACK[TEACHER_FID_END - TEACHER_FID_START + 1] = {
   /* 56 -> */ "T016", "T017", "T018", "T019", "T020"
 };
 
-/* Master FID as requested by you */
-const int MASTER_FID = 99;
-
 /* Student range (explicit for clarity): 1..40 */
 const int STUDENT_FID_START = 1;
 const int STUDENT_FID_END = 40;
@@ -89,6 +86,9 @@ const int STUDENT_FID_END = 40;
 #include <Adafruit_Fingerprint.h>
 #include <Wire.h>
 #include <RTClib.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include "esp_task_wdt.h"
 
 /* FreeRTOS primitives */
 #include "freertos/FreeRTOS.h"
@@ -109,6 +109,13 @@ SemaphoreHandle_t spiffsMutex = NULL;
 SemaphoreHandle_t enrollMutex = NULL;
 SemaphoreHandle_t enrollSem = NULL;
 
+String wifiSSID = "";
+String wifiPASS = "";
+
+TaskHandle_t hFingerprint = NULL;
+TaskHandle_t hNetwork     = NULL;
+TaskHandle_t hEnrollment  = NULL;
+
 std::deque<String> memQueue; // in-memory queue for attendance payloads
 std::vector<String> fidMap;  // index 0 unused; fidMap[fid] == uniqueId (or empty)
 std::vector<String> fidMapRole; // role per fid
@@ -125,10 +132,6 @@ struct EnrollJob {
 };
 volatile bool enrollmentJobPending = false;
 EnrollJob currentEnrollJob;
-
-// Enrollment mode (master triggered)
-volatile bool enrollmentMode = false;
-volatile unsigned long enrollmentModeTs = 0; // millis when enrollment mode started
 
 static unsigned long lastScanMillis[MAX_FID + 1];
 static bool fidEverScanned[MAX_FID + 1];
@@ -192,6 +195,126 @@ void showReadyState() {
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
   }
 }
+
+/* ================== WiFi Credentials (SPIFFS) ================== */
+bool loadWiFiCreds() {
+  if (!SPIFFS.exists(WIFI_CREDS_FILE)) return false;
+  File f = SPIFFS.open(WIFI_CREDS_FILE, FILE_READ);
+  if (!f) return false;
+  String ssid = "", pass = "";
+  while (f.available()) {
+    String ln = f.readStringUntil('\n');
+    ln.trim();
+    if (ln.startsWith("ssid=")) ssid = ln.substring(5);
+    else if (ln.startsWith("pass=")) pass = ln.substring(5);
+  }
+  f.close();
+  if (ssid.length() == 0) return false;
+  wifiSSID = ssid;
+  wifiPASS = pass;
+  return true;
+}
+
+void saveWiFiCreds(const String &ssid, const String &pass) {
+  File f = SPIFFS.open(WIFI_CREDS_FILE, FILE_WRITE);
+  if (!f) { Serial.println("Failed to write WiFi creds"); return; }
+  f.println("ssid=" + ssid);
+  f.println("pass=" + pass);
+  f.close();
+  Serial.println("WiFi credentials saved.");
+}
+
+/* ================== Captive Portal ================== */
+WebServer portalServer(80);
+DNSServer dnsServer;
+
+const char PORTAL_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance Device Setup</title>
+<style>
+  body{font-family:sans-serif;max-width:420px;margin:50px auto;padding:20px;background:#f5f5f5;}
+  .card{background:white;border-radius:10px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+  h2{color:#1565C0;margin-top:0;}
+  input{width:100%;padding:10px;margin:8px 0 16px 0;border:1px solid #ccc;
+        border-radius:6px;font-size:15px;box-sizing:border-box;}
+  button{width:100%;padding:13px;background:#1565C0;color:white;
+         border:none;border-radius:6px;font-size:16px;cursor:pointer;}
+  button:hover{background:#0D47A1;}
+  #msg{margin-top:14px;font-size:14px;color:#333;}
+  .lbl{font-size:13px;font-weight:bold;color:#555;}
+</style></head>
+<body><div class="card">
+<h2>&#128246; WiFi Setup</h2>
+<p style="color:#555;font-size:14px;">Enter the school WiFi details for this attendance device.</p>
+<div class="lbl">WiFi Name (SSID)</div>
+<input type="text" id="ssid" placeholder="e.g. GHS-Staff" autocomplete="off"/>
+<div class="lbl">Password</div>
+<input type="password" id="pass" placeholder="WiFi password"/>
+<button onclick="save()">Save &amp; Connect</button>
+<div id="msg"></div>
+</div>
+<script>
+function save(){
+  var s=document.getElementById('ssid').value.trim();
+  var p=document.getElementById('pass').value;
+  if(!s){document.getElementById('msg').innerText='Please enter a WiFi name.';return;}
+  document.getElementById('msg').innerText='Saving...';
+  fetch('/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p))
+    .then(function(r){return r.text();})
+    .then(function(t){document.getElementById('msg').innerText=t;});
+}
+</script></body></html>
+)rawliteral";
+
+void startCaptivePortal() {
+  esp_task_wdt_delete(NULL); // remove this task from watchdog
+
+  // Suspend other tasks so they don't interfere with AP mode
+  if (hNetwork    != NULL) vTaskSuspend(hNetwork);
+  if (hEnrollment != NULL) vTaskSuspend(hEnrollment);
+
+  Serial.println("Starting captive portal (AP mode)...");
+  WiFi.disconnect(true);
+  delay(200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.print("Portal AP IP: "); Serial.println(WiFi.softAPIP());
+
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+  portalServer.on("/", []() {
+    portalServer.send(200, "text/html", PORTAL_HTML);
+  });
+  portalServer.on("/save", []() {
+    String ssid = portalServer.arg("ssid");
+    String pass = portalServer.arg("pass");
+    if (ssid.length() == 0) {
+      portalServer.send(400, "text/plain", "SSID cannot be empty.");
+      return;
+    }
+    saveWiFiCreds(ssid, pass);
+    portalServer.send(200, "text/plain", "Saved! Device will restart now...");
+    delay(1500);
+    ESP.restart();
+  });
+  portalServer.onNotFound([]() {
+    portalServer.sendHeader("Location", "http://192.168.4.1/", true);
+    portalServer.send(302, "text/plain", "");
+  });
+  portalServer.begin();
+  Serial.println("Portal running. Connect to: " AP_SSID);
+
+  while (true) {
+    dnsServer.processNextRequest();
+    portalServer.handleClient();
+    finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
+    delay(500);
+    finger.LEDcontrol(FINGERPRINT_LED_OFF, 0, 0);
+    delay(500);
+  }
+}
+/* ================== End Captive Portal ================== */
 
 /* Fingerprint initialization */
 void setupFingerprint() {
@@ -281,12 +404,6 @@ bool loadFidMapFromFS() {
         fidMapRole[fid] = "teacher";
       }
     }
-    // Master fallback (if within range)
-    if (MASTER_FID >= 1 && MASTER_FID <= MAX_FID) {
-      fidMap[MASTER_FID] = String("MASTER");
-      fidMapRole[MASTER_FID] = "master";
-      fidMapName[MASTER_FID] = "Admin";
-    }
     xSemaphoreGive(spiffsMutex);
     Serial.println("No fid_map file; using fallbacks where available (teachers + master).");
     return true;
@@ -361,38 +478,37 @@ void clearAllFidMap() {
 bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHttpCode, String &outBody) {
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
 
-  for (int attempt=1; attempt<=POST_MAX_RETRIES; ++attempt) {
+  for (int attempt = 1; attempt <= POST_MAX_RETRIES; ++attempt) {
     WiFiClientSecure client; client.setInsecure();
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.setTimeout(POST_TIMEOUT_MS);
-    bool started = http.begin(client, targetUrl);
-    if (!started) {
+    http.setTimeout(20000);
+    if (!http.begin(client, targetUrl)) {
       outHttpCode = -2; outBody = "HTTP begin failed";
       Serial.println("HTTP begin failed");
-    } else {
-      http.addHeader("Content-Type", "application/json");
-      int code = http.POST(jsonPayload);
-      outHttpCode = code;
-      if (code > 0) {
-        outBody = http.getString();
-        Serial.printf("POST -> code=%d body=%s\n", code, outBody.c_str());
-        http.end();
-        if ((code >=200 && code <300) || code == 400) return true;
-        if ((code >=500 && code <600) || code == 429) {
-          Serial.printf("Server transient %d; will retry\n", code);
-        } else {
-          Serial.printf("Permanent HTTP failure %d\n", code);
-          return false;
-        }
+      break;
+    }
+    http.addHeader("Content-Type", "application/json");
+    int code = http.POST(jsonPayload);
+    outHttpCode = code;
+    if (code > 0) {
+      outBody = http.getString();
+      Serial.printf("POST -> code=%d body=%s\n", code, outBody.c_str());
+      http.end();
+      if ((code >= 200 && code < 300) || code == 400) return true;
+      if ((code >= 500 && code < 600) || code == 429) {
+        Serial.printf("Server transient %d; will retry\n", code);
       } else {
-        outBody = http.errorToString(code);
-        Serial.printf("HTTP client error: %s\n", outBody.c_str());
-        http.end();
+        Serial.printf("Permanent HTTP failure %d\n", code);
+        return false;
       }
+    } else {
+      outBody = http.errorToString(code);
+      Serial.printf("HTTP client error: %s\n", outBody.c_str());
+      http.end();
     }
     if (attempt < POST_MAX_RETRIES) {
-      unsigned long backoff = POST_BASE_DELAY_MS * (1UL << (attempt-1));
+      unsigned long backoff = POST_BASE_DELAY_MS * (1UL << (attempt - 1));
       vTaskDelay(backoff / portTICK_PERIOD_MS);
     } else {
       Serial.println("Max POST attempts reached");
@@ -419,27 +535,26 @@ String urlEncode(const String &str) {
 
 /* GET fallback for client errors (400/404) - same as before */
 bool sendGETFallback(const String &studentId, const String &date, const String &ts, int &outHttpCode, String &outBody) {
-  if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody="WiFi not connected"; return false; }
+  if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
   String url = String(SCRIPT_URL) + "?";
   url += "classId=" + urlEncode(String(CLASS_ID));
   url += "&className=" + urlEncode(String(CLASS_NAME));
   if (studentId.length()) url += "&studentId=" + urlEncode(studentId);
-  if (date.length()) url += "&date=" + urlEncode(date);
-  if (ts.length()) url += "&ts=" + urlEncode(ts);
+  if (date.length())      url += "&date=" + urlEncode(date);
+  if (ts.length())        url += "&ts=" + urlEncode(ts);
 
   WiFiClientSecure client; client.setInsecure();
   HTTPClient http;
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(POST_TIMEOUT_MS);
-  bool started = http.begin(client, url);
-  if (!started) { outHttpCode = -2; outBody="GET begin failed"; return false; }
+  http.setTimeout(20000);
+  if (!http.begin(client, url)) { outHttpCode = -2; outBody = "GET begin failed"; return false; }
   int code = http.GET();
   outHttpCode = code;
   if (code > 0) {
     outBody = http.getString();
     Serial.printf("GET -> code=%d body=%s\n", code, outBody.c_str());
     http.end();
-    return (code >=200 && code <300);
+    return (code >= 200 && code < 300);
   } else {
     outBody = http.errorToString(code);
     Serial.printf("GET client error: %s\n", outBody.c_str());
@@ -461,12 +576,14 @@ void reportEnrollUpdate(int row, const String &status, int fingerId, const Strin
   Serial.printf("Reporting enroll_update row=%d status=%s fid=%d\n", row, status.c_str(), fingerId);
   WiFiClientSecure client; client.setInsecure();
   HTTPClient http;
-  http.begin(client, url);
-  int code = http.GET();
-  String body = "";
-  if (code > 0) body = http.getString();
-  Serial.printf("enroll_update -> code=%d body=%s\n", code, body.c_str());
-  http.end();
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setTimeout(20000);
+  if (http.begin(client, url)) {
+    int code = http.GET();
+    String body = (code > 0) ? http.getString() : http.errorToString(code);
+    Serial.printf("enroll_update -> code=%d body=%s\n", code, body.c_str());
+    http.end();
+  }
 }
 
 /* ================== Enrollment execution helpers ================== */
@@ -779,6 +896,7 @@ void flushQueue() {
 /* =================== NetworkTask (Core 0) =================== */
 void NetworkTask(void *pvParameters) {
   const TickType_t flushIntervalTicks = pdMS_TO_TICKS(60000); // 60s
+  esp_task_wdt_delete(NULL); // this task does long HTTP calls; remove from watchdog
   for (;;) {
     // Process any in-memory queued payloads
     String payload = "";
@@ -873,7 +991,7 @@ void NetworkTask(void *pvParameters) {
         //(full reconnect cycle so it re-scans all APs):
         WiFi.disconnect(true);
         vTaskDelay(pdMS_TO_TICKS(1000));
-        WiFi.begin(WIFI_SSID, WIFI_PASS);
+        WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
       } 
     }
   }
@@ -883,6 +1001,7 @@ void NetworkTask(void *pvParameters) {
 /* =================== EnrollmentTask (polls Apps Script) =================== */
 void EnrollmentTask(void *pvParameters) {
   (void) pvParameters;
+  esp_task_wdt_delete(NULL); // this task does long HTTP calls; remove from watchdog
   for (;;) {
     // Poll only when WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
@@ -892,14 +1011,16 @@ void EnrollmentTask(void *pvParameters) {
       WiFiClientSecure client; client.setInsecure();
       HTTPClient http;
       http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-      http.setTimeout(10000);
+      http.setTimeout(20000);
+      int code = -1;
+      String body = "";
       if (http.begin(client, url)) {
-        int code = http.GET();
-        String body = "";
+        code = http.GET();
         if (code > 0) body = http.getString();
-        Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
         http.end();
-
+      }
+      Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
+      {
         if (code >= 200 && code < 300 && body.length()) {
           // We expect JSON with "result":"ok" and a record object OR "result":"none"
           if (body.indexOf("\"result\":\"ok\"") >= 0 && body.indexOf("\"record\"") >= 0) {
@@ -969,9 +1090,7 @@ void EnrollmentTask(void *pvParameters) {
         } else {
           Serial.printf("EnrollmentTask: HTTP poll failed code=%d\n", code);
         }
-      } else {
-        Serial.println("EnrollmentTask: HTTP begin failed");
-      }
+      } 
     } else {
       Serial.println("EnrollmentTask: WiFi not connected; skipping poll");
     }
@@ -988,14 +1107,6 @@ void FingerprintTask(void *pvParameters) {
   const unsigned long feedbackDuration = 600; // ms (green or red hold)
 
   for (;;) {
-    // check if master enrollment mode timed out
-    if (enrollmentMode) {
-      if (millis() - enrollmentModeTs > ENROLL_MODE_TIMEOUT_MS) {
-        enrollmentMode = false;
-        Serial.println("Enrollment mode timed out; exiting enrollment mode.");
-      }
-    }
-
     // show ready (blue or purple depending on WiFi state)
     showReadyState();
 
@@ -1061,52 +1172,14 @@ void FingerprintTask(void *pvParameters) {
       role.toLowerCase();
 
       if (role == "master") {
-        // Trigger enrollment mode
-        enrollmentMode = true;
-        enrollmentModeTs = millis();
-        Serial.println("Master scanned: entering ENROLLMENT MODE for short time.");
-        // blink to indicate enrollment mode
-        for (int i=0;i<3;i++){
+        Serial.println("Master scanned: launching WiFi captive portal.");
+        for (int i = 0; i < 5; i++) {
           setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
-          vTaskDelay(150 / portTICK_PERIOD_MS);
+          vTaskDelay(120 / portTICK_PERIOD_MS);
           setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
-          vTaskDelay(150 / portTICK_PERIOD_MS);
+          vTaskDelay(120 / portTICK_PERIOD_MS);
         }
-        showReadyState();
-        vTaskDelay(200 / portTICK_PERIOD_MS);
-      } else if (enrollmentMode) {
-        // If in enrollmentMode and scan is of a non-master finger -> start local enroll (register)
-        // We interpret this as "enroll this finger into next free fid" only if we have a prompt earlier.
-        // But since the user might want to enroll a new finger, we ask for two presses and store
-        // For safety we set the new uniqueId to empty — better to use server-driven enrollment in most cases.
-        Serial.println("In enrollment mode: treat scan as NEW registration request.");
-        int freeFid = -1;
-        for (int f=1; f<=MAX_FID; ++f) if (fidMap[f].length()==0) { freeFid = f; break; }
-        if (freeFid < 1) {
-          Serial.println("No free fid available locally.");
-          setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
-          vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-          showReadyState();
-        } else {
-          // register fingerprint into freeFid (perform enrollment flow)
-          int res = enrollID_toFid(freeFid);
-          if (res > 0) {
-            // save mapping with placeholder uniqueId; user should later update sheet or we could prompt via serial
-            fidMap[res] = String("AUTO_" + String(res));
-            fidMapRole[res] = "student";
-            fidMapName[res] = "";
-            saveFidMapToFS();
-            reportEnrollUpdate(0, "registered", res, "local-auto"); // row 0 indicates local-only registration
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
-            vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-            showReadyState();
-          } else {
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
-            vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-            showReadyState();
-          }
-        }
-        // After local enrollment we remain in enrollmentMode until timeout or master exits
+        startCaptivePortal(); // blocks until credentials saved, then restarts
       } else {
         // Decide branch using the stored role. If there is a stored mapping:
         if (mapped.length()) {
@@ -1199,7 +1272,6 @@ void setup() {
   spiffsMutex = xSemaphoreCreateMutex();
   enrollMutex = xSemaphoreCreateMutex();
   enrollSem = xSemaphoreCreateBinary();
-
   if (!memQueueMutex || !memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem) {
     Serial.println("Failed to create RTOS primitives");
     while (1) delay(1000);
@@ -1212,15 +1284,22 @@ void setup() {
   memset(lastScanMillis, 0, sizeof(lastScanMillis));
   memset(fidEverScanned, 0, sizeof(fidEverScanned));
 
-  // WiFi connect
+  // WiFi connect — load from SPIFFS, portal on first boot only
+  bool hasCreds = loadWiFiCreds();
+  if (!hasCreds) {
+    Serial.println("No WiFi credentials found. Launching captive portal...");
+    setupFingerprint(); // needed so portal can blink the LED
+    startCaptivePortal(); // blocks; device restarts after save
+  }
+
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.setAutoReconnect(true);        // let the driver reconnect automatically
-  wifi_config_t conf;                 // disable BSSID lock so it roams to strongest AP
+  WiFi.setAutoReconnect(true);
+  wifi_config_t conf;
   esp_wifi_get_config(WIFI_IF_STA, &conf);
   conf.sta.bssid_set = 0;
   esp_wifi_set_config(WIFI_IF_STA, &conf);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
   Serial.print("Connecting to WiFi");
   int tries = 0;
   while (WiFi.status() != WL_CONNECTED && tries < 30) { delay(500); Serial.print("."); tries++; }
@@ -1228,8 +1307,11 @@ void setup() {
     Serial.println("\nWiFi connected");
     Serial.print("IP: "); Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\nWiFi not connected");
+    Serial.println("\nWiFi failed — continuing in offline mode. Scan master finger to reconfigure.");
+    setupFingerprint();
+    startCaptivePortal();
   }
+  Serial.printf("Free heap at boot: %u bytes\n", esp_get_free_heap_size());
 
   // RTC Init/ 
   Wire.begin(21, 22);
@@ -1246,9 +1328,9 @@ void setup() {
   setupFingerprint();
 
   // Create tasks
-  BaseType_t ok1 = xTaskCreatePinnedToCore(FingerprintTask, "FingerprintTask", 8192, NULL, 1, NULL, 1);
-  BaseType_t ok2 = xTaskCreatePinnedToCore(NetworkTask, "NetworkTask", 16384, NULL, 1, NULL, 0);
-  BaseType_t ok3 = xTaskCreatePinnedToCore(EnrollmentTask, "EnrollmentTask", 8192, NULL, 1, NULL, 0);
+  BaseType_t ok1 = xTaskCreatePinnedToCore(FingerprintTask, "FingerprintTask", 8192, NULL, 1, &hFingerprint, 1);
+  BaseType_t ok2 = xTaskCreatePinnedToCore(NetworkTask, "NetworkTask", 16384, NULL, 1, &hNetwork, 0);
+  BaseType_t ok3 = xTaskCreatePinnedToCore(EnrollmentTask, "EnrollmentTask", 12288, NULL, 1, &hEnrollment, 0);
   if (ok1 != pdPASS || ok2 != pdPASS || ok3 != pdPASS) {
     Serial.println("Failed to create tasks");
     while (1) delay(1000);
