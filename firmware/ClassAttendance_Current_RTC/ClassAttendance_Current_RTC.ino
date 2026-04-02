@@ -1288,8 +1288,8 @@ void setup() {
   bool hasCreds = loadWiFiCreds();
   if (!hasCreds) {
     Serial.println("No WiFi credentials found. Launching captive portal...");
-    setupFingerprint(); // needed so portal can blink the LED
-    startCaptivePortal(); // blocks; device restarts after save
+    setupFingerprint();
+    startCaptivePortal();
   }
 
   WiFi.mode(WIFI_STA);
@@ -1308,8 +1308,6 @@ void setup() {
     Serial.print("IP: "); Serial.println(WiFi.localIP());
   } else {
     Serial.println("\nWiFi failed — continuing in offline mode. Scan master finger to reconfigure.");
-    setupFingerprint();
-    startCaptivePortal();
   }
   Serial.printf("Free heap at boot: %u bytes\n", esp_get_free_heap_size());
 
