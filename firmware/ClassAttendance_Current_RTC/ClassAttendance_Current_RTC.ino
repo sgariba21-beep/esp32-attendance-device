@@ -48,29 +48,6 @@ const char* CLASS_NAME = "2 Science 2";
 #define AP_PASS         "setup1234"
 #define DNS_PORT        53
 
-/* ============ TEACHER ID-RANGE CONFIG ============ */
-/* Edit these to match how you enroll teacher fingerprints.
-   Example: if you enroll students as 1..40 and teachers as 41..60,
-   set TEACHER_FID_START = 41 and TEACHER_FID_END = 60.
-*/
-const int TEACHER_FID_START = 41;
-const int TEACHER_FID_END   = 60;
-
-/* Provide teacher unique IDs that correspond to the fingerprint IDs
-   in the range TEACHER_FID_START..TEACHER_FID_END in order.
-   This array is a fallback initial mapping only; fid_map.csv persisted values will override.
-*/
-const char* TEACHERS_IDS_FALLBACK[TEACHER_FID_END - TEACHER_FID_START + 1] = {
-  /* 41 -> */ "T001", "T002", "T003", "T004", "T005",
-  /* 46 -> */ "T006", "T007", "T008", "T009", "T010",
-  /* 51 -> */ "T011", "T012", "T013", "T014", "T015",
-  /* 56 -> */ "T016", "T017", "T018", "T019", "T020"
-};
-
-/* Student range (explicit for clarity): 1..40 */
-const int STUDENT_FID_START = 1;
-const int STUDENT_FID_END = 40;
-
 /* ============ END CONFIG ================ */
 
 /* Libraries */
@@ -327,7 +304,9 @@ void setupFingerprint() {
   } else {
     Serial.println("Fingerprint sensor not found :(");
   }
+  finger.getParameters();
   Serial.print("Template count: "); Serial.println(finger.templateCount);
+  Serial.print("Sensor capacity: "); Serial.println(finger.capacity);
 }
 
 /* Helper: generate a unique scanId using millis + id */
@@ -396,16 +375,8 @@ bool loadFidMapFromFS() {
   // load fallback teachers into mapping (only applies if fidMap empty later)
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
   if (!SPIFFS.exists(FID_MAP_FILE)) {
-    // no file — initialize with fallbacks for teacher range (if any) and master fallback
-    for (int fid = TEACHER_FID_START; fid <= TEACHER_FID_END && fid <= MAX_FID; ++fid) {
-      int idx = fid - TEACHER_FID_START;
-      if (idx >= 0 && idx < (int)(sizeof(TEACHERS_IDS_FALLBACK)/sizeof(TEACHERS_IDS_FALLBACK[0]))) {
-        fidMap[fid] = String(TEACHERS_IDS_FALLBACK[idx]);
-        fidMapRole[fid] = "teacher";
-      }
-    }
     xSemaphoreGive(spiffsMutex);
-    Serial.println("No fid_map file; using fallbacks where available (teachers + master).");
+    Serial.println("No fid_map file; starting with empty map.");
     return true;
   }
   File f = SPIFFS.open(FID_MAP_FILE, FILE_READ);
@@ -1208,35 +1179,11 @@ void FingerprintTask(void *pvParameters) {
             vTaskDelay(200 / portTICK_PERIOD_MS);
           }
         } else {
-          // No mapping stored: fall back to the teacher-range fallback logic you already have
-          if (fid >= TEACHER_FID_START && fid <= TEACHER_FID_END) {
-            int tIdx = fid - TEACHER_FID_START;
-            String teacherId = "";
-            if (tIdx >= 0 && tIdx < (TEACHER_FID_END - TEACHER_FID_START + 1)) {
-              teacherId = String(TEACHERS_IDS_FALLBACK[tIdx]);
-            }
-            if (teacherId.length() == 0) {
-              Serial.printf("Matched fingerID %d in teacher range but no TeacherID mapping configured. Ignoring.\n", fid);
-              setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
-              vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-              showReadyState();
-              vTaskDelay(100 / portTICK_PERIOD_MS);
-            } else {
-              setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
-              String scanId = makeScanId(teacherId);
-              String payload = "{\"type\":\"teacher\",\"classId\":\"" + String(CLASS_ID) + "\",\"className\":\"" + String(CLASS_NAME) + "\",\"teacherId\":\"" + teacherId + "\",\"scanId\":\"" + scanId + "\"}";
-              vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-              showReadyState();
-              sendOrQueuePayload(payload);
-              vTaskDelay(200 / portTICK_PERIOD_MS);
-            }
-          } else {
-            Serial.printf("Matched fingerID %d but no StudentID mapping configured. Ignoring.\n", fid);
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
-            vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-            showReadyState();
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-          }
+          Serial.printf("Matched fingerID %d but no mapping configured. Ignoring.\n", fid);
+          setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+          vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
+          showReadyState();
+          vTaskDelay(100 / portTICK_PERIOD_MS);
         }
       }
     } else if (fid == -1) {
