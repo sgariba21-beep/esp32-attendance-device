@@ -1,0 +1,6 @@
+Designator,Val,Package,Mid X,Mid Y,Rotation,Layer
+J1,Conn_01x15_Socket,PinSocket_1x15_P2.54mm_Vertical,126.64,-78.57,90,top
+J2,Conn_01x15_Socket,PinSocket_1x15_P2.54mm_Vertical,100.64,-78.57,90,top
+J3,Conn_01x06_Socket,JST_SH_BM06B-SRSS-TB_1x06-1MP_P1.00mm_Vertical,111.485,-51.3,180,top
+J4,Conn_01x06_Socket,PinSocket_1x06_P2.54mm_Vertical,93.4,-76.77,90,top
+J5,Conn_01x02_Socket,JST_GH_BM02B-GHS-TBT_1x02-1MP_P1.25mm_Vertical,95,-51.8,180,top
