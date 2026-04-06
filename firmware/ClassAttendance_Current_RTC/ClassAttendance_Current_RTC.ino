@@ -89,6 +89,7 @@ SemaphoreHandle_t enrollSem = NULL;
 
 String wifiSSID = "";
 String wifiPASS = "";
+String pendingOtaUrl = "";
 
 TaskHandle_t hFingerprint = NULL;
 TaskHandle_t hNetwork     = NULL;
@@ -340,41 +341,44 @@ void startCaptivePortalWithOTA() {
   if (hNetwork    != NULL) vTaskSuspend(hNetwork);
   if (hEnrollment != NULL) vTaskSuspend(hEnrollment);
 
-  Serial.println("Starting OTA portal (AP mode)...");
-  WiFi.disconnect(true);
-  delay(200);
-  WiFi.mode(WIFI_AP);
+  Serial.println("Starting OTA portal (AP+STA mode)...");
+
+  // AP+STA: device serves the portal AND stays connected to school WiFi
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(AP_SSID, AP_PASS);
   Serial.print("OTA Portal AP IP: "); Serial.println(WiFi.softAPIP());
 
+  // Reconnect STA if needed
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("OTA portal: reconnecting STA...");
+    WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
+    int tries = 0;
+    while (WiFi.status() != WL_CONNECTED && tries < 20) {
+      delay(500); Serial.print("."); tries++;
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("\nOTA portal: STA reconnected, IP: " + WiFi.localIP().toString());
+    } else {
+      Serial.println("\nOTA portal: STA reconnect failed — download will not work");
+    }
+  } else {
+    Serial.println("OTA portal: STA already connected, IP: " + WiFi.localIP().toString());
+  }
+
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
-  // Root: show the OTA page
   portalServer.on("/", []() {
     portalServer.send(200, "text/html", OTA_HTML);
   });
 
-  // /flash: receive the URL, start OTA
-  // The response is sent first, then OTA begins — otherwise the fetch() never
-  // gets a reply because the device reboots mid-response
   portalServer.on("/flash", []() {
     String url = portalServer.arg("url");
     if (url.length() == 0 || !url.startsWith("http")) {
       portalServer.send(400, "text/plain", "Invalid URL.");
       return;
     }
+    pendingOtaUrl = url;   // defer to main loop so response sends fully first
     portalServer.send(200, "text/plain", "Starting OTA flash. Device will reboot...");
-    // Small delay so the HTTP response fully sends before we block the loop
-    delay(500);
-    // Suspend FingerprintTask — it's on Core 1 and must not touch the sensor mid-flash
-    if (hFingerprint != NULL) vTaskSuspend(hFingerprint);
-    bool ok = performOTA(url);
-    if (!ok) {
-      // OTA failed — resume tasks and keep portal open for retry
-      Serial.println("OTA failed. Resuming tasks.");
-      if (hFingerprint != NULL) vTaskResume(hFingerprint);
-    }
-    // On success, performOTA() calls ESP.restart() so we never reach here
   });
 
   portalServer.onNotFound([]() {
@@ -385,10 +389,23 @@ void startCaptivePortalWithOTA() {
   portalServer.begin();
   Serial.println("OTA portal running. Connect to: " AP_SSID);
 
-  // Same pulsing purple as the WiFi setup portal
   while (true) {
     dnsServer.processNextRequest();
     portalServer.handleClient();
+
+    // Deferred OTA: only starts after /flash response has fully sent
+    if (pendingOtaUrl.length() > 0) {
+      String url = pendingOtaUrl;
+      pendingOtaUrl = "";
+      if (hFingerprint != NULL) vTaskSuspend(hFingerprint);
+      bool ok = performOTA(url);
+      if (!ok) {
+        Serial.println("OTA failed. Portal still open — you can retry.");
+        if (hFingerprint != NULL) vTaskResume(hFingerprint);
+      }
+      // On success performOTA() calls ESP.restart() so we never reach here
+    }
+
     finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
     delay(500);
     finger.LEDcontrol(FINGERPRINT_LED_OFF, 0, 0);
