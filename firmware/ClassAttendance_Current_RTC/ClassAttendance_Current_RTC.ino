@@ -66,6 +66,7 @@ const char* CLASS_NAME = "2 Science 2";
 #include <WebServer.h>
 #include <DNSServer.h>
 #include "esp_task_wdt.h"
+#include <Update.h>
 
 /* FreeRTOS primitives */
 #include "freertos/FreeRTOS.h"
@@ -133,6 +134,8 @@ void reportEnrollUpdate(int row, const String &status, int fingerId, const Strin
 bool initRTC();
 void syncRTCFromNTP();
 String getRTCTimestamp();
+void startCaptivePortalWithOTA();
+bool performOTA(const String &url);
 
 /* Networking helpers (copied/kept similar to your original) */
 #define POST_MAX_RETRIES 3
@@ -244,6 +247,44 @@ function save(){
 </script></body></html>
 )rawliteral";
 
+const char OTA_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OTA Firmware Update</title>
+<style>
+  body{font-family:sans-serif;max-width:420px;margin:50px auto;padding:20px;background:#f5f5f5;}
+  .card{background:white;border-radius:10px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,0.1);}
+  h2{color:#E65100;margin-top:0;}
+  input{width:100%;padding:10px;margin:8px 0 16px 0;border:1px solid #ccc;
+        border-radius:6px;font-size:15px;box-sizing:border-box;}
+  button{width:100%;padding:13px;background:#E65100;color:white;
+         border:none;border-radius:6px;font-size:16px;cursor:pointer;}
+  button:hover{background:#BF360C;}
+  #msg{margin-top:14px;font-size:14px;color:#333;}
+  .lbl{font-size:13px;font-weight:bold;color:#555;}
+  .warn{background:#FFF3E0;border-left:4px solid #E65100;padding:10px;
+        border-radius:4px;font-size:13px;margin-bottom:16px;}
+</style></head>
+<body><div class="card">
+<h2>&#128295; OTA Firmware Update</h2>
+<div class="warn">Device will flash new firmware and reboot. Do not disconnect power.</div>
+<div class="lbl">Firmware URL (.bin)</div>
+<input type="text" id="url" placeholder="https://..." autocomplete="off"/>
+<button onclick="flash()">Flash Firmware</button>
+<div id="msg"></div>
+</div>
+<script>
+function flash(){
+  var u=document.getElementById('url').value.trim();
+  if(!u||!u.startsWith('http')){document.getElementById('msg').innerText='Please enter a valid URL.';return;}
+  document.getElementById('msg').innerText='Flashing... device will reboot when done. This page will disconnect.';
+  fetch('/flash?url='+encodeURIComponent(u))
+    .then(function(r){return r.text();})
+    .then(function(t){document.getElementById('msg').innerText=t;});
+}
+</script></body></html>
+)rawliteral";
+
 void startCaptivePortal() {
   esp_task_wdt_delete(NULL); // remove this task from watchdog
 
@@ -291,7 +332,131 @@ void startCaptivePortal() {
     delay(500);
   }
 }
+
+/* ================== Captive Portal with OTA page ================== */
+void startCaptivePortalWithOTA() {
+  esp_task_wdt_delete(NULL);
+
+  if (hNetwork    != NULL) vTaskSuspend(hNetwork);
+  if (hEnrollment != NULL) vTaskSuspend(hEnrollment);
+
+  Serial.println("Starting OTA portal (AP mode)...");
+  WiFi.disconnect(true);
+  delay(200);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  Serial.print("OTA Portal AP IP: "); Serial.println(WiFi.softAPIP());
+
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+  // Root: show the OTA page
+  portalServer.on("/", []() {
+    portalServer.send(200, "text/html", OTA_HTML);
+  });
+
+  // /flash: receive the URL, start OTA
+  // The response is sent first, then OTA begins — otherwise the fetch() never
+  // gets a reply because the device reboots mid-response
+  portalServer.on("/flash", []() {
+    String url = portalServer.arg("url");
+    if (url.length() == 0 || !url.startsWith("http")) {
+      portalServer.send(400, "text/plain", "Invalid URL.");
+      return;
+    }
+    portalServer.send(200, "text/plain", "Starting OTA flash. Device will reboot...");
+    // Small delay so the HTTP response fully sends before we block the loop
+    delay(500);
+    // Suspend FingerprintTask — it's on Core 1 and must not touch the sensor mid-flash
+    if (hFingerprint != NULL) vTaskSuspend(hFingerprint);
+    bool ok = performOTA(url);
+    if (!ok) {
+      // OTA failed — resume tasks and keep portal open for retry
+      Serial.println("OTA failed. Resuming tasks.");
+      if (hFingerprint != NULL) vTaskResume(hFingerprint);
+    }
+    // On success, performOTA() calls ESP.restart() so we never reach here
+  });
+
+  portalServer.onNotFound([]() {
+    portalServer.sendHeader("Location", "http://192.168.4.1/", true);
+    portalServer.send(302, "text/plain", "");
+  });
+
+  portalServer.begin();
+  Serial.println("OTA portal running. Connect to: " AP_SSID);
+
+  // Same pulsing purple as the WiFi setup portal
+  while (true) {
+    dnsServer.processNextRequest();
+    portalServer.handleClient();
+    finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
+    delay(500);
+    finger.LEDcontrol(FINGERPRINT_LED_OFF, 0, 0);
+    delay(500);
+  }
+}
 /* ================== End Captive Portal ================== */
+
+/* ================== OTA Firmware Update ================== */
+bool performOTA(const String &url) {
+  Serial.println("OTA: starting download from " + url);
+
+  // Visual indicator: breathing yellow = OTA in progress
+  setSensorLED(FINGERPRINT_LED_BREATHING, 25, FINGERPRINT_LED_YELLOW);
+
+  WiFiClientSecure client;
+  client.setInsecure(); // same pattern as your HTTP helpers
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setTimeout(60000); // 60s — firmware files are larger than attendance payloads
+
+  if (!http.begin(client, url)) {
+    Serial.println("OTA: HTTP begin failed");
+    return false;
+  }
+
+  int code = http.GET();
+  if (code != 200) {
+    Serial.printf("OTA: bad HTTP response %d\n", code);
+    http.end();
+    return false;
+  }
+
+  int totalSize = http.getSize(); // -1 if server doesn't send Content-Length
+  Serial.printf("OTA: firmware size = %d bytes\n", totalSize);
+
+  // Tell the Update library how much flash space to prepare
+  // UPDATE_SIZE_UNKNOWN handles the case where totalSize == -1
+  if (!Update.begin(totalSize > 0 ? totalSize : UPDATE_SIZE_UNKNOWN)) {
+    Serial.println("OTA: Update.begin failed (not enough space?)");
+    http.end();
+    return false;
+  }
+
+  // Stream the binary directly into flash — no RAM buffer needed
+  WiFiClient *stream = http.getStreamPtr();
+  size_t written = Update.writeStream(*stream);
+  Serial.printf("OTA: wrote %u bytes\n", (unsigned)written);
+
+  if (!Update.end()) {
+    Serial.printf("OTA: Update.end failed, error: %s\n", Update.errorString());
+    http.end();
+    return false;
+  }
+
+  if (!Update.isFinished()) {
+    Serial.println("OTA: Update not finished — incomplete download?");
+    http.end();
+    return false;
+  }
+
+  http.end();
+  Serial.println("OTA: success! Rebooting...");
+  setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+  delay(1000);
+  ESP.restart();
+  return true; // never reached, but keeps the compiler happy
+}
 
 /* Fingerprint initialization */
 void setupFingerprint() {
@@ -1143,14 +1308,43 @@ void FingerprintTask(void *pvParameters) {
       role.toLowerCase();
 
       if (role == "master") {
-        Serial.println("Master scanned: launching WiFi captive portal.");
+        Serial.println("Master scanned: waiting for second scan to choose mode...");
+        // Flash yellow 5 times as before
         for (int i = 0; i < 5; i++) {
           setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
           vTaskDelay(120 / portTICK_PERIOD_MS);
           setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
           vTaskDelay(120 / portTICK_PERIOD_MS);
         }
-        startCaptivePortal(); // blocks until credentials saved, then restarts
+
+        // Hold blue = waiting for second scan (up to 5 seconds)
+        setSensorLED(FINGERPRINT_LED_BREATHING, 25, FINGERPRINT_LED_BLUE);
+        bool secondScan = false;
+        unsigned long waitStart = millis();
+        while (millis() - waitStart < 5000) {
+          int r = fingerSearch();
+          if (r > 0 && (size_t)r < fidMapRole.size() && fidMapRole[r] == "master") {
+            secondScan = true;
+            break;
+          }
+          vTaskDelay(50 / portTICK_PERIOD_MS);
+        }
+
+        if (secondScan) {
+          // Double scan = OTA portal
+          Serial.println("Master double-scan: launching OTA portal.");
+          for (int i = 0; i < 3; i++) {
+            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_WHITE);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+          }
+          startCaptivePortalWithOTA();
+        } else {
+          // Single scan = WiFi setup portal (original behaviour)
+          Serial.println("Master single scan: launching WiFi setup portal.");
+          startCaptivePortal();
+        }
       } else {
         // Decide branch using the stored role. If there is a stored mapping:
         if (mapped.length()) {
