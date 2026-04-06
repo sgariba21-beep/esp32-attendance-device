@@ -1,7 +1,7 @@
 /* 
   ESP32 Attendance client — R503 fingerprint edition (dual-core optimized)
   WITH enrollment polling + master-triggered enrollment mode + fid mapping in SPIFFS
-  (LED: fingerprint-only feedback — RED/red briefly; treat HTTP 400 as success)
+  (LED: fingerprint-only feedback — green/red briefly; treat HTTP 400 as success)
   
   IMPORTANT: Edit WIFI_SSID, WIFI_PASS, SCRIPT_URL, CLASS_ID, SCRIPT_AUTH before use.
 */
@@ -32,7 +32,7 @@ const char* CLASS_NAME = "2 Science 2";
 #define FINGERPRINT_LED_RED       0x01
 #define FINGERPRINT_LED_BLUE      0x02
 #define FINGERPRINT_LED_PURPLE    0x03
-#define FINGERPRINT_LED_RED     0x04
+#define FINGERPRINT_LED_GREEN     0x04
 #define FINGERPRINT_LED_WHITE     0x05
 #define FINGERPRINT_LED_YELLOW    0x06
 
@@ -154,11 +154,11 @@ void setSensorLED(uint8_t mode, uint8_t speed, uint8_t color) {
 
 void setSensorLED(int mode) {
   if (mode == 1) {
-    setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+    setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
     return;
   }
   if (mode == 2) {
-    setSensorLED(FINGERPRINT_LED_BREATHING, 25, FINGERPRINT_LED_RED);
+    setSensorLED(FINGERPRINT_LED_BREATHING, 25, FINGERPRINT_LED_GREEN);
     return;
   }
   if (mode == 3) {
@@ -452,7 +452,7 @@ bool performOTA(const String &url) {
 
   http.end();
   Serial.println("OTA: success! Rebooting...");
-  setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+  setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
   delay(1000);
   ESP.restart();
   return true; // never reached, but keeps the compiler happy
@@ -830,7 +830,7 @@ void enrollment_doRegister(int requestedFid, const String &uniqueId, const Strin
     fidMapName[resFid] = name;
     saveFidMapToFS();
     Serial.printf("Saved fid %d -> %s (%s) name=%s\n", resFid, fidMap[resFid].c_str(), fidMapRole[resFid].c_str(), fidMapName[resFid].c_str());
-    setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+    setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
     reportEnrollUpdate(rowToReport, "registered", resFid, "");
@@ -1240,7 +1240,7 @@ void EnrollmentTask(void *pvParameters) {
 /* =================== FingerprintTask (Core 1) =================== */
 void FingerprintTask(void *pvParameters) {
   (void) pvParameters;
-  const unsigned long feedbackDuration = 600; // ms (RED or red hold)
+  const unsigned long feedbackDuration = 600; // ms (green or red hold)
 
   for (;;) {
     // show ready (blue or purple depending on WiFi state)
@@ -1283,7 +1283,7 @@ void FingerprintTask(void *pvParameters) {
     // Normal scan behavior
     int fid = fingerSearch();
     if (fid > 0) {
-      // matched -> immediate RED feedback, then back to ready color
+      // matched -> immediate green feedback, then back to ready color
       Serial.print("Fingerprint matched ID: "); Serial.println(fid);
 
       // --- Cooldown check ---
@@ -1351,7 +1351,7 @@ void FingerprintTask(void *pvParameters) {
           if (role == "teacher") {
             // Teacher path: send teacher payload using the mapped uniqueId
             String teacherId = mapped;
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
             String scanId = makeScanId(teacherId);
             String ts = getRTCTimestamp();
             String payload = "{\"type\":\"teacher\",""\"classId\":\"" + String(CLASS_ID) + "\",""\"teacherId\":\"" + teacherId + "\",""\"timestamp\":\"" + ts + "\",""\"scanId\":\"" + scanId + "\"}";
@@ -1362,7 +1362,7 @@ void FingerprintTask(void *pvParameters) {
           } else {
             // Default to student path (role == "student" or unknown)
             String studentId = mapped;
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
             String scanId = makeScanId(studentId);
             String studentName = fidMapName[fid];
             String ts = getRTCTimestamp();
