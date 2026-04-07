@@ -422,7 +422,10 @@ void startCaptivePortalWithOTA() {
 
 /* ================== OTA Firmware Update ================== */
 bool performOTA(const String &url) {
-  Serial.println("OTA: starting download from " + url);
+  Serial.println("OTA: performOTA() entered");
+  Serial.println("OTA: WiFi status = " + String(WiFi.status()));
+  Serial.println("OTA: free heap = " + String(esp_get_free_heap_size()));
+  Serial.println("OTA: url = " + url);
 
   // Visual indicator: breathing yellow = OTA in progress
   setSensorLED(FINGERPRINT_LED_BREATHING, 25, FINGERPRINT_LED_YELLOW);
