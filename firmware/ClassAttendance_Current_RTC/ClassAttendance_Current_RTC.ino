@@ -300,6 +300,9 @@ void startCaptivePortal() {
   WiFi.softAP(AP_SSID, AP_PASS);
   Serial.print("Portal AP IP: "); Serial.println(WiFi.softAPIP());
 
+  dnsServer.stop();
+  portalServer.stop();
+  delay(100);
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
   portalServer.on("/", []() {
@@ -378,6 +381,8 @@ void startCaptivePortalWithOTA() {
       return;
     }
     pendingOtaUrl = url;   // defer to main loop so response sends fully first
+    pendingOtaUrl = url;
+    Serial.println("DEBUG: pendingOtaUrl set to " + url);
     portalServer.send(200, "text/plain", "Starting OTA flash. Device will reboot...");
   });
 
@@ -394,6 +399,7 @@ void startCaptivePortalWithOTA() {
     portalServer.handleClient();
 
     // Deferred OTA: only starts after /flash response has fully sent
+    Serial.println("DEBUG: loop tick, pendingOtaUrl=" + pendingOtaUrl);
     if (pendingOtaUrl.length() > 0) {
       String url = pendingOtaUrl;
       pendingOtaUrl = "";
