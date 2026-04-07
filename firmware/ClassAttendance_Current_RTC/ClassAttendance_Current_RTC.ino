@@ -403,13 +403,31 @@ void startCaptivePortalWithOTA() {
     if (pendingOtaUrl.length() > 0) {
       String url = pendingOtaUrl;
       pendingOtaUrl = "";
-      if (hFingerprint != NULL) vTaskSuspend(hFingerprint);
+
+      // Tear down AP and switch to pure STA before downloading
+      // AP+STA causes routing conflicts; pure STA routes correctly
+      Serial.println("OTA: stopping AP, switching to STA only...");
+      portalServer.stop();
+      dnsServer.stop();
+      WiFi.softAPdisconnect(true);
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
+      int tries = 0;
+      while (WiFi.status() != WL_CONNECTED && tries < 20) {
+        delay(500); Serial.print("."); tries++;
+      }
+      Serial.println();
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("OTA: STA reconnect failed. Aborting.");
+        ESP.restart(); // restart cleanly rather than leaving in broken state
+      }
+      Serial.println("OTA: STA ready, IP = " + WiFi.localIP().toString());
+
       bool ok = performOTA(url);
       if (!ok) {
-        Serial.println("OTA failed. Portal still open — you can retry.");
-        if (hFingerprint != NULL) vTaskResume(hFingerprint);
+        Serial.println("OTA failed. Restarting device.");
+        ESP.restart(); // restart rather than trying to re-raise the portal
       }
-      // On success performOTA() calls ESP.restart() so we never reach here
     }
 
     finger.LEDcontrol(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
@@ -431,10 +449,11 @@ bool performOTA(const String &url) {
   setSensorLED(FINGERPRINT_LED_BREATHING, 25, FINGERPRINT_LED_YELLOW);
 
   WiFiClientSecure client;
-  client.setInsecure(); // same pattern as your HTTP helpers
+  client.setInsecure();
   HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(60000); // 60s — firmware files are larger than attendance payloads
+  http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+  http.setTimeout(60000);
+  http.setReuse(false);
 
   if (!http.begin(client, url)) {
     Serial.println("OTA: HTTP begin failed");
@@ -442,8 +461,9 @@ bool performOTA(const String &url) {
   }
 
   int code = http.GET();
+  Serial.printf("OTA: GET returned %d\n", code);
   if (code != 200) {
-    Serial.printf("OTA: bad HTTP response %d\n", code);
+    Serial.printf("OTA: error string = %s\n", http.errorToString(code).c_str());
     http.end();
     return false;
   }
