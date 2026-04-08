@@ -9,14 +9,14 @@
 /* ========= CONFIG - EDIT THESE ========== */
 
 // Central Apps Script endpoint (single router web app)
-const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxg_Dj_i-JrmNfHblrzBaxaxzwWArAsgzKSz0QNhfjhltZmwSYiZqXgY8FqCJYatfVM4g/exec";
+const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfapwAVM7TPASsB6AbenNeUyiDosoAXXBx7yds3ZHxeaM7lakQf-t_FVQ_mAkfYD9pcw/exec";
 
 // If you set SCRIPT_AUTH_KEY in Apps Script, put the same string here; otherwise leave empty
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
 
-// Device identity / class
-const char* CLASS_ID   = "2-SCI-2";
-const char* CLASS_NAME = "2 Science 2";
+// Device identity / branch
+const char* BRANCH_ID   = "EJURA-SYS";   // e.g. "HQ-ADMIN"
+const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
 
 /* Fingerprint UART pins (change to your wiring) */
 #define R503_RX_PIN 16  // to sensor TX
@@ -223,9 +223,9 @@ const char PORTAL_HTML[] PROGMEM = R"rawliteral(
 </style></head>
 <body><div class="card">
 <h2>&#128246; WiFi Setup</h2>
-<p style="color:#555;font-size:14px;">Enter the school WiFi details for this attendance device.</p>
+<p style="color:#555;font-size:14px;">Enter the office WiFi details for this attendance device.</p>
 <div class="lbl">WiFi Name (SSID)</div>
-<input type="text" id="ssid" placeholder="e.g. GHS-Staff" autocomplete="off"/>
+<input type="text" id="ssid" placeholder="e.g. Office-WiFi" autocomplete="off"/>
 <div class="lbl">Password</div>
 <input type="password" id="pass" placeholder="WiFi password"/>
 <button onclick="save()">Save &amp; Connect</button>
@@ -508,9 +508,9 @@ String urlEncode(const String &str) {
 bool sendGETFallback(const String &studentId, const String &date, const String &ts, int &outHttpCode, String &outBody) {
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
   String url = String(SCRIPT_URL) + "?";
-  url += "classId=" + urlEncode(String(CLASS_ID));
-  url += "&className=" + urlEncode(String(CLASS_NAME));
-  if (studentId.length()) url += "&studentId=" + urlEncode(studentId);
+  url += "branchId=" + urlEncode(String(BRANCH_ID));
+  url += "&branchName=" + urlEncode(String(BRANCH_NAME));
+  if (studentId.length()) url += "&employeeId=" + urlEncode(studentId);
   if (date.length())      url += "&date=" + urlEncode(date);
   if (ts.length())        url += "&ts=" + urlEncode(ts);
 
@@ -537,7 +537,7 @@ bool sendGETFallback(const String &studentId, const String &date, const String &
 /* ================== Enrollment support: report update to sheet ================== */
 void reportEnrollUpdate(int row, const String &status, int fingerId, const String &note) {
   if (row <= 1) return;
-  String url = String(SCRIPT_URL) + "?api=enroll_update&classId=" + urlEncode(String(CLASS_ID));
+  String url = String(SCRIPT_URL) + "?api=enroll_update&branchId=" + urlEncode(String(BRANCH_ID));
   url += "&row=" + String(row);
   url += "&status=" + urlEncode(status);
   if (fingerId > 0) url += "&fingerId=" + String(fingerId);
@@ -976,7 +976,7 @@ void EnrollmentTask(void *pvParameters) {
   for (;;) {
     // Poll only when WiFi is connected
     if (WiFi.status() == WL_CONNECTED) {
-      String url = String(SCRIPT_URL) + "?api=enroll_fetch&classId=" + urlEncode(String(CLASS_ID));
+      String url = String(SCRIPT_URL) + "?api=enroll_fetch&branchId=" + urlEncode(String(BRANCH_ID));
       if (strlen(SCRIPT_AUTH) > 0) url += "&auth=" + String(SCRIPT_AUTH);
       Serial.println("EnrollmentTask: polling for enroll job...");
       WiFiClientSecure client; client.setInsecure();
@@ -1154,30 +1154,23 @@ void FingerprintTask(void *pvParameters) {
       } else {
         // Decide branch using the stored role. If there is a stored mapping:
         if (mapped.length()) {
-          if (role == "teacher") {
-            // Teacher path: send teacher payload using the mapped uniqueId
-            String teacherId = mapped;
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
-            String scanId = makeScanId(teacherId);
-            String ts = getRTCTimestamp();
-            String payload = "{\"type\":\"teacher\",""\"classId\":\"" + String(CLASS_ID) + "\",""\"teacherId\":\"" + teacherId + "\",""\"timestamp\":\"" + ts + "\",""\"scanId\":\"" + scanId + "\"}";
-            vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-            showReadyState();
-            sendOrQueuePayload(payload);
-            vTaskDelay(200 / portTICK_PERIOD_MS);
-          } else {
-            // Default to student path (role == "student" or unknown)
-            String studentId = mapped;
-            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
-            String scanId = makeScanId(studentId);
-            String studentName = fidMapName[fid];
-            String ts = getRTCTimestamp();
-            String payload ="{\"type\":\"student\",""\"classId\":\"" + String(CLASS_ID) + "\",""\"studentId\":\"" + studentId + "\",""\"studentName\":\"" + studentName + "\",""\"timestamp\":\"" + ts + "\",""\"scanId\":\"" + scanId + "\"}";
-            vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
-            showReadyState();
-            sendOrQueuePayload(payload);
-            vTaskDelay(200 / portTICK_PERIOD_MS);
-          }
+          // Employee path (all non-master roles)
+          String employeeId   = mapped;
+          String employeeName = fidMapName[fid];
+          setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+          String scanId = makeScanId(employeeId);
+          String ts = getRTCTimestamp();
+          String payload = "{\"type\":\"employee\","
+                           "\"branchId\":\"" + String(BRANCH_ID) + "\","
+                           "\"branchName\":\"" + String(BRANCH_NAME) + "\","
+                           "\"employeeId\":\"" + employeeId + "\","
+                           "\"employeeName\":\"" + employeeName + "\","
+                           "\"timestamp\":\"" + ts + "\","
+                           "\"scanId\":\"" + scanId + "\"}";
+          vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
+          showReadyState();
+          sendOrQueuePayload(payload);
+          vTaskDelay(200 / portTICK_PERIOD_MS);
         } else {
           Serial.printf("Matched fingerID %d but no mapping configured. Ignoring.\n", fid);
           setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
