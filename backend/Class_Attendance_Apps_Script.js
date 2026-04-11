@@ -154,7 +154,7 @@ function enrollFetch(e) {
       fingerId: fid ? parseInt(fid,10) : 0,
       uniqueId: uniqueId || '',
       name: name || '',
-      role: role || 'student',
+      role: role || 'employee',
       command: cmd
     };
     return jsonOutObject(200, { result: "ok", record: outRecord });

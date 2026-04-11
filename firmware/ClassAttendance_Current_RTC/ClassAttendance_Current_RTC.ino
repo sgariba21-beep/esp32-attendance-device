@@ -657,10 +657,10 @@ void enrollment_doRegister(int requestedFid, const String &uniqueId, const Strin
     // Set role according to provided role string; default to "student" if missing/unknown
     String r = role;
     r.toLowerCase();
-    if (r == "teacher" || r == "master" || r == "student") {
+    if (r == "employee" || r == "master") {
       fidMapRole[resFid] = r;
     } else {
-      fidMapRole[resFid] = "student";
+      fidMapRole[resFid] = "employee";
     }
     fidMapName[resFid] = name;
     saveFidMapToFS();
