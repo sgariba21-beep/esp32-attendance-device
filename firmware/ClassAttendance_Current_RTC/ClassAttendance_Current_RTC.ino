@@ -47,6 +47,8 @@ const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
 #define AP_SSID         "Attendance-Setup"
 #define AP_PASS         "setup1234"
 #define DNS_PORT        53
+#define QUEUE_MAX_ENTRIES   200          // drop oldest if queue exceeds this
+#define QUEUE_MAX_AGE_MS    (7UL * 24 * 3600 * 1000)  // discard entries older than 7 days
 
 /* ============ END CONFIG ================ */
 
@@ -743,6 +745,48 @@ int fingerSearch() {
   }
 }
 
+/* Trims queue: removes entries older than QUEUE_MAX_AGE_MS, then caps at QUEUE_MAX_ENTRIES */
+void trimQueue() {
+  // Age-based trim: parse timestamp from each payload and drop stale entries
+  unsigned long nowMs = millis();
+  // We can't use millis() for wall-clock age, so use RTC instead
+  DateTime nowRTC = rtc.now();
+  long nowEpoch = nowRTC.unixtime();
+
+  std::deque<String> kept;
+  for (auto &entry : memQueue) {
+    // Payload format: {...,"timestamp":"YYYY-MM-DD HH:MM:SS",...}
+    int tsIdx = entry.indexOf("\"timestamp\":\"");
+    if (tsIdx < 0) { kept.push_back(entry); continue; } // can't parse, keep it
+    int tsStart = tsIdx + 13; // length of "timestamp":"
+    int tsEnd   = entry.indexOf("\"", tsStart);
+    if (tsEnd < 0) { kept.push_back(entry); continue; }
+    String tsStr = entry.substring(tsStart, tsEnd); // "YYYY-MM-DD HH:MM:SS"
+    // Parse manually
+    int yr  = tsStr.substring(0,4).toInt();
+    int mo  = tsStr.substring(5,7).toInt();
+    int dy  = tsStr.substring(8,10).toInt();
+    int hr  = tsStr.substring(11,13).toInt();
+    int mn  = tsStr.substring(14,16).toInt();
+    int sc  = tsStr.substring(17,19).toInt();
+    if (yr < 2020) { kept.push_back(entry); continue; } // malformed, keep
+    DateTime entryTime(yr, mo, dy, hr, mn, sc);
+    long ageSec = nowEpoch - (long)entryTime.unixtime();
+    if (ageSec < 0 || (unsigned long)(ageSec * 1000UL) <= QUEUE_MAX_AGE_MS) {
+      kept.push_back(entry);
+    } else {
+      Serial.printf("Queue: dropping stale entry (age=%lds): %s\n", ageSec, entry.c_str());
+    }
+  }
+  memQueue = kept;
+
+  // Size-based trim: drop oldest entries from front
+  while (memQueue.size() > QUEUE_MAX_ENTRIES) {
+    Serial.printf("Queue full (%d); dropping oldest entry.\n", (int)memQueue.size());
+    memQueue.pop_front();
+  }
+}
+
 /* =============== sendOrQueuePayload (unchanged but kept) =============== */
 void sendOrQueuePayload(const String &payloadJson) {
   if (WiFi.status() != WL_CONNECTED) {
@@ -761,6 +805,7 @@ void sendOrQueuePayload(const String &payloadJson) {
 
   bool pushed = false;
   if (xSemaphoreTake(memQueueMutex, (TickType_t) (50 / portTICK_PERIOD_MS)) == pdTRUE) {
+    trimQueue();
     memQueue.push_back(payloadJson);
     xSemaphoreGive(memQueueMutex);
     pushed = true;
