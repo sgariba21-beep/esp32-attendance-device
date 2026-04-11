@@ -23,6 +23,10 @@ const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
 #define R503_TX_PIN 17  // to sensor RX
 #define R503_BAUD   57600
 
+// Portal fallback: 5 no-match scans within 30s triggers captive portal
+#define PORTAL_FALLBACK_TAPS    10
+#define PORTAL_FALLBACK_WINDOW_MS 30000UL
+
 /* LED fallbacks (same as your original) */
 #define FINGERPRINT_LED_OFF       0x00
 #define FINGERPRINT_LED_ON        0x01
@@ -114,6 +118,9 @@ EnrollJob currentEnrollJob;
 
 static unsigned long lastScanMillis[MAX_FID + 1];
 static bool fidEverScanned[MAX_FID + 1];
+
+static int portalFallbackCount = 0;
+static unsigned long portalFallbackWindowStart = 0;
 
 /* Forward declarations */
 void showReadyState();
@@ -1234,6 +1241,29 @@ void FingerprintTask(void *pvParameters) {
       vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
       showReadyState();
       vTaskDelay(100 / portTICK_PERIOD_MS); // brief debounce
+
+      // Portal fallback: count rapid no-match taps
+      unsigned long nowMs = millis();
+      if (portalFallbackCount == 0 || (nowMs - portalFallbackWindowStart) > PORTAL_FALLBACK_WINDOW_MS) {
+        // Start or restart the window
+        portalFallbackCount = 1;
+        portalFallbackWindowStart = nowMs;
+      } else {
+        portalFallbackCount++;
+      }
+      Serial.printf("Portal fallback tap %d/%d\n", portalFallbackCount, PORTAL_FALLBACK_TAPS);
+      if (portalFallbackCount >= PORTAL_FALLBACK_TAPS) {
+        portalFallbackCount = 0;
+        Serial.println("Portal fallback triggered by repeated no-match scans.");
+        // Flash yellow 3 times to confirm
+        for (int i = 0; i < 3; i++) {
+          setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
+          vTaskDelay(150 / portTICK_PERIOD_MS);
+          setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
+          vTaskDelay(150 / portTICK_PERIOD_MS);
+        }
+        startCaptivePortal();
+      }
     } else {
       // other error: show red briefly then ready color (but keep short)
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
