@@ -426,18 +426,21 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
 
     // Find existing row for this employee on this date (for Time-Out update)
     var existingRow = -1;
+    var existingRowIsAbsent = false;
     var lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
-      var data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+      var data = sheet.getRange(2, 1, lastRow - 1, 6).getValues(); // extend to col 6 to read Status
       for (var r = 0; r < data.length; r++) {
         var rowDate = (data[r][0] || '').toString().trim();
-        // Handle both string dates and Date objects from Sheets
         if (Object.prototype.toString.call(data[r][0]) === '[object Date]') {
           rowDate = Utilities.formatDate(new Date(data[r][0]), tz, 'yyyy-MM-dd');
         }
         var rowId = (data[r][2] || '').toString().trim();
         if (rowDate === dateStr && rowId === employeeId) {
           existingRow = r + 2;
+          // Check if this is a nightly-inserted Absent row (Time-In is blank)
+          var rowTimeIn = (data[r][3] || '').toString().trim();
+          existingRowIsAbsent = (rowTimeIn === '');
           break;
         }
       }
@@ -446,10 +449,10 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
     var shiftStartMinutes = SHIFT_START_HOUR * 60 + SHIFT_START_MIN;
     var shiftEndMinutes   = SHIFT_END_HOUR   * 60 + SHIFT_END_MIN;
 
-    if (existingRow === -1) {
-      // First scan of day → Time-In
+    if (existingRow === -1 || existingRowIsAbsent) {
+      // First real scan of day → write as Time-In (overwrite Absent row if present)
       var status = computeStatus(tsMinutes, null, shiftStartMinutes, shiftEndMinutes);
-      var newRow = lastRow + 1;
+      var newRow = existingRowIsAbsent ? existingRow : lastRow + 1;
       sheet.getRange(newRow, 1).setValue(dateStr);
       sheet.getRange(newRow, 2).setValue(employeeName);
       sheet.getRange(newRow, 3).setValue(employeeId);
@@ -458,7 +461,7 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
       sheet.getRange(newRow, 6).setValue(status);
       if (scanId) sheet.getRange(newRow, 7).setValue(scanId);
       lock.releaseLock();
-      return { code: 200, message: "Time-In recorded: " + timeStr };
+      return { code: 200, message: (existingRowIsAbsent ? "Absent row corrected to Time-In: " : "Time-In recorded: ") + timeStr };
 
     } else {
       // Subsequent scan → update Time-Out (last-scan-wins)
