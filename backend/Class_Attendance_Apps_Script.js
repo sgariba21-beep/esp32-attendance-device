@@ -88,7 +88,7 @@ function handleRequest(e) {
   enroll_fetch
     GET params: classId (required) OR className, auth (if SCRIPT_AUTH_KEY set)
     Returns:
-      { statusCode:200, result:"ok", record: { row: ROW_NUMBER, fingerId:NUM_OR_EMPTY, uniqueId:"", name:"", role:"", command:"register" } }
+      { statusCode:200, result:"ok", record: { row: ROW_NUMBER, fingerId:NUM_OR_EMPTY, uniqueId:"", name:"", role:"", position:"", command:"register" } }
     If none pending: { statusCode:200, result:"none" }
 */
 
@@ -97,7 +97,7 @@ function ensureEnrollSheet(ss) {
   var sheet = ss.getSheetByName(ENROLL_SHEET_NAME);
   if (sheet) return sheet;
   sheet = ss.insertSheet(ENROLL_SHEET_NAME);
-  var headers = ['FingerID','UniqueID','Name','Role','Command','Status','Note','CreatedAt'];
+  var headers = ['FingerID','UniqueID','Name','Role','Position','Command','Status','Note','CreatedAt'];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   var hdrRange = sheet.getRange(1, 1, 1, headers.length);
   hdrRange.setFontWeight('bold');
@@ -108,10 +108,11 @@ function ensureEnrollSheet(ss) {
   sheet.setColumnWidth(2, 110);  // UniqueID
   sheet.setColumnWidth(3, 140);  // Name
   sheet.setColumnWidth(4, 90);   // Role
-  sheet.setColumnWidth(5, 100);  // Command
-  sheet.setColumnWidth(6, 100);  // Status
-  sheet.setColumnWidth(7, 180);  // Note
-  sheet.setColumnWidth(8, 160);  // CreatedAt
+  sheet.setColumnWidth(5, 130);  // Position
+  sheet.setColumnWidth(6, 100);  // Command
+  sheet.setColumnWidth(7, 100);  // Status
+  sheet.setColumnWidth(8, 180);  // Note
+  sheet.setColumnWidth(9, 160);  // CreatedAt
   return sheet;
 }
 
@@ -128,7 +129,7 @@ function enrollFetch(e) {
   var lastRow = enrollSheet.getLastRow();
   if (lastRow < 2) return jsonOutObject(200, { result: "none" });
 
-  var data = enrollSheet.getRange(2,1,lastRow-1,8).getValues();
+  var data = enrollSheet.getRange(2,1,lastRow-1,9).getValues();
   for (var r = 0; r < data.length; r++) {
     var rowNum = r + 2;
     var row = data[r];
@@ -136,8 +137,9 @@ function enrollFetch(e) {
     var uniqueId = (row[1] || '').toString().trim();
     var name = (row[2] || '').toString().trim();
     var role = (row[3] || '').toString().trim().toLowerCase();
-    var cmd = (row[4] || '').toString().trim().toLowerCase();
-    var status = (row[5] || '').toString().trim().toLowerCase();
+    var position = (row[4] || '').toString().trim();
+    var cmd = (row[5] || '').toString().trim().toLowerCase();
+    var status = (row[6] || '').toString().trim().toLowerCase();
 
     // eligible commands
     if (!cmd) continue;
@@ -145,9 +147,9 @@ function enrollFetch(e) {
 
     // Only process rows with blank status or 'pending' or 'queued'
     if (status !== '' && status !== 'pending' && status !== 'queued') continue;
-    
+
     // Mark as 'processing' immediately so re-polls don't pick it up again
-    enrollSheet.getRange(rowNum, 6).setValue('processing');
+    enrollSheet.getRange(rowNum, 7).setValue('processing');
 
     var outRecord = {
       row: rowNum,
@@ -155,6 +157,7 @@ function enrollFetch(e) {
       uniqueId: uniqueId || '',
       name: name || '',
       role: role || 'employee',
+      position: position || '',
       command: cmd
     };
     return jsonOutObject(200, { result: "ok", record: outRecord });
@@ -303,9 +306,10 @@ function parsePayload(e) {
     type:         (get(['type']) || 'employee').toString().toLowerCase(),
     branchId:     (get(['branchId', 'classId', 'branch_id']) || '').toString().trim(),
     branchName:   (get(['branchName', 'className', 'branch_name']) || '').toString().trim(),
-    employeeId:   (get(['employeeId', 'employee_id', 'staffId', 'staff_id']) || '').toString().trim(),
-    employeeName: (get(['employeeName', 'employee_name', 'name']) || '').toString().trim(),
-    scanId:       (get(['scanId', 'scan_id']) || '').toString().trim(),
+    employeeId:       (get(['employeeId', 'employee_id', 'staffId', 'staff_id']) || '').toString().trim(),
+    employeeName:     (get(['employeeName', 'employee_name', 'name']) || '').toString().trim(),
+    employeePosition: (get(['employeePosition', 'employee_position', 'position']) || '').toString().trim(),
+    scanId:           (get(['scanId', 'scan_id']) || '').toString().trim(),
     ts:           (get(['ts', 'timestamp', 'time']) || '').toString().trim(),
     device:       (get(['device', 'deviceId']) || '').toString().trim(),
   };
@@ -351,7 +355,7 @@ function getOrCreateSpreadsheetForBranch(branchId, branchName) {
   var attSheet = newSS.getSheetByName(ATTENDANCE_SHEET_NAME);
   if (!attSheet) attSheet = newSS.insertSheet(ATTENDANCE_SHEET_NAME);
   attSheet.clear();
-  var headers = ['Date','Employee Name','Staff ID','Time-In','Time-Out','Status'];
+  var headers = ['Date','Employee Name','Staff ID','Position','Time-In','Time-Out','Status'];
   attSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   var hdrRange = attSheet.getRange(1, 1, 1, headers.length);
   hdrRange.setFontWeight('bold');
@@ -385,7 +389,7 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
     var sheet = ss.getSheetByName(ATTENDANCE_SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(ATTENDANCE_SHEET_NAME);
-      var hdrs = ['Date','Employee Name','Staff ID','Time-In','Time-Out','Status'];
+      var hdrs = ['Date','Employee Name','Staff ID','Position','Time-In','Time-Out','Status'];
       sheet.getRange(1, 1, 1, hdrs.length).setValues([hdrs]);
       sheet.getRange(1, 1, 1, hdrs.length).setFontWeight('bold')
            .setBackground('#4a86e8').setFontColor('#ffffff');
@@ -394,8 +398,9 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
 
     var tz = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
 
-    var employeeId   = payload.employeeId   || '';
-    var employeeName = payload.employeeName || '';
+    var employeeId       = payload.employeeId       || '';
+    var employeeName     = payload.employeeName     || '';
+    var employeePosition = payload.employeePosition || '';
     if (!employeeId) { lock.releaseLock(); return { code: 400, message: "Missing employeeId" }; }
 
     // Resolve timestamp
@@ -413,8 +418,8 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
     if (scanId) {
       var lastRow = sheet.getLastRow();
       if (lastRow >= 2) {
-        // We store processed scanIds in a hidden column 7 (not visible in normal view)
-        var scanIds = sheet.getRange(2, 7, lastRow - 1, 1).getValues();
+        // We store processed scanIds in a hidden column 8 (not visible in normal view)
+        var scanIds = sheet.getRange(2, 8, lastRow - 1, 1).getValues();
         for (var s = 0; s < scanIds.length; s++) {
           if ((scanIds[s][0] || '').toString() === scanId) {
             lock.releaseLock();
@@ -429,7 +434,7 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
     var existingRowIsAbsent = false;
     var lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
-      var data = sheet.getRange(2, 1, lastRow - 1, 6).getValues(); // extend to col 6 to read Status
+      var data = sheet.getRange(2, 1, lastRow - 1, 7).getValues(); // extend to col 7 to read Status
       for (var r = 0; r < data.length; r++) {
         var rowDate = (data[r][0] || '').toString().trim();
         if (Object.prototype.toString.call(data[r][0]) === '[object Date]') {
@@ -439,7 +444,7 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
         if (rowDate === dateStr && rowId === employeeId) {
           existingRow = r + 2;
           // Check if this is a nightly-inserted Absent row (Time-In is blank)
-          var rowTimeIn = (data[r][3] || '').toString().trim();
+          var rowTimeIn = (data[r][4] || '').toString().trim(); // col 5 = Time-In
           existingRowIsAbsent = (rowTimeIn === '');
           break;
         }
@@ -456,21 +461,22 @@ function storeEmployeeAttendance(spreadsheetId, payload) {
       sheet.getRange(newRow, 1).setValue(dateStr);
       sheet.getRange(newRow, 2).setValue(employeeName);
       sheet.getRange(newRow, 3).setValue(employeeId);
-      sheet.getRange(newRow, 4).setValue(timeStr);
-      sheet.getRange(newRow, 5).setValue('');
-      sheet.getRange(newRow, 6).setValue(status);
-      if (scanId) sheet.getRange(newRow, 7).setValue(scanId);
+      sheet.getRange(newRow, 4).setValue(employeePosition);
+      sheet.getRange(newRow, 5).setValue(timeStr);
+      sheet.getRange(newRow, 6).setValue('');
+      sheet.getRange(newRow, 7).setValue(status);
+      if (scanId) sheet.getRange(newRow, 8).setValue(scanId);
       lock.releaseLock();
       return { code: 200, message: (existingRowIsAbsent ? "Absent row corrected to Time-In: " : "Time-In recorded: ") + timeStr };
 
     } else {
       // Subsequent scan → update Time-Out (last-scan-wins)
-      var timeInRaw = sheet.getRange(existingRow, 4).getValue();
+      var timeInRaw = sheet.getRange(existingRow, 5).getValue();
       var timeInMinutes = parseTimeCellToMinutes(timeInRaw, tz);
       var status = computeStatus(timeInMinutes, tsMinutes, shiftStartMinutes, shiftEndMinutes);
-      sheet.getRange(existingRow, 5).setValue(timeStr);
-      sheet.getRange(existingRow, 6).setValue(status);
-      if (scanId) sheet.getRange(existingRow, 7).setValue(scanId);
+      sheet.getRange(existingRow, 6).setValue(timeStr);
+      sheet.getRange(existingRow, 7).setValue(status);
+      if (scanId) sheet.getRange(existingRow, 8).setValue(scanId);
       lock.releaseLock();
       return { code: 200, message: "Time-Out updated: " + timeStr };
     }
@@ -512,26 +518,26 @@ function runNightlyJob() {
       // 1. Fill blank Time-Out fields for today → "No Check-Out"
       var attLastRow = attSheet.getLastRow();
       if (attLastRow >= 2) {
-        var attData = attSheet.getRange(2, 1, attLastRow - 1, 6).getValues();
+        var attData = attSheet.getRange(2, 1, attLastRow - 1, 7).getValues();
         for (var r = 0; r < attData.length; r++) {
           var rowDate = attData[r][0];
           var rowDateStr = Object.prototype.toString.call(rowDate) === '[object Date]'
             ? Utilities.formatDate(new Date(rowDate), tz, 'yyyy-MM-dd')
             : (rowDate || '').toString().trim();
           if (rowDateStr !== dateStr) continue;
-          var timeOut = (attData[r][4] || '').toString().trim();
+          var timeOut = (attData[r][5] || '').toString().trim(); // col 6 = Time-Out
           if (timeOut === '') {
             var sheetRow = r + 2;
-            attSheet.getRange(sheetRow, 5).setValue('No Check-Out');
+            attSheet.getRange(sheetRow, 6).setValue('No Check-Out');
             // Recompute status: Time-In is still valid, just no check-out
-            var timeInStr = (attData[r][3] || '').toString().trim();
+            var timeInStr = (attData[r][4] || '').toString().trim(); // col 5 = Time-In
             var timeInMin = parseHHMM(timeInStr);
             var shiftStart = SHIFT_START_HOUR * 60 + SHIFT_START_MIN;
             var shiftEnd   = SHIFT_END_HOUR   * 60 + SHIFT_END_MIN;
             var newStatus = computeStatus(timeInMin, null, shiftStart, shiftEnd);
             if (newStatus === 'On-Time') newStatus = 'No Check-Out';
             else newStatus = newStatus + ' | No Check-Out';
-            attSheet.getRange(sheetRow, 6).setValue(newStatus);
+            attSheet.getRange(sheetRow, 7).setValue(newStatus);
           }
         }
       }
@@ -539,7 +545,7 @@ function runNightlyJob() {
       // 2. Insert Absent rows for registered employees with no scan today
       var enrollLastRow = enrollSheet.getLastRow();
       if (enrollLastRow < 2) continue;
-      var enrollData = enrollSheet.getRange(2, 1, enrollLastRow - 1, 6).getValues();
+      var enrollData = enrollSheet.getRange(2, 1, enrollLastRow - 1, 9).getValues();
 
       // Build set of employeeIds that have a row today
       var presentIds = {};
@@ -557,14 +563,15 @@ function runNightlyJob() {
       }
 
       for (var e = 0; e < enrollData.length; e++) {
-        var role   = (enrollData[e][3] || '').toString().trim().toLowerCase();
-        var status = (enrollData[e][5] || '').toString().trim().toLowerCase();
-        var uid    = (enrollData[e][1] || '').toString().trim();
-        var name   = (enrollData[e][2] || '').toString().trim();
+        var role     = (enrollData[e][3] || '').toString().trim().toLowerCase();
+        var position = (enrollData[e][4] || '').toString().trim();
+        var status   = (enrollData[e][6] || '').toString().trim().toLowerCase();
+        var uid      = (enrollData[e][1] || '').toString().trim();
+        var name     = (enrollData[e][2] || '').toString().trim();
         if (role !== 'employee' || status !== 'registered' || !uid) continue;
         if (presentIds[uid]) continue;
         // No scan found → insert Absent row
-        attSheet.appendRow([dateStr, name, uid, '', '', 'Absent']);
+        attSheet.appendRow([dateStr, name, uid, position, '', '', 'Absent']);
       }
 
     } catch (err) {
@@ -714,7 +721,7 @@ function sendMonthlySummary() {
       }
 
       var lastRow = attSheet.getLastRow();
-      var data = attSheet.getRange(2, 1, lastRow - 1, 6).getValues();
+      var data = attSheet.getRange(2, 1, lastRow - 1, 7).getValues();
 
       // Filter to previous month only
       var monthRows = data.filter(function(row) {
@@ -733,15 +740,14 @@ function sendMonthlySummary() {
       // Aggregate per employee
       var empMap = {};
       for (var r = 0; r < monthRows.length; r++) {
-        var row       = monthRows[r];
-        var empName   = (row[1] || '').toString().trim();
-        var empId     = (row[2] || '').toString().trim();
-        var timeIn    = (row[3] || '').toString().trim();
-        var timeOut   = (row[4] || '').toString().trim();
-        var status    = (row[5] || '').toString().trim();
-        var key       = empId || empName;
+        var row         = monthRows[r];
+        var empName     = (row[1] || '').toString().trim();
+        var empId       = (row[2] || '').toString().trim();
+        var empPosition = (row[3] || '').toString().trim(); // col 4 = Position
+        var status      = (row[6] || '').toString().trim(); // col 7 = Status
+        var key         = empId || empName;
         if (!key) continue;
-        if (!empMap[key]) empMap[key] = { name: empName, id: empId, present: 0, absent: 0, late: 0, earlyDep: 0, noCheckOut: 0 };
+        if (!empMap[key]) empMap[key] = { name: empName, id: empId, position: empPosition, present: 0, absent: 0, late: 0, earlyDep: 0, noCheckOut: 0 };
         if (status === 'Absent') {
           empMap[key].absent++;
         } else {
@@ -779,7 +785,7 @@ function sendMonthlySummary() {
       var summarySheet = ss.getSheetByName('Monthly Summary');
       if (!summarySheet) summarySheet = ss.insertSheet('Monthly Summary');
       summarySheet.clear();
-      var sumHeaders = ['Employee Name','Staff ID','Days Present','Days Absent','Late Arrivals','Early Departures','No Check-Out'];
+      var sumHeaders = ['Employee Name','Staff ID','Position','Days Present','Days Absent','Late Arrivals','Early Departures','No Check-Out'];
       summarySheet.getRange(1, 1, 1, sumHeaders.length).setValues([sumHeaders]);
       summarySheet.getRange(1, 1, 1, sumHeaders.length).setFontWeight('bold')
                   .setBackground('#4a86e8').setFontColor('#ffffff');
@@ -789,7 +795,7 @@ function sendMonthlySummary() {
       empKeys.sort(function(a, b) { return empMap[a].name.localeCompare(empMap[b].name); });
       var sumRows = empKeys.map(function(k) {
         var e = empMap[k];
-        return [e.name, e.id, e.present, e.absent, e.late, e.earlyDep, e.noCheckOut];
+        return [e.name, e.id, e.position, e.present, e.absent, e.late, e.earlyDep, e.noCheckOut];
       });
       if (sumRows.length > 0) {
         summarySheet.getRange(2, 1, sumRows.length, sumHeaders.length).setValues(sumRows);
@@ -870,4 +876,143 @@ function sendMonthlySummary() {
     MailApp.sendEmail({ to: email, subject: subject, htmlBody: htmlBody, attachments: attachments });
   }
   Logger.log("Monthly summary sent to " + adminEmails.length + " admin(s).");
+}
+
+/******** One-time setup / migration: ensure all active branch spreadsheets have correct sheets and headers *********/
+function setupAllBranchSpreadsheets() {
+  var mapSS = SpreadsheetApp.openById(BRANCHMAP_SPREADSHEET_ID);
+  var mapSheet = mapSS.getSheetByName(BRANCHMAP_SHEET_NAME);
+  if (!mapSheet || mapSheet.getLastRow() < 2) {
+    Logger.log("setupAllBranchSpreadsheets: no branches found in BranchMap.");
+    return;
+  }
+
+  var rows = mapSheet.getRange(2, 1, mapSheet.getLastRow() - 1, 5).getValues();
+  var report = [];
+
+  for (var i = 0; i < rows.length; i++) {
+    var branchId   = (rows[i][0] || '').toString().trim();
+    var branchName = (rows[i][1] || '').toString().trim();
+    var sheetId    = (rows[i][2] || '').toString().trim();
+    var active     = (rows[i][4] || '').toString().toUpperCase();
+    if (!sheetId || active === 'N') continue;
+
+    var label = branchName || branchId;
+    try {
+      var ss = SpreadsheetApp.openById(sheetId);
+      var changes = [];
+      _setupAttendanceSheet(ss, changes);
+      _setupEnrollmentSheet(ss, changes);
+      _setupMonthlySummarySheet(ss, changes);
+      report.push(label + ': ' + (changes.length ? changes.join('; ') : 'no changes needed'));
+    } catch (err) {
+      report.push(label + ': ERROR — ' + err.message);
+    }
+  }
+
+  Logger.log("setupAllBranchSpreadsheets complete:\n" + report.join('\n'));
+}
+
+function _applySheetHeader(sheet, headers) {
+  var r = sheet.getRange(1, 1, 1, headers.length);
+  r.setValues([headers]);
+  r.setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+}
+
+function _setupAttendanceSheet(ss, changes) {
+  var headers = ['Date','Employee Name','Staff ID','Position','Time-In','Time-Out','Status'];
+  var sheet = ss.getSheetByName(ATTENDANCE_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(ATTENDANCE_SHEET_NAME);
+    _applySheetHeader(sheet, headers);
+    changes.push('Attendance: created');
+    return;
+  }
+
+  var numCols = sheet.getLastColumn();
+  var existing = numCols > 0 ? sheet.getRange(1, 1, 1, numCols).getValues()[0] : [];
+  var col4 = (existing[3] || '').toString().trim();
+
+  if (col4 === 'Position') {
+    // Already migrated — re-apply formatting only
+    _applySheetHeader(sheet, headers);
+    changes.push('Attendance: headers verified');
+    return;
+  }
+
+  if (col4 === 'Time-In') {
+    // Old 6-column format: insert Position column before col 4 to preserve data alignment
+    sheet.insertColumnBefore(4);
+    changes.push('Attendance: Position column inserted at col 4');
+  }
+
+  _applySheetHeader(sheet, headers);
+  changes.push('Attendance: headers updated');
+}
+
+function _setupEnrollmentSheet(ss, changes) {
+  var headers = ['FingerID','UniqueID','Name','Role','Position','Command','Status','Note','CreatedAt'];
+  var sheet = ss.getSheetByName(ENROLL_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(ENROLL_SHEET_NAME);
+    _applySheetHeader(sheet, headers);
+    sheet.setColumnWidth(1, 80);
+    sheet.setColumnWidth(2, 110);
+    sheet.setColumnWidth(3, 140);
+    sheet.setColumnWidth(4, 90);
+    sheet.setColumnWidth(5, 130);
+    sheet.setColumnWidth(6, 100);
+    sheet.setColumnWidth(7, 100);
+    sheet.setColumnWidth(8, 180);
+    sheet.setColumnWidth(9, 160);
+    changes.push('Enrollment: created');
+    return;
+  }
+
+  var numCols = sheet.getLastColumn();
+  var existing = numCols > 0 ? sheet.getRange(1, 1, 1, numCols).getValues()[0] : [];
+  var col5 = (existing[4] || '').toString().trim();
+
+  if (col5 === 'Position') {
+    _applySheetHeader(sheet, headers);
+    changes.push('Enrollment: headers verified');
+    return;
+  }
+
+  if (col5 === 'Command') {
+    // Old 8-column format: insert Position column before col 5
+    sheet.insertColumnBefore(5);
+    changes.push('Enrollment: Position column inserted at col 5');
+  }
+
+  _applySheetHeader(sheet, headers);
+  changes.push('Enrollment: headers updated');
+}
+
+function _setupMonthlySummarySheet(ss, changes) {
+  var headers = ['Employee Name','Staff ID','Position','Days Present','Days Absent','Late Arrivals','Early Departures','No Check-Out'];
+  var sheet = ss.getSheetByName('Monthly Summary');
+  if (!sheet) return; // created on demand by sendMonthlySummary; nothing to migrate
+
+  var numCols = sheet.getLastColumn();
+  var existing = numCols > 0 ? sheet.getRange(1, 1, 1, numCols).getValues()[0] : [];
+  var col3 = (existing[2] || '').toString().trim();
+
+  if (col3 === 'Position') {
+    _applySheetHeader(sheet, headers);
+    changes.push('Monthly Summary: headers verified');
+    return;
+  }
+
+  if (col3 === 'Days Present') {
+    // Old format: insert Position column before col 3
+    sheet.insertColumnBefore(3);
+    changes.push('Monthly Summary: Position column inserted at col 3');
+  }
+
+  _applySheetHeader(sheet, headers);
+  changes.push('Monthly Summary: headers updated');
 }

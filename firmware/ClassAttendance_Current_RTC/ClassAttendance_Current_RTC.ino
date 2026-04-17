@@ -103,9 +103,10 @@ TaskHandle_t hNetwork     = NULL;
 TaskHandle_t hEnrollment  = NULL;
 
 std::deque<String> memQueue; // in-memory queue for attendance payloads
-std::vector<String> fidMap;  // index 0 unused; fidMap[fid] == uniqueId (or empty)
-std::vector<String> fidMapRole; // role per fid
-std::vector<String> fidMapName; // name per fid
+std::vector<String> fidMap;         // index 0 unused; fidMap[fid] == uniqueId (or empty)
+std::vector<String> fidMapRole;     // system role per fid (employee|master)
+std::vector<String> fidMapName;     // display name per fid
+std::vector<String> fidMapPosition; // job title per fid (e.g. Manager, Engineer)
 
 // Enrollment job struct
 struct EnrollJob {
@@ -113,8 +114,9 @@ struct EnrollJob {
   int requestedFid;
   String uniqueId;
   String name;
-  String role; // student|teacher|master
-  String command; // register|delete|clearall
+  String role;     // employee|master
+  String position; // job title (e.g. Manager, Engineer)
+  String command;  // register|delete|clearall
 };
 volatile bool enrollmentJobPending = false;
 EnrollJob currentEnrollJob;
@@ -388,7 +390,7 @@ bool loadFidMapFromFS() {
   fidMap.assign(MAX_FID + 1, "");
   fidMapRole.assign(MAX_FID + 1, "");
   fidMapName.assign(MAX_FID + 1, "");
-  // load fallback teachers into mapping (only applies if fidMap empty later)
+  fidMapPosition.assign(MAX_FID + 1, "");
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
   if (!SPIFFS.exists(FID_MAP_FILE)) {
     xSemaphoreGive(spiffsMutex);
@@ -405,21 +407,25 @@ bool loadFidMapFromFS() {
     String ln = f.readStringUntil('\n');
     ln.trim();
     if (ln.length() == 0) continue;
-    // expected format: fid,uniqueId,role,name
+    // expected format: fid,uniqueId,role,name,position
     int p1 = ln.indexOf(',');
     if (p1 < 0) continue;
     int p2 = ln.indexOf(',', p1+1);
     if (p2 < 0) continue;
     int p3 = ln.indexOf(',', p2+1);
-    String sFid = ln.substring(0,p1);
-    String sUnique = ln.substring(p1+1, p2);
-    String sRole = (p3>0) ? ln.substring(p2+1, p3) : ln.substring(p2+1);
-    String sName = (p3>0) ? ln.substring(p3+1) : "";
+    if (p3 < 0) continue;
+    int p4 = ln.indexOf(',', p3+1);
+    String sFid      = ln.substring(0, p1);
+    String sUnique   = ln.substring(p1+1, p2);
+    String sRole     = ln.substring(p2+1, p3);
+    String sName     = (p4 > 0) ? ln.substring(p3+1, p4) : ln.substring(p3+1);
+    String sPosition = (p4 > 0) ? ln.substring(p4+1) : "";
     int fid = sFid.toInt();
     if (fid >= 1 && fid <= MAX_FID) {
-      fidMap[fid] = sUnique;
-      fidMapRole[fid] = sRole;
-      fidMapName[fid] = sName;
+      fidMap[fid]         = sUnique;
+      fidMapRole[fid]     = sRole;
+      fidMapName[fid]     = sName;
+      fidMapPosition[fid] = sPosition;
     }
   }
   f.close();
@@ -438,7 +444,7 @@ bool saveFidMapToFS() {
   }
   for (int fid=1; fid<=MAX_FID; ++fid) {
     if (fidMap[fid].length()) {
-      String line = String(fid) + "," + fidMap[fid] + "," + fidMapRole[fid] + "," + fidMapName[fid];
+      String line = String(fid) + "," + fidMap[fid] + "," + fidMapRole[fid] + "," + fidMapName[fid] + "," + fidMapPosition[fid];
       f.println(line);
     }
   }
@@ -456,7 +462,7 @@ int findFidByUnique(const String &uniqueId) {
 }
 
 void clearAllFidMap() {
-  for (int f=1; f<=MAX_FID; ++f) { fidMap[f] = ""; fidMapRole[f] = ""; fidMapName[f] = ""; }
+  for (int f=1; f<=MAX_FID; ++f) { fidMap[f] = ""; fidMapRole[f] = ""; fidMapName[f] = ""; fidMapPosition[f] = ""; }
   saveFidMapToFS();
 }
 
@@ -646,7 +652,7 @@ int enrollID_toFid(int requestedFid) {
 }
 
 /* enrollment_doRegister: handles a register command: uses requestedFid (or finds free slot) */
-void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, int rowToReport) {
+void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, const String &position, int rowToReport) {
   int fidToUse = requestedFid;
   if (fidToUse < 1 || fidToUse > MAX_FID) {
     // find a free fid
@@ -678,9 +684,10 @@ void enrollment_doRegister(int requestedFid, const String &uniqueId, const Strin
     } else {
       fidMapRole[resFid] = "employee";
     }
-    fidMapName[resFid] = name;
+    fidMapName[resFid]     = name;
+    fidMapPosition[resFid] = position;
     saveFidMapToFS();
-    Serial.printf("Saved fid %d -> %s (%s) name=%s\n", resFid, fidMap[resFid].c_str(), fidMapRole[resFid].c_str(), fidMapName[resFid].c_str());
+    Serial.printf("Saved fid %d -> %s (%s) name=%s position=%s\n", resFid, fidMap[resFid].c_str(), fidMapRole[resFid].c_str(), fidMapName[resFid].c_str(), fidMapPosition[resFid].c_str());
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
@@ -1264,22 +1271,24 @@ void EnrollmentTask(void *pvParameters) {
               return body.substring(q1+1, q2);
             };
             String uniqueId = extractStringField("uniqueId");
-            String name = extractStringField("name");
-            String role = extractStringField("role");
-            String command = extractStringField("command");
+            String name     = extractStringField("name");
+            String role     = extractStringField("role");
+            String position = extractStringField("position");
+            String command  = extractStringField("command");
 
             // Create job and notify FingerprintTask
             if (parsedRow >= 2) {
               xSemaphoreTake(enrollMutex, portMAX_DELAY);
-              currentEnrollJob.row = parsedRow;
+              currentEnrollJob.row          = parsedRow;
               currentEnrollJob.requestedFid = parsedFid;
-              currentEnrollJob.uniqueId = uniqueId;
-              currentEnrollJob.name = name;
-              currentEnrollJob.role = role;
-              currentEnrollJob.command = command;
+              currentEnrollJob.uniqueId     = uniqueId;
+              currentEnrollJob.name         = name;
+              currentEnrollJob.role         = role;
+              currentEnrollJob.position     = position;
+              currentEnrollJob.command      = command;
               enrollmentJobPending = true;
               xSemaphoreGive(enrollMutex);
-              Serial.printf("EnrollmentTask: job queued row=%d cmd=%s fid=%d id=%s role=%s\n", parsedRow, command.c_str(), parsedFid, uniqueId.c_str(), role.c_str());
+              Serial.printf("EnrollmentTask: job queued row=%d cmd=%s fid=%d id=%s role=%s position=%s\n", parsedRow, command.c_str(), parsedFid, uniqueId.c_str(), role.c_str(), position.c_str());
               xSemaphoreGive(enrollSem);
               // Fast-poll after finding a job so we notice completion quickly
               vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
@@ -1320,10 +1329,9 @@ void FingerprintTask(void *pvParameters) {
         enrollmentJobPending = false;
         xSemaphoreGive(enrollMutex);
 
-        Serial.printf("Processing enroll job row=%d cmd=%s role=%s\n", job.row, job.command.c_str(), job.role.c_str());
+        Serial.printf("Processing enroll job row=%d cmd=%s role=%s position=%s\n", job.row, job.command.c_str(), job.role.c_str(), job.position.c_str());
         if (job.command == "register") {
-          // Pass job.role so device stores the correct role (student/teacher/master)
-          enrollment_doRegister(job.requestedFid, job.uniqueId, job.name, job.role, job.row);
+          enrollment_doRegister(job.requestedFid, job.uniqueId, job.name, job.role, job.position, job.row);
         } else if (job.command == "delete") {
           if (job.requestedFid > 0) enrollment_doDeleteByFid(job.requestedFid, job.row);
           else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job.uniqueId, job.row);
@@ -1386,8 +1394,9 @@ void FingerprintTask(void *pvParameters) {
         // Decide branch using the stored role. If there is a stored mapping:
         if (mapped.length()) {
           // Employee path (all non-master roles)
-          String employeeId   = mapped;
-          String employeeName = fidMapName[fid];
+          String employeeId       = mapped;
+          String employeeName     = fidMapName[fid];
+          String employeePosition = fidMapPosition[fid];
           setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
           String scanId = makeScanId(employeeId);
           String ts = getRTCTimestamp();
@@ -1396,6 +1405,7 @@ void FingerprintTask(void *pvParameters) {
                            "\"branchName\":\"" + String(BRANCH_NAME) + "\","
                            "\"employeeId\":\"" + employeeId + "\","
                            "\"employeeName\":\"" + employeeName + "\","
+                           "\"employeePosition\":\"" + employeePosition + "\","
                            "\"timestamp\":\"" + ts + "\","
                            "\"scanId\":\"" + scanId + "\"}";
           vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
