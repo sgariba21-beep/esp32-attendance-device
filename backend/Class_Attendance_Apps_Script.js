@@ -752,7 +752,30 @@ function sendMonthlySummary() {
         }
       }
 
-      // Write Monthly Summary tab (regenerated fresh each run)
+      // 1. Delete all entries older than the previous month to keep the sheet lean.
+      //    Entries from the previous month and current month are preserved.
+      //    Iterate bottom-up to avoid row index shifting after each deletion.
+      try {
+        if (attSheet.getLastRow() > 1) {
+          var attAllData = attSheet.getRange(2, 1, attSheet.getLastRow() - 1, 1).getValues();
+          var deletedCount = 0;
+          for (var rd = attAllData.length - 1; rd >= 0; rd--) {
+            var d = attAllData[rd][0];
+            var ds = Object.prototype.toString.call(d) === '[object Date]'
+              ? Utilities.formatDate(new Date(d), tz, 'yyyy-MM-dd')
+              : (d || '').toString().trim();
+            if (ds && ds < monthStartStr) {
+              attSheet.deleteRow(rd + 2);
+              deletedCount++;
+            }
+          }
+          Logger.log("Cleared " + deletedCount + " old rows for " + (branchName || branchId) + " (before " + monthStartStr + ")");
+        }
+      } catch(err) {
+        Logger.log("Clear old rows failed for " + branchId + ": " + err.message);
+      }
+
+      // 2. Write Monthly Summary tab (regenerated fresh each run)
       var summarySheet = ss.getSheetByName('Monthly Summary');
       if (!summarySheet) summarySheet = ss.insertSheet('Monthly Summary');
       summarySheet.clear();
@@ -812,7 +835,10 @@ function sendMonthlySummary() {
         + '</section>';
       summaries.push(branchHtml);
 
-      // XLSX attachment — exported BEFORE archiving so the file contains the full raw data
+      // 3. Flush pending writes so the XLSX export captures the updated Monthly Summary tab
+      SpreadsheetApp.flush();
+
+      // 4. XLSX attachment
       try {
         var blob = exportAttendanceSheetAsXlsx(sheetId);
         if (blob) {
@@ -821,52 +847,6 @@ function sendMonthlySummary() {
         }
       } catch(err) {
         Logger.log("XLSX export failed for " + branchId + ": " + err.message);
-      }
-
-      // Archive previous month's raw rows into a dedicated tab, then clear the Attendance sheet
-      try {
-        var archiveTabName = 'Archive - ' + monthLabel;
-        var archiveSheet = ss.getSheetByName(archiveTabName);
-        if (!archiveSheet) archiveSheet = ss.insertSheet(archiveTabName);
-        archiveSheet.clear();
-
-        // Copy headers
-        var hdrs = attSheet.getRange(1, 1, 1, 6).getValues();
-        archiveSheet.getRange(1, 1, 1, 6).setValues(hdrs);
-        archiveSheet.getRange(1, 1, 1, 6).setFontWeight('bold')
-                    .setBackground('#4a86e8').setFontColor('#ffffff');
-        archiveSheet.setFrozenRows(1);
-
-        // Copy only rows belonging to the previous month
-        var archiveRows = data.filter(function(row) {
-          var d = row[0];
-          var ds = Object.prototype.toString.call(d) === '[object Date]'
-            ? Utilities.formatDate(new Date(d), tz, 'yyyy-MM-dd')
-            : (d || '').toString().trim();
-          return ds >= monthStartStr && ds <= monthEndStr;
-        });
-
-        if (archiveRows.length > 0) {
-          archiveSheet.getRange(2, 1, archiveRows.length, 6).setValues(archiveRows);
-        }
-
-        // Delete only the archived rows from the Attendance sheet, preserving any rows
-        // from the current month (e.g. if the job runs slightly late and a new scan is in)
-        // Work bottom-up to avoid row index shifting
-        var attAllData = attSheet.getRange(2, 1, attSheet.getLastRow() - 1, 1).getValues();
-        for (var rd = attAllData.length - 1; rd >= 0; rd--) {
-          var d = attAllData[rd][0];
-          var ds = Object.prototype.toString.call(d) === '[object Date]'
-            ? Utilities.formatDate(new Date(d), tz, 'yyyy-MM-dd')
-            : (d || '').toString().trim();
-          if (ds >= monthStartStr && ds <= monthEndStr) {
-            attSheet.deleteRow(rd + 2); // +2 because data starts at row 2
-          }
-        }
-
-        Logger.log("Archived " + archiveRows.length + " rows for " + (branchName || branchId) + " — " + monthLabel);
-      } catch(err) {
-        Logger.log("Archive/clear failed for " + branchId + ": " + err.message);
       }
 
     } catch (err) {
