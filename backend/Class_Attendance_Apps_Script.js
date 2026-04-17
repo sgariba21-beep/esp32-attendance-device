@@ -685,14 +685,13 @@ function sendMonthlySummary() {
   var tz = Session.getScriptTimeZone();
   var today = new Date();
 
-  // Report covers the previous calendar month
-  var firstOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  var lastOfPrevMonth  = new Date(firstOfThisMonth.getTime() - 1);
-  var firstOfPrevMonth = new Date(lastOfPrevMonth.getFullYear(), lastOfPrevMonth.getMonth(), 1);
+  // Report covers the 16th of the previous month through the 15th of the current month
+  var periodStart = new Date(today.getFullYear(), today.getMonth() - 1, 16);
+  var periodEnd   = new Date(today.getFullYear(), today.getMonth(),     15);
 
-  var monthStartStr = Utilities.formatDate(firstOfPrevMonth, tz, 'yyyy-MM-dd');
-  var monthEndStr   = Utilities.formatDate(lastOfPrevMonth,  tz, 'yyyy-MM-dd');
-  var monthLabel    = Utilities.formatDate(firstOfPrevMonth, tz, 'MMMM yyyy');
+  var monthStartStr = Utilities.formatDate(periodStart, tz, 'yyyy-MM-dd');
+  var monthEndStr   = Utilities.formatDate(periodEnd,   tz, 'yyyy-MM-dd');
+  var monthLabel    = Utilities.formatDate(periodStart, tz, 'MMM d') + ' \u2013 ' + Utilities.formatDate(periodEnd, tz, 'MMM d, yyyy');
 
   var mapSS = SpreadsheetApp.openById(BRANCHMAP_SPREADSHEET_ID);
   var mapSheet = mapSS.getSheetByName(BRANCHMAP_SHEET_NAME);
