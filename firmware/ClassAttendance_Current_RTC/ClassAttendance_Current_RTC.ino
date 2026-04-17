@@ -51,8 +51,11 @@ const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
 #define AP_SSID         "Attendance-Setup"
 #define AP_PASS         "setup1234"
 #define DNS_PORT        53
-#define QUEUE_MAX_ENTRIES   200          // drop oldest if queue exceeds this
-#define QUEUE_MAX_AGE_MS    (7UL * 24 * 3600 * 1000)  // discard entries older than 7 days
+#define QUEUE_MAX_ENTRIES   200          // in-memory queue: drop oldest if exceeds this
+#define QUEUE_MAX_AGE_MS    (7UL * 24 * 3600 * 1000)  // discard entries older than 7 days (both queues)
+#define QUEUE_MAX_SPIFFS_ENTRIES       1000                    // SPIFFS queue: hard cap on entry count
+#define QUEUE_MAX_SPIFFS_BYTES         (256UL * 1024UL)       // SPIFFS queue: hard cap on total bytes (256 KB)
+#define QUEUE_SPIFFS_TRIM_INTERVAL_MS  (5UL * 60UL * 1000UL)  // run SPIFFS trim at most this often while offline (5 minutes)
 
 /* ============ END CONFIG ================ */
 
@@ -142,6 +145,10 @@ void reportEnrollUpdate(int row, const String &status, int fingerId, const Strin
 bool initRTC();
 void syncRTCFromNTP();
 String getRTCTimestamp();
+bool parsePayloadAgeSec(const String &payload, long nowEpoch, long &outAgeSec);
+void trimSPIFFSQueue_locked();
+bool appendToSPIFFSQueue_locked(const String &line);
+void trimQueue();
 
 /* Networking helpers (copied/kept similar to your original) */
 #define POST_MAX_RETRIES 3
@@ -752,44 +759,160 @@ int fingerSearch() {
   }
 }
 
-/* Trims queue: removes entries older than QUEUE_MAX_AGE_MS, then caps at QUEUE_MAX_ENTRIES */
-void trimQueue() {
-  // Age-based trim: parse timestamp from each payload and drop stale entries
-  unsigned long nowMs = millis();
-  // We can't use millis() for wall-clock age, so use RTC instead
-  DateTime nowRTC = rtc.now();
-  long nowEpoch = nowRTC.unixtime();
+/* Parses embedded "timestamp":"YYYY-MM-DD HH:MM:SS" from a payload.
+   On success, writes age in seconds (relative to nowEpoch) to outAgeSec and returns true.
+   A negative age means the timestamp is in the future (e.g., pre-NTP boot).
+   Returns false if the timestamp is missing or malformed. */
+bool parsePayloadAgeSec(const String &payload, long nowEpoch, long &outAgeSec) {
+  int tsIdx = payload.indexOf("\"timestamp\":\"");
+  if (tsIdx < 0) return false;
+  int tsStart = tsIdx + 13;
+  int tsEnd   = payload.indexOf("\"", tsStart);
+  if (tsEnd < 0) return false;
+  String tsStr = payload.substring(tsStart, tsEnd);
+  if (tsStr.length() < 19) return false;
+  int yr = tsStr.substring(0,4).toInt();
+  int mo = tsStr.substring(5,7).toInt();
+  int dy = tsStr.substring(8,10).toInt();
+  int hr = tsStr.substring(11,13).toInt();
+  int mn = tsStr.substring(14,16).toInt();
+  int sc = tsStr.substring(17,19).toInt();
+  if (yr < 2020) return false;
+  DateTime entryTime(yr, mo, dy, hr, mn, sc);
+  outAgeSec = nowEpoch - (long)entryTime.unixtime();
+  return true;
+}
 
+/* Is an entry stale per QUEUE_MAX_AGE_MS?
+   Unparseable or future-dated entries are NOT considered stale (keep them). */
+static inline bool entryIsStale(long ageSec, bool parsed) {
+  if (!parsed) return false;
+  if (ageSec <= 0) return false;
+  return (unsigned long)ageSec * 1000UL > QUEUE_MAX_AGE_MS;
+}
+
+/* Trim the SPIFFS queue file in-place:
+     1. Drop entries older than QUEUE_MAX_AGE_MS
+     2. If over QUEUE_MAX_SPIFFS_ENTRIES, drop oldest (from front) to fit
+     3. If over QUEUE_MAX_SPIFFS_BYTES, drop oldest (from front) to fit
+   CALLER MUST HOLD spiffsMutex. */
+void trimSPIFFSQueue_locked() {
+  if (!SPIFFS.exists(QUEUE_FILE)) return;
+  File f = SPIFFS.open(QUEUE_FILE, FILE_READ);
+  if (!f) return;
+
+  long nowEpoch = rtc.now().unixtime();
+  std::vector<String> kept;
+  kept.reserve(64);
+  size_t droppedAge = 0;
+
+  while (f.available()) {
+    String ln = f.readStringUntil('\n');
+    ln.trim();
+    if (!ln.length()) continue;
+    long ageSec = 0;
+    bool parsed = parsePayloadAgeSec(ln, nowEpoch, ageSec);
+    if (entryIsStale(ageSec, parsed)) { droppedAge++; continue; }
+    kept.push_back(ln);
+  }
+  f.close();
+
+  // Count cap: drop oldest (front)
+  size_t droppedCount = 0;
+  if (kept.size() > QUEUE_MAX_SPIFFS_ENTRIES) {
+    droppedCount = kept.size() - QUEUE_MAX_SPIFFS_ENTRIES;
+    kept.erase(kept.begin(), kept.begin() + droppedCount);
+  }
+
+  // Byte cap: measure from newest backward, keep as many as fit
+  size_t droppedBytes = 0;
+  {
+    size_t totalBytes = 0;
+    size_t firstKeep = 0;
+    bool byteCapHit = false;
+    for (size_t i = kept.size(); i > 0; --i) {
+      size_t idx = i - 1;
+      totalBytes += kept[idx].length() + 1; // +1 for newline
+      if (totalBytes > QUEUE_MAX_SPIFFS_BYTES) {
+        firstKeep = idx + 1;
+        byteCapHit = true;
+        break;
+      }
+    }
+    if (byteCapHit && firstKeep > 0) {
+      droppedBytes = firstKeep;
+      kept.erase(kept.begin(), kept.begin() + firstKeep);
+    }
+  }
+
+  // Rewrite (or delete if empty)
+  if (kept.empty()) {
+    SPIFFS.remove(QUEUE_FILE);
+  } else {
+    File wf = SPIFFS.open(QUEUE_FILE, FILE_WRITE);
+    if (wf) {
+      for (auto &ln : kept) wf.println(ln);
+      wf.close();
+    } else {
+      Serial.println("trimSPIFFSQueue: rewrite failed to open");
+    }
+  }
+
+  size_t totalDropped = droppedAge + droppedCount + droppedBytes;
+  if (totalDropped) {
+    Serial.printf("SPIFFS queue trimmed: dropped %u (age=%u count=%u bytes=%u), kept %u\n",
+                  (unsigned)totalDropped, (unsigned)droppedAge,
+                  (unsigned)droppedCount, (unsigned)droppedBytes,
+                  (unsigned)kept.size());
+  }
+}
+
+/* Append one line to the SPIFFS queue. If adding the line would push the file
+   past QUEUE_MAX_SPIFFS_BYTES, runs a trim pass first so the cap is enforced
+   even when flushQueue hasn't had a chance to run (prolonged offline).
+   CALLER MUST HOLD spiffsMutex. */
+bool appendToSPIFFSQueue_locked(const String &line) {
+  size_t currentSize = 0;
+  if (SPIFFS.exists(QUEUE_FILE)) {
+    File fr = SPIFFS.open(QUEUE_FILE, FILE_READ);
+    if (fr) {
+      currentSize = fr.size();
+      fr.close();
+    }
+  }
+  if (currentSize + line.length() + 1 > QUEUE_MAX_SPIFFS_BYTES) {
+    Serial.printf("SPIFFS queue near cap (%u bytes); trimming before append\n", (unsigned)currentSize);
+    trimSPIFFSQueue_locked();
+  }
+
+  File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
+  if (!f) {
+    Serial.println("SPIFFS queue append failed to open");
+    return false;
+  }
+  f.println(line);
+  f.close();
+  return true;
+}
+
+/* Trims in-memory queue: removes entries older than QUEUE_MAX_AGE_MS,
+   then caps at QUEUE_MAX_ENTRIES. CALLER MUST HOLD memQueueMutex. */
+void trimQueue() {
+  long nowEpoch = rtc.now().unixtime();
   std::deque<String> kept;
   for (auto &entry : memQueue) {
-    // Payload format: {...,"timestamp":"YYYY-MM-DD HH:MM:SS",...}
-    int tsIdx = entry.indexOf("\"timestamp\":\"");
-    if (tsIdx < 0) { kept.push_back(entry); continue; } // can't parse, keep it
-    int tsStart = tsIdx + 13; // length of "timestamp":"
-    int tsEnd   = entry.indexOf("\"", tsStart);
-    if (tsEnd < 0) { kept.push_back(entry); continue; }
-    String tsStr = entry.substring(tsStart, tsEnd); // "YYYY-MM-DD HH:MM:SS"
-    // Parse manually
-    int yr  = tsStr.substring(0,4).toInt();
-    int mo  = tsStr.substring(5,7).toInt();
-    int dy  = tsStr.substring(8,10).toInt();
-    int hr  = tsStr.substring(11,13).toInt();
-    int mn  = tsStr.substring(14,16).toInt();
-    int sc  = tsStr.substring(17,19).toInt();
-    if (yr < 2020) { kept.push_back(entry); continue; } // malformed, keep
-    DateTime entryTime(yr, mo, dy, hr, mn, sc);
-    long ageSec = nowEpoch - (long)entryTime.unixtime();
-    if (ageSec < 0 || (unsigned long)(ageSec * 1000UL) <= QUEUE_MAX_AGE_MS) {
-      kept.push_back(entry);
-    } else {
-      Serial.printf("Queue: dropping stale entry (age=%lds): %s\n", ageSec, entry.c_str());
+    long ageSec = 0;
+    bool parsed = parsePayloadAgeSec(entry, nowEpoch, ageSec);
+    if (entryIsStale(ageSec, parsed)) {
+      Serial.printf("memQueue: dropping stale entry (age=%lds)\n", ageSec);
+      continue;
     }
+    kept.push_back(entry);
   }
   memQueue = kept;
 
-  // Size-based trim: drop oldest entries from front
   while (memQueue.size() > QUEUE_MAX_ENTRIES) {
-    Serial.printf("Queue full (%d); dropping oldest entry.\n", (int)memQueue.size());
+    Serial.printf("memQueue full (%u); dropping oldest.\n", (unsigned)memQueue.size());
     memQueue.pop_front();
   }
 }
@@ -798,13 +921,8 @@ void trimQueue() {
 void sendOrQueuePayload(const String &payloadJson) {
   if (WiFi.status() != WL_CONNECTED) {
     xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-    File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-    if (f) {
-      f.println(payloadJson);
-      f.close();
+    if (appendToSPIFFSQueue_locked(payloadJson)) {
       Serial.println("Queued locally (SPIFFS): " + payloadJson);
-    } else {
-      Serial.println("Queue append failed");
     }
     xSemaphoreGive(spiffsMutex);
     return;
@@ -820,32 +938,49 @@ void sendOrQueuePayload(const String &payloadJson) {
   }
   if (!pushed) {
     xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-    File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-    if (f) {
-      f.println(payloadJson);
-      f.close();
+    if (appendToSPIFFSQueue_locked(payloadJson)) {
       Serial.println("Queued (fallback) locally: " + payloadJson);
     }
     xSemaphoreGive(spiffsMutex);
   }
 }
 
-/* flushQueue: attempt to send queued entries (used by NetworkTask) */
+/* flushQueue: attempt to send queued entries (used by NetworkTask).
+   Also opportunistically drops stale entries (age > QUEUE_MAX_AGE_MS) during read,
+   and enforces count/byte caps on the rewritten tail. */
 void flushQueue() {
   if (WiFi.status() != WL_CONNECTED) return;
   std::vector<String> pending;
+  size_t droppedStale = 0;
+  long nowEpoch = rtc.now().unixtime();
+
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
   File f = SPIFFS.open(QUEUE_FILE, FILE_READ);
   if (!f) { xSemaphoreGive(spiffsMutex); return; }
   while (f.available()) {
     String ln = f.readStringUntil('\n');
     ln.trim();
-    if (ln.length()) pending.push_back(ln);
+    if (!ln.length()) continue;
+    long ageSec = 0;
+    bool parsed = parsePayloadAgeSec(ln, nowEpoch, ageSec);
+    if (entryIsStale(ageSec, parsed)) { droppedStale++; continue; }
+    pending.push_back(ln);
   }
   f.close();
   xSemaphoreGive(spiffsMutex);
 
-  if (pending.empty()) return;
+  if (droppedStale) {
+    Serial.printf("flushQueue: dropped %u stale entries on read\n", (unsigned)droppedStale);
+  }
+  if (pending.empty()) {
+    // If stale entries were all we had, remove the now-empty file
+    if (droppedStale) {
+      xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+      SPIFFS.remove(QUEUE_FILE);
+      xSemaphoreGive(spiffsMutex);
+    }
+    return;
+  }
   Serial.printf("Flushing %u queued records\n", (unsigned)pending.size());
   std::vector<String> keep;
   for (auto &entry : pending) {
@@ -903,15 +1038,50 @@ void flushQueue() {
     vTaskDelay(200 / portTICK_PERIOD_MS);
   }
 
+  // Enforce count cap on the tail we're about to rewrite
+  size_t capDroppedCount = 0;
+  if (keep.size() > QUEUE_MAX_SPIFFS_ENTRIES) {
+    capDroppedCount = keep.size() - QUEUE_MAX_SPIFFS_ENTRIES;
+    keep.erase(keep.begin(), keep.begin() + capDroppedCount);
+  }
+  // Enforce byte cap (keep newest that fit)
+  size_t capDroppedBytes = 0;
+  {
+    size_t totalBytes = 0;
+    size_t firstKeep = 0;
+    bool byteCapHit = false;
+    for (size_t i = keep.size(); i > 0; --i) {
+      size_t idx = i - 1;
+      totalBytes += keep[idx].length() + 1;
+      if (totalBytes > QUEUE_MAX_SPIFFS_BYTES) {
+        firstKeep = idx + 1;
+        byteCapHit = true;
+        break;
+      }
+    }
+    if (byteCapHit && firstKeep > 0) {
+      capDroppedBytes = firstKeep;
+      keep.erase(keep.begin(), keep.begin() + firstKeep);
+    }
+  }
+  if (capDroppedCount || capDroppedBytes) {
+    Serial.printf("flushQueue: cap enforced (count-dropped=%u bytes-dropped=%u)\n",
+                  (unsigned)capDroppedCount, (unsigned)capDroppedBytes);
+  }
+
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
   if (keep.empty()) {
     SPIFFS.remove(QUEUE_FILE);
     Serial.println("Queue cleared.");
   } else {
     File wf = SPIFFS.open(QUEUE_FILE, FILE_WRITE);
-    for (auto &ln : keep) wf.println(ln);
-    wf.close();
-    Serial.printf("Queue retained %u records\n", (unsigned)keep.size());
+    if (wf) {
+      for (auto &ln : keep) wf.println(ln);
+      wf.close();
+      Serial.printf("Queue retained %u records\n", (unsigned)keep.size());
+    } else {
+      Serial.println("flushQueue: rewrite failed to open");
+    }
   }
   xSemaphoreGive(spiffsMutex);
 }
@@ -977,18 +1147,14 @@ void NetworkTask(void *pvParameters) {
           } else {
             Serial.printf("NetworkTask: GET fallback failed (code=%d). Queuing for retry.\n", gCode);
             xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-            File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-            if (f) { f.println(payload); f.close(); }
+            appendToSPIFFSQueue_locked(payload);
             xSemaphoreGive(spiffsMutex);
-            Serial.printf("Queue retained: %d records\n", (int)0);
           }
         } else {
           Serial.printf("NetworkTask: POST failed (code=%d). Queuing for retry.\n", httpCode);
           xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-          File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-          if (f) { f.println(payload); f.close(); }
+          appendToSPIFFSQueue_locked(payload);
           xSemaphoreGive(spiffsMutex);
-          Serial.printf("Queue retained: %d records\n", (int)0);
         }
       }
       continue;
@@ -1015,7 +1181,20 @@ void NetworkTask(void *pvParameters) {
         WiFi.disconnect(true);
         vTaskDelay(pdMS_TO_TICKS(1000));
         WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
-      } 
+
+        // While offline, flushQueue isn't running so age-based trimming
+        // wouldn't otherwise happen. Run a periodic SPIFFS trim to keep
+        // flash healthy across long WiFi outages.
+        static unsigned long lastSPIFFSTrimMs = 0;
+        unsigned long nowMs = millis();
+        if (lastSPIFFSTrimMs == 0 ||
+            (nowMs - lastSPIFFSTrimMs) > QUEUE_SPIFFS_TRIM_INTERVAL_MS) {
+          lastSPIFFSTrimMs = nowMs;
+          xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+          trimSPIFFSQueue_locked();
+          xSemaphoreGive(spiffsMutex);
+        }
+      }
     }
   }
   vTaskDelete(NULL);
