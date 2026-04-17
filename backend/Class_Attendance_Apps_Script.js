@@ -582,7 +582,6 @@ function computeStatus(timeInMinutes, timeOutMinutes, shiftStart, shiftEnd) {
   if (timeOutMinutes !== null && timeOutMinutes < shiftEnd - EARLY_GRACE_MINUTES) {
     flags.push('Left-Early');
   }
-  console.log(flags);
   if (flags.length === 0) return 'On-Time';
   return flags.join(' | ');
 }

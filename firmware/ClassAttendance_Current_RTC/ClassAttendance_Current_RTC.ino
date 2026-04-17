@@ -858,7 +858,7 @@ void flushQueue() {
     if (httpCode == 400 || httpCode == 404) {
       // attempt GET fallback
       String studentId="", date="", ts="";
-      int p = entry.indexOf("\"studentId\"");
+      int p = entry.indexOf("\"employeeId\"");
       if (p >= 0) {
         int colon = entry.indexOf(':', p);
         int q = entry.indexOf('"', colon);
@@ -943,7 +943,7 @@ void NetworkTask(void *pvParameters) {
         if (httpCode == 400 || httpCode == 404) {
           // GET fallback
           String studentId="", date="", ts="";
-          int p = payload.indexOf("\"studentId\"");
+          int p = payload.indexOf("\"employeeId\"");
           if (p>=0) {
             int colon = payload.indexOf(':', p);
             int q = payload.indexOf('"', colon);
