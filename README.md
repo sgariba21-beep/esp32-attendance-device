@@ -41,7 +41,7 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 
 - **Biometric identification** — R503 capacitive fingerprint sensor, up to 127 stored templates
 - **Dual-core FreeRTOS architecture** — fingerprint scanning on Core 1, networking on Core 0, fully non-blocking
-- **Offline-first queue** — missed records stored to SPIFFS and flushed automatically on reconnection; queue is capped by age (7 days), entry count (500), and byte size (256 KB) to prevent flash exhaustion
+- **Offline-first queue** — missed records stored to SPIFFS and flushed automatically on reconnection; queue is capped by age (7 days), entry count (1 000 entries on SPIFFS), and byte size (256 KB) to prevent flash exhaustion
 - **RTC backup (DS3231)** — accurate timestamps survive WiFi outages and power cycles
 - **NTP sync** — RTC auto-synced from internet time on every WiFi reconnect
 - **Remote enrollment** — add, delete, or clear fingerprints via the Google Sheet Enrollment tab without touching the device
@@ -49,9 +49,9 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 - **Scan cooldown** — configurable per-finger cooldown (default 60 min) prevents duplicate records
 - **LED feedback** — R503 RGB LED signals state: blue (ready/online), purple (offline), green (success), red (failure), yellow (enrolling or master scan)
 - **Captive portal** — on first boot or master finger scan, device broadcasts a setup AP for WiFi credential entry; credentials stored securely in SPIFFS
-- **Monthly email summaries** — automated HTML report with per-employee attendance stats and XLSX attachments sent to configured admin addresses on the 1st of each month
+- **Pay-period email summaries** — automated HTML report with per-employee attendance stats and an XLSX export sent to configured admin addresses on the 16th of each month, covering the period from the 16th of the previous month through the 15th of the current month
 - **Nightly job** — marks No Check-Out and inserts Absent rows for registered employees who did not scan that day
-- **Monthly archiving** — previous month's raw attendance rows moved to a dedicated Archive tab; live sheet stays clean
+- **Automatic sheet trimming** — attendance entries older than the start of the current pay period are deleted from the live sheet each cycle; the monthly XLSX export serves as the permanent backup
 - **Deduplication** — scanId-based deduplication at the Apps Script layer prevents double entries
 
 ---
@@ -94,8 +94,7 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 │  └── Per-branch spreadsheet        │
 │      ├── Attendance tab             │
 │      ├── Enrollment tab             │
-│      ├── Monthly Summary tab        │
-│      └── Archive - [Month] tabs     │
+│      └── Monthly Summary tab        │
 └─────────────────────────────────────┘
 ```
 
@@ -179,7 +178,7 @@ cd esp32-attendance-device
 6. Copy the deployment URL ending in `/exec` — this is your `SCRIPT_URL`
 7. Set up two time-driven triggers (**Triggers** sidebar):
    - `runNightlyJob` — Day timer, 12am–1am
-   - `sendMonthlySummary` — Month timer, 1st of month, 6am–7am
+   - `sendMonthlySummary` — Month timer, 16th of month, 1am–2am
 
 > **Important:** Every time you edit the script, create a **New deployment** — re-deploying an existing version will not update the live app. Update `SCRIPT_URL` in the firmware and re-flash after each new deployment.
 
@@ -237,8 +236,8 @@ Fingerprints are enrolled **remotely** via the Enrollment tab in each branch's G
 
 ### Enrollment Sheet Columns
 
-| FingerID | UniqueID | Name | Role | Command | Status | Note | CreatedAt |
-|----------|----------|------|------|---------|--------|------|-----------|
+| FingerID | UniqueID | Name | Role | Position | Command | Status | Note | CreatedAt |
+|----------|----------|------|------|----------|---------|--------|------|-----------|
 
 > The Enrollment tab is created automatically by the Apps Script on the device's first enrollment poll — you do not need to create it manually.
 
@@ -250,6 +249,7 @@ Fingerprints are enrolled **remotely** via the Enrollment tab in each branch's G
    - **UniqueID:** employee ID (e.g. `EMP001`) — must be unique per person
    - **Name:** full name
    - **Role:** `employee`
+   - **Position:** job title (e.g. `Manager`, `Engineer`, `Technician`)
    - **Command:** `register`
    - **Status:** leave blank
 3. The device polls every 10 seconds and picks up the job automatically
@@ -288,20 +288,19 @@ Set `active` to `N` to stop routing records for a branch without deleting the ro
 
 **Attendance tab** — one row per employee per day
 
-| Date | Employee Name | Staff ID | Time-In | Time-Out | Status |
-|------|--------------|----------|---------|---------|--------|
-| 2025-04-17 | John Mensah | EMP001 | 20:05 | 22:58 | On-Time |
-| 2025-04-17 | Ama Owusu | EMP002 | 20:45 | No Check-Out | Late \| No Check-Out |
+| Date | Employee Name | Staff ID | Position | Time-In | Time-Out | Status |
+|------|--------------|----------|----------|---------|---------|--------|
+| 2025-04-17 | John Mensah | EMP001 | Engineer | 20:05 | 22:58 | On-Time |
+| 2025-04-17 | Ama Owusu | EMP002 | Technician | 20:45 | No Check-Out | Late \| No Check-Out |
 
-- First scan of the day → fills Time-In, sets Status
+- First scan of the day → fills Time-In and Position, sets Status
 - Subsequent scans → updates Time-Out and recomputes Status
 - Nightly job → fills blank Time-Out with "No Check-Out", inserts Absent rows for no-shows
+- Pay-period job (16th of month) → deletes entries older than the current pay period start; remaining data is clean and current
 
 **Enrollment tab** — remote enrollment command queue (auto-created by Apps Script)
 
-**Monthly Summary tab** — regenerated on each monthly report run; one row per employee
-
-**Archive - [Month Year] tabs** — previous months' raw attendance rows preserved here after the monthly job runs
+**Monthly Summary tab** — regenerated on each pay-period report run; one row per employee with aggregated attendance stats
 
 ---
 
@@ -319,6 +318,7 @@ POST /exec
   "branchName": "Site Name",
   "employeeId": "EMP001",
   "employeeName": "John Mensah",
+  "employeePosition": "Engineer",
   "timestamp": "2025-04-17 20:05:00",
   "scanId": "scan-123456789-EMP001"
 }

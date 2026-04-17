@@ -1,12 +1,11 @@
 /*******************************************************
- Central Router Apps Script for per-class Attendance
+ Central Router Apps Script for multi-branch Employee Attendance
  - Single web endpoint accepts POST JSON or GET params
- - Payload must include classId or className (classId preferred)
- - Routes the attendance record to that class's spreadsheet (auto-creates it if missing)
- - Preserves per-class student sheet format
- - Teacher sheet exact headers: Id, Name, Subject, Scheduled Start, Scheduled End, Date, Actual Start, Actual End
- - Dedupe on scanId (per-class) using PropertiesService (scanId not written to sheet)
- - New: enrollment API endpoints for device-driven enrollment (fetch/update/list masters)
+ - Payload must include branchId (preferred) or branchName
+ - Routes the attendance record to that branch's spreadsheet (auto-creates if missing)
+ - Attendance sheet headers: Date | Employee Name | Staff ID | Position | Time-In | Time-Out | Status | (col 8: scanId, hidden)
+ - Dedupe on scanId checked against hidden column 8 of the Attendance sheet
+ - Enrollment API endpoints for device-driven fingerprint enrollment (fetch/update/list masters)
 *******************************************************/
 
 /* CONFIG - set these before deploying */
@@ -25,9 +24,9 @@ const SHIFT_END_MIN    = 0;
 
 // Enrollment sheet name & columns inside each class spreadsheet
 const ENROLL_SHEET_NAME = 'Enrollment'; 
-// Enrollment sheet column order: FingerID | UniqueID | Name | Role | Command | Status | Note | CreatedAt
+// Enrollment sheet column order: FingerID | UniqueID | Name | Role | Position | Command | Status | Note | CreatedAt
 // Command values: register, delete, clearall
-// Role values: student, teacher, master
+// Role values: employee, master
 
 // Optional script-level auth key (set to '' to disable)
 const SCRIPT_AUTH_KEY = ''; // e.g. "supersecret" - if set, devices must pass &auth=supersecret
@@ -188,15 +187,15 @@ function enrollUpdate(e) {
     var ss = SpreadsheetApp.openById(ssId);
     var enrollSheet = ensureEnrollSheet(ss);
 
-    // FingerID column is 1, UniqueID 2, Name 3, Role 4, Command 5, Status 6, Note 7
+    // FingerID 1, UniqueID 2, Name 3, Role 4, Position 5, Command 6, Status 7, Note 8
     if (fingerId) {
       enrollSheet.getRange(row, 1).setValue(fingerId);
     }
     if (status) {
-      enrollSheet.getRange(row, 6).setValue(status);
+      enrollSheet.getRange(row, 7).setValue(status);
     }
     if (note) {
-      enrollSheet.getRange(row, 7).setValue(note);
+      enrollSheet.getRange(row, 8).setValue(note);
     }
     return jsonOut(200, "ok");
   } catch (err) {
@@ -222,13 +221,13 @@ function enrollMasters(e) {
 
   var lastRow = enrollSheet.getLastRow();
   if (lastRow >= 2) {
-    var data = enrollSheet.getRange(2,1,lastRow-1,8).getValues();
+    var data = enrollSheet.getRange(2,1,lastRow-1,9).getValues();
     for (var r=0; r<data.length; r++) {
       var row = data[r];
-      var fid = (row[0] || '').toString().trim();
-      var role = (row[3] || '').toString().trim().toLowerCase();
-      var status = (row[5] || '').toString().trim().toLowerCase();
-      if (role === 'master' && (status === 'registered')) {
+      var fid    = (row[0] || '').toString().trim();
+      var role   = (row[3] || '').toString().trim().toLowerCase();
+      var status = (row[6] || '').toString().trim().toLowerCase(); // col 7 = Status
+      if (role === 'master' && status === 'registered') {
         var nfid = parseInt(fid,10);
         if (!isNaN(nfid) && nfid > 0) masters.push(nfid);
       }
@@ -254,18 +253,19 @@ function enrollList(e) {
 
   var lastRow = enrollSheet.getLastRow();
   if (lastRow >= 2) {
-    var data = enrollSheet.getRange(2,1,lastRow-1,8).getValues();
+    var data = enrollSheet.getRange(2,1,lastRow-1,9).getValues();
     for (var r=0; r<data.length; r++) {
       var row = data[r];
       out.push({
-        row: r+2,
+        row:      r+2,
         fingerId: (row[0] || ''),
         uniqueId: (row[1] || ''),
-        name: (row[2] || ''),
-        role: (row[3] || ''),
-        command: (row[4] || ''),
-        status: (row[5] || ''),
-        note: (row[6] || '')
+        name:     (row[2] || ''),
+        role:     (row[3] || ''),
+        position: (row[4] || ''),
+        command:  (row[5] || ''),
+        status:   (row[6] || ''),
+        note:     (row[7] || '')
       });
     }
   }

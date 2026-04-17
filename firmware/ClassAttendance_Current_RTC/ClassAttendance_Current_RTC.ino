@@ -46,7 +46,7 @@ const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
 #define ENROLL_POLL_MS 10000UL  // normal poll interval
 #define ENROLL_POLL_FAST_MS 2000UL  // fast poll interval after a job is found
 #define QUEUE_FILE "/queue.txt"
-#define FID_MAP_FILE "/fid_map.csv" // csv lines: fid,uniqueId,role,name
+#define FID_MAP_FILE "/fid_map.csv" // csv lines: fid,uniqueId,role,name,position
 #define WIFI_CREDS_FILE "/wifi_creds.json"
 #define AP_SSID         "Attendance-Setup"
 #define AP_PASS         "setup1234"
@@ -140,7 +140,7 @@ int findFidByUnique(const String &uniqueId);
 void clearAllFidMap();
 void applyFidMapToSerialPrint();
 int enrollID_toFid(int requestedFid);
-void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, int rowToReport);
+void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, const String &position, int rowToReport);
 void enrollment_doDeleteByFid(int fid, int rowToReport);
 void enrollment_doDeleteByUnique(const String &uniqueId, int rowToReport);
 void reportEnrollUpdate(int row, const String &status, int fingerId, const String &note);
@@ -526,13 +526,13 @@ String urlEncode(const String &str) {
   return encoded;
 }
 
-/* GET fallback for client errors (400/404) - same as before */
-bool sendGETFallback(const String &studentId, const String &date, const String &ts, int &outHttpCode, String &outBody) {
+/* GET fallback for client errors (400/404) — sends minimal fields only */
+bool sendGETFallback(const String &employeeId, const String &date, const String &ts, int &outHttpCode, String &outBody) {
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
   String url = String(SCRIPT_URL) + "?";
   url += "branchId=" + urlEncode(String(BRANCH_ID));
   url += "&branchName=" + urlEncode(String(BRANCH_NAME));
-  if (studentId.length()) url += "&employeeId=" + urlEncode(studentId);
+  if (employeeId.length()) url += "&employeeId=" + urlEncode(employeeId);
   if (date.length())      url += "&date=" + urlEncode(date);
   if (ts.length())        url += "&ts=" + urlEncode(ts);
 
@@ -676,7 +676,7 @@ void enrollment_doRegister(int requestedFid, const String &uniqueId, const Strin
   if (resFid > 0) {
     // success: update local mapping + persist, and update sheet
     fidMap[resFid] = uniqueId.length() ? uniqueId : String("AUTO_") + String(resFid);
-    // Set role according to provided role string; default to "student" if missing/unknown
+    // Set role according to provided role string; default to "employee" if missing/unknown
     String r = role;
     r.toLowerCase();
     if (r == "employee" || r == "master") {

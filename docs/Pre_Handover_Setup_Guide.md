@@ -94,8 +94,10 @@ Two functions must run automatically on a schedule.
    - Function: `sendMonthlySummary`
    - Event source: Time-driven
    - Type: Month timer
-   - Day: 1
-   - Time: 6am–7am
+   - Day: **16**
+   - Time: **1am–2am**
+
+   > **Note:** The summary covers the pay period from the 16th of the previous month to the 15th of the current month. Running on the 16th at 1am–2am ensures the nightly job has already closed out the 15th before the summary fires.
 
 ---
 
@@ -174,6 +176,7 @@ Add a row to the Enrollment sheet with the following values:
 | UniqueID | `MASTER-01` |
 | Name | Admin Master (or the administrator's name) |
 | Role | `master` |
+| Position | Leave blank |
 | Command | `register` |
 | Status | Leave blank |
 | Note | Leave blank |
@@ -200,6 +203,7 @@ Add a row to the Enrollment sheet for each employee:
 | UniqueID | Employee ID number, e.g. `EMP-001`. Must be unique per person. |
 | Name | Employee's full name |
 | Role | `employee` |
+| Position | Employee's job title, e.g. `Operator`, `Technician`, `Manager` |
 | Command | `register` |
 | Status | Leave blank |
 
@@ -245,7 +249,7 @@ Go through every item below before handover. Do not hand over a device with any 
 - [ ] Script is deployed as Web App (Anyone, Execute as Me)
 - [ ] `SCRIPT_URL` has been confirmed live with a test GET request in a browser
 - [ ] `runNightlyJob` trigger is set for **12am–1am** daily
-- [ ] `sendMonthlySummary` trigger is set for the 1st of each month, 6am–7am
+- [ ] `sendMonthlySummary` trigger is set for the **16th of each month, 1am–2am**
 
 ### Firmware
 - [ ] `SCRIPT_URL` in firmware matches the deployed Apps Script URL

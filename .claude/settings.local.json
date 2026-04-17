@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find docs *)",
+      "Bash(cd /tmp)",
+      "Bash(python3)",
+      "Bash(pdftotext -layout \"C:\\\\Users\\\\VICTUS\\\\Documents\\\\GitHub\\\\esp32-attendance-device\\\\docs\\\\Attendance_System_Admin_Manual_v2.pdf\" -)",
+      "Bash(pandoc \"C:\\\\Users\\\\VICTUS\\\\Documents\\\\GitHub\\\\esp32-attendance-device\\\\docs\\\\ESP32_Attendance_Technical_Documentation.docx\" -t plain)",
+      "Bash(unzip -q \"C:\\\\Users\\\\VICTUS\\\\Documents\\\\GitHub\\\\esp32-attendance-device\\\\docs\\\\ESP32_Attendance_Technical_Documentation.docx\" -d docx_extract)",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)"
+    ]
+  }
+}
