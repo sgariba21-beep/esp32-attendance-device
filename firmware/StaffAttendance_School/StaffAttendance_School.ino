@@ -32,10 +32,6 @@ const char* SCHOOL_NAME = "D and D Academy";   // human-readable name used in lo
 #define R503_TX_PIN 17   // ESP32 TX → sensor RX
 #define R503_BAUD   57600
 
-// Number of unrecognised scans within the fallback window that triggers the captive portal
-#define PORTAL_FALLBACK_TAPS      10
-#define PORTAL_FALLBACK_WINDOW_MS 30000UL
-
 /* ═══════════════════ END CONFIG ═══════════════════ */
 
 /* LED control constants (R503) */
@@ -130,10 +126,6 @@ EnrollJob     currentEnrollJob;
 
 static unsigned long lastScanMillis[MAX_FID + 1];
 static bool          fidEverScanned[MAX_FID + 1];
-
-/* Captive portal fallback counters */
-static int           portalFallbackCount       = 0;
-static unsigned long portalFallbackWindowStart = 0;
 
 /* ── Forward declarations ── */
 void    showReadyState();
@@ -1119,26 +1111,6 @@ void FingerprintTask(void *pvParameters) {
       vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
       showReadyState();
       vTaskDelay(100 / portTICK_PERIOD_MS);
-
-      // Track consecutive no-match taps to trigger the portal fallback
-      unsigned long nowMs = millis();
-      if (portalFallbackCount == 0 || (nowMs - portalFallbackWindowStart) > PORTAL_FALLBACK_WINDOW_MS) {
-        portalFallbackCount       = 1;
-        portalFallbackWindowStart = nowMs;
-      } else {
-        portalFallbackCount++;
-      }
-      Serial.printf("Portal fallback: %d/%d\n", portalFallbackCount, PORTAL_FALLBACK_TAPS);
-      if (portalFallbackCount >= PORTAL_FALLBACK_TAPS) {
-        portalFallbackCount = 0;
-        Serial.println("Portal fallback triggered by repeated unrecognised scans.");
-        for (int i = 0; i < 3; i++) {
-          setSensorLED(FINGERPRINT_LED_ON,  0, FINGERPRINT_LED_YELLOW); vTaskDelay(150 / portTICK_PERIOD_MS);
-          setSensorLED(FINGERPRINT_LED_OFF, 0, 0);                       vTaskDelay(150 / portTICK_PERIOD_MS);
-        }
-        startCaptivePortal();
-      }
-
     } else {
       // Sensor or image error
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
