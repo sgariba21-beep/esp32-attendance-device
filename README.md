@@ -1,6 +1,6 @@
-# 🏫 ESP32 Fingerprint Attendance System
+# 🏫 ESP32 Staff Attendance System
 
-> Automated biometric attendance tracking for classrooms — built with an ESP32, R503 fingerprint sensor, Google Sheets backend, and weekly email summaries.
+> Automated biometric attendance tracking for school staff — built with an ESP32, R503 fingerprint sensor, Google Sheets backend, and monthly email summaries.
 
 ![ESP32](https://img.shields.io/badge/ESP32-Dual--Core-blue?logo=espressif)
 ![Platform](https://img.shields.io/badge/Platform-Arduino%2FIDF-orange)
@@ -27,12 +27,11 @@
 
 ## Overview
 
-This system replaces manual paper-based attendance in classrooms with a fingerprint scanner mounted at the classroom door. Students and teachers scan their fingers when entering; the device records attendance in real time to a per-class Google Spreadsheet via a central Google Apps Script endpoint.
+This system replaces manual paper-based attendance with a fingerprint scanner mounted at the school entrance. Staff scan their fingers when arriving and leaving; the device records attendance in real time to a single Google Spreadsheet via a Google Apps Script endpoint.
 
 The system supports:
-- **Students** — scans mark them "Present" for that date
-- **Teachers** — scans clock in/out, matched against a timetable for late/absence detection
-- **Masters** — a special admin fingerprint that triggers local enrollment mode
+- **Staff** — scans record Time-In on first scan and update Time-Out on each subsequent scan of the day
+- **Masters** — a special admin fingerprint that launches the WiFi captive portal for network reconfiguration
 
 Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physical access to the device is needed to add or remove fingerprints.
 
@@ -46,11 +45,11 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 - **RTC backup (DS3231)** — accurate timestamps survive WiFi outages and power cycles
 - **NTP sync** — RTC auto-synced from internet time on every WiFi reconnect
 - **Remote enrollment** — add/delete/clear fingerprints via Google Sheet without touching the device
-- **Teacher timetable matching** — clock-ins/outs are matched to a timetable; out-of-window scans ignored
-- **Scan cooldown** — configurable per-finger cooldown (default 60 min) prevents duplicate records
+- **Scan cooldown** — configurable per-finger cooldown (default 60 s) prevents duplicate records within the window
 - **LED feedback** — R503 RGB LED signals state: blue (ready/online), purple (offline), green (success), red (failure), yellow (enrolling)
-- **Weekly email summaries** — automated HTML email with absences, missed lessons, late starts, early endings, and XLSX attachments
+- **Monthly email summaries** — automated HTML email covering the previous calendar month, with absences, late arrivals, early departures, and missing check-outs; includes an XLSX attachment
 - **Deduplication** — scanId-based deduplication at the Apps Script layer prevents double entries
+- **Captive portal** — WiFi credentials entered via a browser-based setup page on first boot; re-launched by the master fingerprint when credentials need to change
 
 ---
 
@@ -75,25 +74,23 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 │   Google Apps Script (Web App)      │
 │                                     │
 │  doPost / doGet ── handleRequest    │
-│  ├── attendance handler             │
-│  │   ├── storeAttendance (students) │
-│  │   └── storeTeacherAttendance     │
+│  ├── storeStaffAttendance           │
 │  └── enrollment API                 │
 │      ├── enroll_fetch               │
-│      └── enroll_update              │
+│      ├── enroll_update              │
+│      ├── enroll_list                │
+│      └── enroll_masters             │
 └──────────────┬──────────────────────┘
                │
                ▼
 ┌─────────────────────────────────────┐
 │         Google Sheets               │
 │                                     │
-│  ClassMap (central spreadsheet)     │
-│  ├── Attendance — per class SS      │
-│  │   ├── Attendance tab             │
-│  │   ├── TeacherAttendance tab      │
-│  │   ├── Timetable tab              │
-│  │   └── Enrollment tab             │
-│  └── Unmapped (error log)           │
+│  School Spreadsheet                 │
+│  ├── Attendance tab                 │
+│  ├── Enrollment tab                 │
+│  ├── Monthly Summary tab (auto)     │
+│  └── Archive - <Month> tabs (auto)  │
 └─────────────────────────────────────┘
 ```
 
@@ -108,7 +105,7 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 | Microcontroller | ESP32 (dual-core, 240 MHz) | Any ESP32 devkit works |
 | Fingerprint Sensor | R503 Capacitive | UART, 57600 baud |
 | RTC Module | DS3231 | I2C, CR2032 backup battery |
-| Enclosure | Custom FreeCAD design | See `Enclosure/` folder |
+| Enclosure | Custom FreeCAD design | See `hardware/Enclosure/` folder |
 | Power Supply | 5V USB or regulated supply | |
 
 ### Wiring
@@ -136,12 +133,12 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
   - `Adafruit_Fingerprint` — R503 sensor driver
   - `RTClib` — DS3231 RTC driver
   - `WiFi`, `HTTPClient`, `WiFiClientSecure` — networking
+  - `WebServer`, `DNSServer` — captive portal
   - `SPIFFS` — local filesystem for offline queue and fid map
 
 ### Backend
-- **Google Apps Script** — single web app endpoint routing attendance to per-class spreadsheets
-- **Google Sheets** — per-class data storage (students, teachers, timetable, enrollment)
-- **Google Drive** — auto-created class spreadsheets optionally organized into a folder
+- **Google Apps Script** — single web app endpoint handling all attendance and enrollment requests
+- **Google Sheets** — single school spreadsheet (Attendance + Enrollment tabs)
 
 ---
 
@@ -150,88 +147,112 @@ Enrollment is managed remotely via a Google Sheet "Enrollment" tab — no physic
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/esp32-attendance-system.git
-cd esp32-attendance-system
+git clone https://github.com/sgariba21-beep/esp32-attendance-device.git
+cd esp32-attendance-device
 ```
 
-### 2. Deploy the Apps Script
+### 2. Set Up the School Spreadsheet
 
-1. Go to [script.google.com](https://script.google.com) and create a new project
-2. Paste the contents of `backend/Class_Attendance_Apps_Script.js`
-3. Set the `CLASSMAP_SPREADSHEET_ID` constant to your central Google Spreadsheet ID
-4. Deploy as a **Web App**: Execute as "Me", access "Anyone"
-5. Copy the deployment URL — this is your `SCRIPT_URL`
+Create a Google Spreadsheet in the Google account that will own the Apps Script. Copy its Spreadsheet ID from the URL bar (the long string between `/d/` and `/edit`).
 
-### 3. Flash the Firmware
+> The Attendance and Enrollment tabs are created automatically by the Apps Script — you do not need to add them manually.
+
+### 3. Deploy the Apps Script
+
+1. In the spreadsheet, click **Extensions → Apps Script**
+2. Delete any existing code and paste the contents of `backend/Staff_Attendance_Apps_Script.js`
+3. Set `SCHOOL_SPREADSHEET_ID` to the spreadsheet ID from step 2
+4. Set `SCHOOL_NAME` to your school name
+5. Set `SHIFT_START_HOUR`/`SHIFT_START_MIN` and `SHIFT_END_HOUR`/`SHIFT_END_MIN` to match your school day
+6. Add admin email addresses to the `adminEmails` array
+7. Deploy as a **Web App**: Execute as "Me", access "Anyone"
+8. Copy the deployment URL — this is your `SCRIPT_URL`
+
+### 4. Set Up Time-Driven Triggers
+
+In the Apps Script editor, click the clock icon (Triggers) and add two triggers:
+
+| Function | Type | Schedule |
+|---|---|---|
+| `runNightlyJob` | Day timer | 10pm–11pm (after school day ends) |
+| `sendMonthlySummary` | Month timer | 1st of month, 1am–2am |
+
+### 5. Flash the Firmware
 
 1. Install [Arduino IDE](https://www.arduino.cc/en/software) with the ESP32 board package
 2. Install required libraries via Library Manager:
    - `Adafruit Fingerprint Sensor Library`
    - `RTClib` by Adafruit
-3. Open `firmware/ClassAttendance_Current_RTC.ino`
-4. Fill in the [Configuration](#configuration) section
-5. Select your ESP32 board and port, then upload
+3. Open `firmware/StaffAttendance_School.ino`
+4. Fill in `SCRIPT_URL` and `SCHOOL_ID` / `SCHOOL_NAME` in the [Configuration](#configuration) section
+5. Format SPIFFS (Tools → ESP32 Sketch Data Upload with an empty `data/` folder) to start clean
+6. Select your ESP32 board and port, then upload
 
-### 4. Set Up the ClassMap Spreadsheet
+### 6. First Boot
 
-Create a Google Spreadsheet and add a sheet named `ClassMap` with these columns:
-
-| classId | className | spreadsheetId | createdAt | active | notes |
-|---------|-----------|--------------|-----------|--------|-------|
-
-The system auto-creates class spreadsheets on first scan if `ALLOW_AUTO_CREATE = true`.
+On first boot with no saved WiFi credentials, the device launches its captive portal automatically:
+1. The sensor LED pulses purple
+2. Connect your phone/laptop to the `Attendance-Setup` WiFi network (password: `setup1234`)
+3. Open a browser to `http://192.168.4.1` and enter your school WiFi credentials
+4. Click **Save & Connect** — the device restarts and the LED turns steady blue
 
 ---
 
 ## Configuration
 
-Edit the top of `ClassAttendance_Current_RTC.ino` before flashing:
+Edit the top of `StaffAttendance_School.ino` before flashing:
 
 ```cpp
-// WiFi
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
-
-// Apps Script endpoint (from step 2 of Getting Started)
+// Apps Script endpoint (from step 3 of Getting Started)
 const char* SCRIPT_URL = "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec";
 
 // Optional auth key (must match SCRIPT_AUTH_KEY in Apps Script if set)
 const char* SCRIPT_AUTH = "";
 
-// Class identity — this device logs to this class
-const char* CLASS_ID   = "2-SCI-2";     // must match classId in ClassMap sheet
-const char* CLASS_NAME = "2 Science 2"; // human-readable
+// School identity — sent with every attendance payload
+const char* SCHOOL_ID   = "DDA";             // short unique identifier
+const char* SCHOOL_NAME = "D and D Academy"; // human-readable name used in logs
 
-// Fingerprint ID ranges
-const int STUDENT_FID_START = 1;
-const int STUDENT_FID_END   = 40;
-const int TEACHER_FID_START = 41;
-const int TEACHER_FID_END   = 60;
-const int MASTER_FID        = 99;  // triggers enrollment mode when scanned
+// Fingerprint sensor UART pins — adjust to match your wiring
+#define R503_RX_PIN 16
+#define R503_TX_PIN 17
 
-// Cooldown between accepted scans (ms) — default 60 minutes
+// Cooldown between accepted scans per finger (ms) — default 60 seconds
 #define SCAN_COOLDOWN_MS 60000UL
+```
+
+> **Note:** WiFi credentials are NOT hardcoded in the firmware. They are entered via the captive portal on first boot and stored in SPIFFS.
+
+In the Apps Script, configure the matching constants:
+
+```javascript
+const SCHOOL_SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
+const SCHOOL_NAME           = 'D and D Academy';
+const SHIFT_START_HOUR = 7;   const SHIFT_START_MIN = 30;  // 07:30
+const SHIFT_END_HOUR   = 15;  const SHIFT_END_MIN   = 30;  // 15:30
+const LATE_GRACE_MINUTES  = 10;
+const EARLY_GRACE_MINUTES = 10;
 ```
 
 ---
 
 ## Enrollment Guide
 
-Fingerprints are enrolled **remotely** via the Enrollment tab in each class's Google Spreadsheet. No physical access to the device is needed.
+Fingerprints are enrolled **remotely** via the Enrollment tab in the school spreadsheet. No physical access to the device is needed.
 
 ### Enrollment Sheet Columns
 
 | FingerID | UniqueID | Name | Role | Command | Status | Note | CreatedAt |
 |----------|----------|------|------|---------|--------|------|-----------|
 
-### Steps to Enroll a Student
+### Steps to Enroll a Staff Member
 
-1. Open the class spreadsheet → **Enrollment** tab
+1. Open the school spreadsheet → **Enrollment** tab
 2. Add a new row:
-   - **FingerID:** leave blank (or specify a slot 1–40)
-   - **UniqueID:** student ID (e.g. `STU001`)
+   - **FingerID:** leave blank (auto-assigned)
+   - **UniqueID:** staff ID (e.g. `EMP-001`)
    - **Name:** full name
-   - **Role:** `student`
+   - **Role:** `staff`
    - **Command:** `register`
    - **Status:** leave blank
 3. The device polls every 10 seconds and picks up the job automatically
@@ -240,11 +261,10 @@ Fingerprints are enrolled **remotely** via the Enrollment tab in each class's Go
 
 ### Role Values
 
-| Role | FID Range | Description |
-|------|-----------|-------------|
-| `student` | 1–40 | Marks attendance |
-| `teacher` | 41–60 | Clocks in/out, matched to timetable |
-| `master` | 99 | Triggers local enrollment mode on the device |
+| Role | Description |
+|------|-------------|
+| `staff` | Records Time-In / Time-Out attendance |
+| `master` | Launches the WiFi captive portal; never records attendance |
 
 ### Commands
 
@@ -258,31 +278,21 @@ Fingerprints are enrolled **remotely** via the Enrollment tab in each class's Go
 
 ## Google Sheets Structure
 
-### ClassMap Spreadsheet (central)
-Tracks all class spreadsheet IDs. The Apps Script opens this to route incoming attendance.
+### School Spreadsheet
 
-### Per-Class Spreadsheet (auto-created)
-Each class gets its own spreadsheet with four tabs:
-
-**Attendance** — student records
+**Attendance** — staff records
 ```
-StudentID | Name | Total | Attendance % | 2024-01-15 | 2024-01-16 | ...
-STU001    | Ama  | 3     | 75%          | Present    |            | ...
+Date       | Staff Name | Staff ID | Time-In | Time-Out | Status
+2024-01-15 | Ama Owusu  | EMP-001  | 07:28   | 15:45    | On-Time
 ```
 
-**TeacherAttendance** — teacher clock-in/out records
-```
-Id    | Name | Subject | Scheduled Start | Scheduled End | Date       | Actual Start | Actual End
-T001  | Mr K | Math    | 08:00           | 09:30         | 2024-01-15 | 08:05        | 09:28
-```
-
-**Timetable** — weekly schedule (used for teacher matching)
-```
-Day/Date | TeacherID | TeacherName | Subject | Start | End
-Monday   | T001      | Mr K        | Math    | 08:00 | 09:30
-```
+> Column 7 (hidden) stores the `scanId` used for server-side deduplication. Do not delete or edit it.
 
 **Enrollment** — remote enrollment queue (see [Enrollment Guide](#enrollment-guide))
+
+**Monthly Summary** *(auto-created)* — per-staff aggregated counts for the reported month
+
+**Archive - Month Year** *(auto-created)* — archived copy of Attendance rows after the monthly report runs
 
 ---
 
@@ -290,55 +300,44 @@ Monday   | T001      | Mr K        | Math    | 08:00 | 09:30
 
 The Apps Script web app accepts both POST (JSON body) and GET (URL parameters).
 
-### Student Attendance
+### Staff Attendance Scan
 ```json
 POST /exec
 {
-  "type": "student",
-  "classId": "2-SCI-2",
-  "studentId": "STU001",
-  "studentName": "Ama Owusu",
-  "timestamp": "2024-01-15 08:05:00",
-  "scanId": "scan-123456-STU001"
-}
-```
-
-### Teacher Clock-In/Out
-```json
-POST /exec
-{
-  "type": "teacher",
-  "classId": "2-SCI-2",
-  "teacherId": "T001",
-  "timestamp": "2024-01-15 08:05:00",
-  "scanId": "scan-123456-T001"
+  "staffId": "EMP-001",
+  "staffName": "Ama Owusu",
+  "timestamp": "2024-01-15 07:28:00",
+  "scanId": "scan-123456-EMP-001"
 }
 ```
 
 ### Enrollment Endpoints (GET)
 ```
-GET /exec?api=enroll_fetch&classId=2-SCI-2
-GET /exec?api=enroll_update&classId=2-SCI-2&row=3&status=registered&fingerId=5
-GET /exec?api=enroll_list&classId=2-SCI-2
-GET /exec?api=enroll_masters&classId=2-SCI-2
+GET /exec?api=enroll_fetch
+GET /exec?api=enroll_update&row=3&status=registered&fingerId=5
+GET /exec?api=enroll_list
+GET /exec?api=enroll_masters
 ```
+
+All enrollment endpoints accept an optional `&auth=<key>` parameter if `SCRIPT_AUTH_KEY` is configured.
 
 ---
 
 ## File Structure
 
 ```
-esp32-attendance-system/
+esp32-attendance-device/
 ├── firmware/
-│   └── ClassAttendance_Current_RTC.ino   # ESP32 firmware
+│   └── StaffAttendance_School.ino        # ESP32 firmware
 ├── backend/
-│   └── Class_Attendance_Apps_Script.js   # Google Apps Script
+│   └── Staff_Attendance_Apps_Script.js   # Google Apps Script
 ├── hardware/
 │   ├── Attendance_System_v2.kicad_pro    # KiCad schematic project
 │   └── Enclosure/
 │       └── Fingerprint_Device_Enclosure.FCStd  # FreeCAD enclosure model
 ├── docs/
-│   └── Technical_Documentation.docx     # Full technical documentation
+│   ├── Attendance_Admin_Manual_v2_1.pdf  # Administrator operations manual
+│   └── Pre_Handover_Setup_Guide_v1_2.pdf # Technician setup reference
 └── README.md
 ```
 
@@ -347,16 +346,14 @@ esp32-attendance-system/
 ## Known Limitations & Future Work
 
 **Current Limitations:**
-- WiFi credentials are hardcoded — a captive portal setup would be more deployable
-- Each device is tied to one `CLASS_ID` — multi-class support would need runtime config
 - No display (OLED/LCD) for visual feedback beyond the LED
-- JSON parsing in firmware is done with naive string search (no JSON library) — brittle on unusual responses
+- JSON parsing in firmware uses naive string search (no JSON library) — brittle on unusual responses
+- SCHOOL_ID / SCHOOL_NAME are compile-time constants — changing them requires a reflash
 
 **Planned Improvements (v2):**
 - [ ] OLED display showing last scan name and time
-- [ ] Web-based config portal (WiFiManager) for first-time setup
 - [ ] OTA firmware update support
-- [ ] Multi-class device mode via NFC tag switching
+- [ ] Multi-school device mode via runtime configuration
 - [ ] Enclosure revision with better cable management
 - [ ] Admin mobile app for real-time dashboard
 
@@ -368,4 +365,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-*Built by [Your Name] — Kumasi, Ghana 🇬🇭*
+*Built by Samuel Kwaku Gyamfi Gariba — Kumasi, Ghana 🇬🇭*
