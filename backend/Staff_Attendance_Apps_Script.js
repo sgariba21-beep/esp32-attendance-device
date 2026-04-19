@@ -10,8 +10,8 @@
 *******************************************************/
 
 /* ── CONFIG — set these before deploying ── */
-const SCHOOL_SPREADSHEET_ID = '12n4oI5sldgTVX71gbbGArbgXmp5VeTM9-cZUzPJ6hZI'; // ID of the single school attendance spreadsheet
-const SCHOOL_NAME           = 'Kumasi Academy';                                   // Used in email subjects and logging
+const SCHOOL_SPREADSHEET_ID = '13wL2knZ6efzYM_kZ2lMBXbBwB2JM7sZj_8aR00YkzT0'; // ID of the single school attendance spreadsheet
+const SCHOOL_NAME           = 'D and D Academy';                                   // Used in email subjects and logging
 const ATTENDANCE_SHEET_NAME = 'Attendance';
 const DEDUPE_TTL_MS         = 24 * 3600 * 1000; // 24 hours (informational; dedupe uses column 7)
 
