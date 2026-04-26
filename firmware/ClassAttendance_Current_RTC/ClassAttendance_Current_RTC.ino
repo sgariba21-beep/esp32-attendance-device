@@ -15,8 +15,15 @@ const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfapwAVM7TPAS
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
 
 // Device identity / branch
-const char* BRANCH_ID   = "EJURA-SYS";   // e.g. "HQ-ADMIN"
-const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
+#define SYSTEM_TYPE        "CWSA"   
+#define DEVICE_CONFIG_FILE "/device_config.json"
+String BRANCH_ID   = "";
+String BRANCH_NAME = "";
+
+/* ========= OTA CONFIG ========= */
+#define FIRMWARE_VERSION     "1.1.3"           // increment this on each flash
+#define OTA_REPO_API         "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
+/* ============================== */
 
 /* Fingerprint UART pins (change to your wiring) */
 #define R503_RX_PIN 16  // to sensor TX
@@ -71,6 +78,7 @@ const char* BRANCH_NAME = "Ejura Water System";  // e.g. "Head Office - Admin"
 #include <WebServer.h>
 #include <DNSServer.h>
 #include "esp_task_wdt.h"
+#include <Update.h>
 
 /* FreeRTOS primitives */
 #include "freertos/FreeRTOS.h"
@@ -119,6 +127,8 @@ EnrollJob currentEnrollJob;
 
 static unsigned long lastScanMillis[MAX_FID + 1];
 static bool fidEverScanned[MAX_FID + 1];
+
+volatile bool otaInProgress = false;
 
 /* Forward declarations */
 void showReadyState();
@@ -212,6 +222,30 @@ void saveWiFiCreds(const String &ssid, const String &pass) {
   Serial.println("WiFi credentials saved.");
 }
 
+/* ================== Device Identity (SPIFFS) ================== */
+bool loadDeviceConfig() {
+  if (!SPIFFS.exists(DEVICE_CONFIG_FILE)) return false;
+  File f = SPIFFS.open(DEVICE_CONFIG_FILE, FILE_READ);
+  if (!f) return false;
+  while (f.available()) {
+    String ln = f.readStringUntil('\n');
+    ln.trim();
+    if (ln.startsWith("branchId="))   BRANCH_ID   = ln.substring(9);
+    if (ln.startsWith("branchName=")) BRANCH_NAME = ln.substring(11);
+  }
+  f.close();
+  return (BRANCH_ID.length() > 0);
+}
+
+void saveDeviceConfig(const String &id, const String &name) {
+  File f = SPIFFS.open(DEVICE_CONFIG_FILE, FILE_WRITE);
+  if (!f) { Serial.println("Failed to write device config"); return; }
+  f.println("branchId=" + id);
+  f.println("branchName=" + name);
+  f.close();
+  Serial.println("Device config saved: " + id + " / " + name);
+}
+
 /* ================== Captive Portal ================== */
 WebServer portalServer(80);
 DNSServer dnsServer;
@@ -239,6 +273,19 @@ const char PORTAL_HTML[] PROGMEM = R"rawliteral(
 <input type="text" id="ssid" placeholder="e.g. Office-WiFi" autocomplete="off"/>
 <div class="lbl">Password</div>
 <input type="password" id="pass" placeholder="WiFi password"/>
+<div class="lbl">Branch / Class ID <span id="bidnote" style="color:#888;font-weight:normal;"></span></div>
+<input type="text" id="bid" placeholder="e.g. EJURA-SYS"/>
+<div class="lbl">Branch / Class Name <span style="color:#888;font-weight:normal;">(optional if already set)</span></div>
+<input type="text" id="bname" placeholder="e.g. Ejura Water System"/>
+<script>
+fetch('/identity').then(r=>r.json()).then(function(d){
+  if(d.id){
+    document.getElementById('bid').value=d.id;
+    document.getElementById('bname').value=d.name;
+    document.getElementById('bidnote').innerText='(currently: '+d.id+')';
+  }
+});
+</script>
 <button onclick="save()">Save &amp; Connect</button>
 <div id="msg"></div>
 </div>
@@ -248,7 +295,9 @@ function save(){
   var p=document.getElementById('pass').value;
   if(!s){document.getElementById('msg').innerText='Please enter a WiFi name.';return;}
   document.getElementById('msg').innerText='Saving...';
-  fetch('/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p))
+  var b=document.getElementById('bid').value.trim();
+  var bn=document.getElementById('bname').value.trim();
+  fetch('/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)+'&bid='+encodeURIComponent(b)+'&bname='+encodeURIComponent(bn))
     .then(function(r){return r.text();})
     .then(function(t){document.getElementById('msg').innerText=t;});
 }
@@ -282,9 +331,16 @@ void startCaptivePortal() {
       return;
     }
     saveWiFiCreds(ssid, pass);
+    String bid   = portalServer.arg("bid");
+    String bname = portalServer.arg("bname");
+    if (bid.length()) saveDeviceConfig(bid, bname);
     portalServer.send(200, "text/plain", "Saved! Device will restart now...");
     delay(1500);
     ESP.restart();
+  });
+  portalServer.on("/identity", []() {
+    String json = "{\"id\":\"" + BRANCH_ID + "\",\"name\":\"" + BRANCH_NAME + "\"}";
+    portalServer.send(200, "application/json", json);
   });
   portalServer.onNotFound([]() {
     portalServer.sendHeader("Location", "http://192.168.4.1/", true);
@@ -1086,6 +1142,159 @@ void flushQueue() {
   xSemaphoreGive(spiffsMutex);
 }
 
+/* =================== OTA Update =================== */
+void checkAndApplyOTA() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  Serial.println("OTA: Checking for update...");
+  String binUrl = "";
+
+  // === Scope 1: API call — freed completely before download begins ===
+  {
+    WiFiClientSecure apiClient;
+    apiClient.setInsecure();
+    HTTPClient http;
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(15000);
+    http.setUserAgent("ESP32-Attendance/1.0");
+
+    if (!http.begin(apiClient, OTA_REPO_API)) {
+      Serial.println("OTA: Failed to begin API request");
+      return;
+    }
+    int code = http.GET();
+    if (code != 200) {
+      Serial.printf("OTA: API returned %d\n", code);
+      http.end();
+      return;
+    }
+    String body = http.getString();
+    http.end();
+
+    // Extract tag_name
+    int tagIdx = body.indexOf("\"tag_name\"");
+    if (tagIdx < 0) { Serial.println("OTA: No tag_name in response"); return; }
+    int q1 = body.indexOf('"', body.indexOf(':', tagIdx) + 1);
+    int q2 = body.indexOf('"', q1 + 1);
+    if (q1 < 0 || q2 < 0) { Serial.println("OTA: Could not parse tag_name"); return; }
+    String latestTag = body.substring(q1 + 1, q2);
+
+    // Check this release belongs to this variant
+    String expectedPrefix = String(SYSTEM_TYPE) + "-v";
+    if (!latestTag.startsWith(expectedPrefix)) {
+      Serial.printf("OTA: Release tag '%s' is not for this variant (%s). Skipping.\n",
+                    latestTag.c_str(), BRANCH_ID);
+      return;
+    }
+
+    // Strip prefix to get bare version e.g. "1.1.6"
+    String latestVersion = latestTag.substring(expectedPrefix.length());
+
+    Serial.printf("OTA: Current=%s  Latest=%s\n", FIRMWARE_VERSION, latestVersion.c_str());
+    if (latestVersion == FIRMWARE_VERSION) {
+      Serial.println("OTA: Firmware is up to date.");
+      return;
+    }
+
+    // Extract browser_download_url for .bin
+    int searchFrom = 0;
+    while (true) {
+      int keyIdx = body.indexOf("\"browser_download_url\"", searchFrom);
+      if (keyIdx < 0) break;
+      int u1 = body.indexOf('"', body.indexOf(':', keyIdx) + 1);
+      int u2 = body.indexOf('"', u1 + 1);
+      if (u1 < 0 || u2 < 0) break;
+      String candidate = body.substring(u1 + 1, u2);
+      if (candidate.endsWith(".bin")) { binUrl = candidate; break; }
+      searchFrom = u2 + 1;
+    }
+    // body and apiClient destroyed here as scope exits
+  }
+
+  if (binUrl.length() == 0) { Serial.println("OTA: No .bin asset found in release"); return; }
+  Serial.printf("OTA: Downloading from %s\n", binUrl.c_str());
+  Serial.printf("OTA: Free heap before download: %u bytes\n", esp_get_free_heap_size());
+
+  otaInProgress = true;
+  delay(600); // give FingerprintTask time to set the LED before download blocks
+
+  // === Scope 2: Redirect resolution ===
+  {
+    WiFiClientSecure redirectClient;
+    redirectClient.setInsecure();
+    HTTPClient redirectHttp;
+    redirectHttp.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+    redirectHttp.setTimeout(15000);
+    redirectHttp.setUserAgent("ESP32-Attendance/1.0");
+    if (redirectHttp.begin(redirectClient, binUrl)) {
+      int rCode = redirectHttp.GET();
+      if (rCode == 301 || rCode == 302) {
+        String location = redirectHttp.getLocation();
+        if (location.length()) {
+          Serial.printf("OTA: Redirect -> %s\n", location.c_str());
+          binUrl = location;
+        }
+      }
+      redirectHttp.end();
+    }
+    // redirectClient destroyed here
+  }
+
+  // === Scope 3: Binary download and flash ===
+  {
+    WiFiClientSecure binClient;
+    binClient.setInsecure();
+    HTTPClient binHttp;
+    binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    binHttp.setTimeout(60000);
+    binHttp.setUserAgent("ESP32-Attendance/1.0");
+
+    if (!binHttp.begin(binClient, binUrl)) {
+      Serial.printf("OTA: Failed to begin binary download. Free heap: %u\n", esp_get_free_heap_size());
+      otaInProgress = false;
+      return;
+    }
+    int binCode = binHttp.GET();
+    if (binCode != HTTP_CODE_OK) {
+      Serial.printf("OTA: Binary download returned %d\n", binCode);
+      binHttp.end();
+      otaInProgress = false;
+      return;
+    }
+
+    int contentLen = binHttp.getSize();
+    Serial.printf("OTA: Binary size = %d bytes\n", contentLen);
+
+    if (!Update.begin(contentLen > 0 ? contentLen : UPDATE_SIZE_UNKNOWN)) {
+      Serial.printf("OTA: Update.begin failed, error: %s\n", Update.errorString());
+      binHttp.end();
+      otaInProgress = false;
+      return;
+    }
+
+    WiFiClient *stream = binHttp.getStreamPtr();
+    size_t written = Update.writeStream(*stream);
+    Serial.printf("OTA: Written %u / %d bytes\n", written, contentLen);
+    binHttp.end();
+
+    if (Update.end()) {
+      if (Update.isFinished()) {
+        Serial.println("OTA: Update complete! Rebooting...");
+        setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+        delay(1500);
+        ESP.restart();
+      } else {
+        Serial.println("OTA: Update did not finish correctly.");
+      }
+    } else {
+      Serial.printf("OTA: Update.end error: %s\n", Update.errorString());
+    }
+  }
+
+  otaInProgress = false;
+}
+/* =================== End OTA =================== */
+
 /* =================== NetworkTask (Core 0) =================== */
 void NetworkTask(void *pvParameters) {
   const TickType_t flushIntervalTicks = pdMS_TO_TICKS(60000); // 60s
@@ -1311,6 +1520,13 @@ void FingerprintTask(void *pvParameters) {
   const unsigned long feedbackDuration = 600; // ms (green or red hold)
 
   for (;;) {
+    // If OTA is running, hold red breathing and wait
+    if (otaInProgress) {
+      setSensorLED(FINGERPRINT_LED_BREATHING, 15, FINGERPRINT_LED_RED);
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+
     // show ready (blue or purple depending on WiFi state)
     showReadyState();
 
@@ -1453,6 +1669,12 @@ void setup() {
 
   if (!initFS()) Serial.println("SPIFFS failed");
 
+  if (!loadDeviceConfig()) {
+    Serial.println("No device config found — identity will be set via captive portal.");
+  } else {
+    Serial.printf("Device identity: %s / %s\n", BRANCH_ID.c_str(), BRANCH_NAME.c_str());
+  }
+
   // Load fid map
   loadFidMapFromFS();
   memset(lastScanMillis, 0, sizeof(lastScanMillis));
@@ -1509,6 +1731,11 @@ void setup() {
   }
 
   Serial.println("Tasks created; main loop will idle");
+
+  // OTA check: runs after sensor and tasks are ready so LED feedback works
+  if (WiFi.status() == WL_CONNECTED) {
+    checkAndApplyOTA();
+  }
 }
 
 void loop() {
