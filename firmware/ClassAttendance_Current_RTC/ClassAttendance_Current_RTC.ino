@@ -37,8 +37,8 @@ const char* CLASS_NAME = "2 Science 2";
 #define FINGERPRINT_LED_BLUE      0x02
 #define FINGERPRINT_LED_PURPLE    0x03
 #define FINGERPRINT_LED_GREEN     0x04
-#define FINGERPRINT_LED_WHITE     0x05
-#define FINGERPRINT_LED_YELLOW    0x06
+#define FINGERPRINT_LED_WHITE     0x06
+#define FINGERPRINT_LED_YELLOW    0x05
 
 /* Constants */
 #define MAX_FID 127
