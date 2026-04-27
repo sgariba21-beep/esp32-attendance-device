@@ -230,8 +230,8 @@ bool loadDeviceConfig() {
   while (f.available()) {
     String ln = f.readStringUntil('\n');
     ln.trim();
-    if (ln.startsWith("branchId="))   BRANCH_ID   = ln.substring(9);
-    if (ln.startsWith("branchName=")) BRANCH_NAME = ln.substring(11);
+    if (ln.startsWith("branchId="))   BRANCH_ID   = ln.substring(8);
+    if (ln.startsWith("branchName=")) BRANCH_NAME = ln.substring(10);
   }
   f.close();
   return (BRANCH_ID.length() > 0);
