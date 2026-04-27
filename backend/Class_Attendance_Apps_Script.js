@@ -615,17 +615,33 @@ function storeTeacherAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
       if (!p) continue;
       var pDateStr = Utilities.formatDate(p.date, tz, "yyyy-MM-dd");
       if (pDateStr !== dateStr) continue;
-      if (teacherId && p.teacherId && p.teacherId.toString().trim().toLowerCase() === teacherId.toString().trim().toLowerCase()) {
+      var pTeacherId   = (p.teacherId   || '').toString().trim().toLowerCase();
+      var pTeacherName = (p.teacherName || '').toString().trim().toLowerCase();
+      var payloadId    = teacherId.toString().trim().toLowerCase();
+
+      // Primary: timetable TeacherID column matches enrolled UniqueID (correct setup)
+      if (payloadId && pTeacherId && pTeacherId === payloadId) {
         candidates.push(p);
-      } else if (!teacherId && p.teacherName && teacherNamePayload && p.teacherName.toString().trim().toLowerCase() === teacherNamePayload.toString().trim().toLowerCase()) {
+      // Secondary: timetable TeacherName column matches enrolled UniqueID
+      // (handles admins who fill TeacherID column with names instead of IDs)
+      } else if (payloadId && pTeacherName && pTeacherName === payloadId) {
         candidates.push(p);
-      } else if (teacherId && p.teacherName && teacherNamePayload && p.teacherName.toString().trim().toLowerCase() === teacherNamePayload.toString().trim().toLowerCase()) {
+      // Tertiary: payload carries a name (future-proofing) and it matches timetable name
+      } else if (teacherNamePayload && pTeacherName && pTeacherName === teacherNamePayload.toString().trim().toLowerCase()) {
         candidates.push(p);
       }
     }
 
     if (candidates.length === 0) {
-      // No scheduled lesson for this teacher on this date -> do nothing.
+      // Log to Unmapped so this is visible rather than a silent discard
+      storeUnmapped({
+        classId: classId,
+        type: 'teacher-no-timetable-match',
+        teacherId: teacherId,
+        date: dateStr,
+        note: 'No timetable row matched this teacherId on this date. ' +
+              'Check that the Timetable TeacherID column uses the same value as the enrolled UniqueID.'
+      }, 'teacher-no-timetable-match');
       lock.releaseLock();
       return { code: 200, message: "No scheduled lesson for teacher today; ignored" };
     }
