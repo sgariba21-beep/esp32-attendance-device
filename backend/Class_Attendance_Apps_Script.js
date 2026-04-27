@@ -17,6 +17,7 @@ const CLASSMAP_SHEET_NAME = 'ClassMap';
 const TARGET_SHEET_NAME = 'Attendance';
 const TEACHER_SHEET_NAME = 'TeacherAttendance';
 const TIMETABLE_SHEET_NAME = 'Timetable';
+const SETTINGS_SHEET_NAME = 'Settings';
 const ALLOW_AUTO_CREATE = true;
 const DEDUPE_TTL_MS = 24 * 3600 * 1000; // 24 hours
 
@@ -43,6 +44,117 @@ const TEACHER_LATE_WINDOW_MINUTES  = 10; // allow matching up to 10 minutes afte
     "sgariba21@gmail.com",
     // "third.admin@example.com"
   ];
+
+/******** Spreadsheet menu (ClassMap spreadsheet only) *********/
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('📋 Attendance Admin')
+    .addItem('⚙️ Initialize All Class Sheets', 'menuInitializeSheets')
+    .addSeparator()
+    .addItem('🔍 Preview Term Archive (Dry Run)', 'menuPreviewArchive')
+    .addItem('✅ Run Term Archive', 'menuRunArchive')
+    .addSeparator()
+    .addItem('📧 Send Weekly Summary Now', 'menuSendWeeklySummary')
+    .addToUi();
+
+  // Ensure Settings sheet exists every time the spreadsheet is opened
+  ensureSettingsSheet();
+}
+
+function menuInitializeSheets() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    initializeAllClassSheets();
+    ui.alert('✅ Done', 'All class sheets have been initialized.\n\nCheck View → Logs for details.', ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('❌ Error', e.message, ui.ButtonSet.OK);
+  }
+}
+
+function menuPreviewArchive() {
+  var ui = SpreadsheetApp.getUi();
+  var termLabel;
+  try { termLabel = getTermLabel(); } catch (e) { ui.alert('⚠️ Error', e.message, ui.ButtonSet.OK); return; }
+
+  var nextLabel = getNextTermLabel();
+  var confirm = ui.alert(
+    '🔍 Preview Term Archive',
+    'This will show what WOULD happen if you archived now.\n\n' +
+    'Current Term Label: ' + termLabel + '\n' +
+    (nextLabel ? 'Next Term Label: ' + nextLabel + '\n' : '') +
+    '\nNo data will be changed. Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+
+  try {
+    var results = archiveTermSheets(true); // dry run
+    var summary = results ? results.slice(0, 20).join('\n') : 'No results returned.';
+    if (results && results.length > 20) summary += '\n... and ' + (results.length - 20) + ' more (see Logs).';
+    ui.alert('🔍 Dry Run Complete — ' + termLabel, summary, ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('❌ Error', e.message, ui.ButtonSet.OK);
+  }
+}
+
+function menuRunArchive() {
+  var ui = SpreadsheetApp.getUi();
+  var termLabel;
+  try { termLabel = getTermLabel(); } catch (e) { ui.alert('⚠️ Error', e.message, ui.ButtonSet.OK); return; }
+
+  var nextLabel = getNextTermLabel();
+  var confirm = ui.alert(
+    '✅ Run Term Archive — Are you sure?',
+    'This will archive attendance data for:\n\n' +
+    '  Term being closed:  ' + termLabel + '\n' +
+    (nextLabel ? '  New term starting:  ' + nextLabel + '\n' : '') +
+    '\nFor every active class:\n' +
+    '  • "Attendance" → "Attendance - ' + termLabel + '"\n' +
+    '  • "TeacherAttendance" → "TeacherAttendance - ' + termLabel + '"\n' +
+    '  • A fresh empty sheet will be created for the new term\n' +
+    '  • Student roster will be carried forward automatically\n\n' +
+    'This CANNOT be undone. Run the Preview first if unsure.\n\nProceed?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+
+  // Second confirmation — belt and suspenders for a destructive operation
+  var confirm2 = ui.alert(
+    '⚠️ Final Confirmation',
+    'Last chance. Archive term "' + termLabel + '" across all active classes?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm2 !== ui.Button.YES) return;
+
+  try {
+    var results = archiveTermSheets(false); // live run
+    var summary = results ? results.slice(0, 20).join('\n') : 'No results.';
+    if (results && results.length > 20) summary += '\n... and ' + (results.length - 20) + ' more (see Logs).';
+    ui.alert(
+      '✅ Archive Complete — ' + termLabel,
+      summary + '\n\nRemember to update "Current Term Label" and "Next Term Label" in the Settings sheet for the next term.',
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    ui.alert('❌ Error during archive', e.message, ui.ButtonSet.OK);
+  }
+}
+
+function menuSendWeeklySummary() {
+  var ui = SpreadsheetApp.getUi();
+  var confirm = ui.alert(
+    '📧 Send Weekly Summary',
+    'This will send the weekly attendance summary email to all admin addresses now. Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+  try {
+    sendWeeklyAttendanceSummaries();
+    ui.alert('✅ Done', 'Weekly summary email sent.', ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('❌ Error', e.message, ui.ButtonSet.OK);
+  }
+}
 
 /******** Entrypoints *********/
 function doPost(e){ return handleRequest(e); }
@@ -1230,6 +1342,221 @@ function exportAttendanceSheetAsXlsx(spreadsheetId) {
   });
   if (response.getResponseCode() !== 200) return null;
   return response.getBlob().setName("Attendance.xlsx");
+}
+
+/******** Settings sheet *********/
+function ensureSettingsSheet() {
+  var mapSS = SpreadsheetApp.openById(CLASSMAP_SPREADSHEET_ID);
+  var sheet = mapSS.getSheetByName(SETTINGS_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = mapSS.insertSheet(SETTINGS_SHEET_NAME);
+
+  // Header row
+  sheet.getRange('A1').setValue('Setting');
+  sheet.getRange('B1').setValue('Value');
+  sheet.getRange('A1:B1').setFontWeight('bold').setBackground('#4a86e8').setFontColor('#ffffff');
+
+  // Rows
+  sheet.getRange('A2').setValue('Current Term Label');
+  sheet.getRange('B2').setValue('Term 1 2025');
+  sheet.getRange('A2').setNote(
+    'This label is appended to the sheet name when archiving.\n' +
+    'Example values: "Term 1 2025", "Semester 2 2025"\n' +
+    'Update this before running the archive at the end of each term.'
+  );
+
+  sheet.getRange('A3').setValue('Next Term Label');
+  sheet.getRange('B3').setValue('Term 2 2025');
+  sheet.getRange('A3').setNote(
+    'Used for display purposes only in confirmation dialogs.\n' +
+    'Update this so admins know what the new term will be called.'
+  );
+
+  sheet.getRange('A4').setValue('Last Archive Run');
+  sheet.getRange('B4').setValue('Never');
+  sheet.getRange('A4').setNote('Automatically updated when an archive is successfully run.');
+
+  // Formatting
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 220);
+  sheet.getRange('A2:A4').setFontWeight('bold');
+  sheet.getRange('B2:B4').setBackground('#f3f3f3');
+  sheet.setFrozenRows(1);
+
+  return sheet;
+}
+
+function getTermLabel() {
+  var sheet = ensureSettingsSheet();
+  var val = (sheet.getRange('B2').getValue() || '').toString().trim();
+  if (!val) throw new Error('Current Term Label is empty in the Settings sheet. Please fill it in before running the archive.');
+  return val;
+}
+
+function getNextTermLabel() {
+  var sheet = ensureSettingsSheet();
+  return (sheet.getRange('B3').getValue() || '').toString().trim();
+}
+
+function stampLastArchiveRun(termLabel) {
+  var sheet = ensureSettingsSheet();
+  var mapSS = SpreadsheetApp.openById(CLASSMAP_SPREADSHEET_ID);
+  var tz = mapSS.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  var now = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd HH:mm");
+  sheet.getRange('B4').setValue(termLabel + ' — ' + now);
+}
+
+/******** Archive current term sheets and reset for new term *********/
+/*
+  Run manually from Apps Script editor (Run > archiveTermSheets) at the END of each term,
+  BEFORE the new term starts.
+
+  For each active class in ClassMap:
+    1. Renames 'Attendance' to 'Attendance - {CURRENT_TERM_LABEL}'
+    2. Creates a fresh 'Attendance' sheet with the same student roster (IDs + names, no dates)
+    3. Renames 'TeacherAttendance' to 'TeacherAttendance - {CURRENT_TERM_LABEL}'
+    4. Creates a fresh empty 'TeacherAttendance' sheet with correct headers
+
+  IMPORTANT:
+    - Update CURRENT_TERM_LABEL at the top of this script before running.
+    - Safe to inspect first: set DRY_RUN = true below to log what would happen without changing anything.
+    - Enrollment and Timetable sheets are NOT touched.
+    - If an archive sheet with the same label already exists, that class is skipped to prevent overwriting.
+*/
+function archiveTermSheets(dryRun) {
+  var DRY_RUN = (dryRun === true);
+
+  var mapSS = SpreadsheetApp.openById(CLASSMAP_SPREADSHEET_ID);
+  var mapSheet = mapSS.getSheetByName(CLASSMAP_SHEET_NAME);
+  if (!mapSheet) { Logger.log('ClassMap sheet not found.'); return; }
+
+  var tz = mapSS.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  var rows = mapSheet.getDataRange().getValues();
+  var results = [];
+  var termLabel;
+  try {
+    termLabel = getTermLabel();
+  } catch (e) {
+    Logger.log('ERROR: ' + e.message);
+    SpreadsheetApp.getUi().alert('⚠️ Cannot run archive:\n\n' + e.message);
+    return;
+  }
+
+  var archiveAttName = TARGET_SHEET_NAME + ' - ' + termLabel;
+  var archiveTaName  = TEACHER_SHEET_NAME + ' - ' + termLabel;
+
+  for (var i = 1; i < rows.length; i++) {
+    var classId   = (rows[i][0] || '').toString().trim();
+    var className = (rows[i][1] || '').toString().trim();
+    var sheetId   = (rows[i][2] || '').toString().trim();
+    var active    = (rows[i][4] || 'Y').toString().trim().toUpperCase();
+
+    if (!sheetId) { results.push('Row ' + (i+1) + ': skipped (no spreadsheetId)'); continue; }
+    if (active === 'N') { results.push(classId + ': skipped (inactive)'); continue; }
+
+    try {
+      var ss = SpreadsheetApp.openById(sheetId);
+      var log = [];
+
+      // ── Student Attendance ────────────────────────────────────────
+      var attSheet = ss.getSheetByName(TARGET_SHEET_NAME);
+      var attArchiveExists = !!findSheetByName(ss, archiveAttName);
+
+      if (attArchiveExists) {
+        log.push('Attendance archive "' + archiveAttName + '" already exists — skipped');
+      } else if (attSheet) {
+        // Extract student roster before archiving (carry forward IDs + names only)
+        var roster = [];
+        var lastRow = attSheet.getLastRow();
+        if (lastRow >= 2) {
+          var rosterData = attSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+          for (var r = 0; r < rosterData.length; r++) {
+            var sid  = (rosterData[r][0] || '').toString().trim();
+            var sname = (rosterData[r][1] || '').toString().trim();
+            if (sid || sname) roster.push([sid, sname, 0, '0%']);
+          }
+        }
+
+        if (!DRY_RUN) {
+          // Archive: rename existing sheet
+          attSheet.setName(archiveAttName);
+
+          // Fresh sheet: create new Attendance with same roster
+          var newAtt = ss.insertSheet(TARGET_SHEET_NAME);
+          newAtt.getRange(1, 1, 1, 4).setValues([['StudentID', 'Name', 'Total', 'Attendance %']]);
+          var attHdr = newAtt.getRange(1, 1, 1, 4);
+          attHdr.setFontWeight('bold');
+          attHdr.setBackground('#4a86e8');
+          attHdr.setFontColor('#ffffff');
+          newAtt.setFrozenRows(1);
+          newAtt.setColumnWidth(1, 110);
+          newAtt.setColumnWidth(2, 160);
+          newAtt.setColumnWidth(3, 60);
+          newAtt.setColumnWidth(4, 110);
+
+          if (roster.length > 0) {
+            newAtt.getRange(2, 1, roster.length, 4).setValues(roster);
+          }
+        }
+        log.push((DRY_RUN ? '[DRY RUN] Would archive' : 'Archived') +
+                 ' Attendance → "' + archiveAttName + '"' +
+                 (roster.length ? ', carried forward ' + roster.length + ' students' : ', no roster to carry'));
+      } else {
+        log.push('Attendance sheet not found — nothing to archive');
+      }
+
+      // ── Teacher Attendance ────────────────────────────────────────
+      var taSheet = ss.getSheetByName(TEACHER_SHEET_NAME);
+      var taArchiveExists = !!findSheetByName(ss, archiveTaName);
+
+      if (taArchiveExists) {
+        log.push('TeacherAttendance archive "' + archiveTaName + '" already exists — skipped');
+      } else if (taSheet) {
+        if (!DRY_RUN) {
+          // Archive: rename existing sheet
+          taSheet.setName(archiveTaName);
+
+          // Fresh sheet: create new TeacherAttendance (empty — rows are generated from timetable)
+          var taHeaders = ['Id', 'Name', 'Subject', 'Scheduled Start', 'Scheduled End', 'Date', 'Actual Start', 'Actual End'];
+          var newTa = ss.insertSheet(TEACHER_SHEET_NAME);
+          newTa.getRange(1, 1, 1, taHeaders.length).setValues([taHeaders]);
+          var taHdr = newTa.getRange(1, 1, 1, taHeaders.length);
+          taHdr.setFontWeight('bold');
+          taHdr.setBackground('#0f9d58');
+          taHdr.setFontColor('#ffffff');
+          newTa.setFrozenRows(1);
+          newTa.setColumnWidth(1, 100);
+          newTa.setColumnWidth(2, 150);
+          newTa.setColumnWidth(3, 130);
+          newTa.setColumnWidth(4, 120);
+          newTa.setColumnWidth(5, 120);
+          newTa.setColumnWidth(6, 100);
+          newTa.setColumnWidth(7, 100);
+          newTa.setColumnWidth(8, 100);
+        }
+        log.push((DRY_RUN ? '[DRY RUN] Would archive' : 'Archived') +
+                 ' TeacherAttendance → "' + archiveTaName + '"');
+      } else {
+        log.push('TeacherAttendance sheet not found — nothing to archive');
+      }
+
+      results.push(classId + ' (' + className + '): ' + log.join(' | '));
+
+    } catch (err) {
+      results.push(classId + ': ERROR — ' + err.message);
+    }
+  }
+
+  Logger.log((DRY_RUN ? '=== DRY RUN ===' : '=== LIVE RUN ===') + ' archiveTermSheets — ' + termLabel);
+  Logger.log(results.join('\n'));
+  Logger.log('Done.');
+
+  if (!DRY_RUN) {
+    stampLastArchiveRun(termLabel);
+  }
+
+  return results; // returned so menu functions can display output
 }
 
 /******** Initialize all class sheets from ClassMap *********/

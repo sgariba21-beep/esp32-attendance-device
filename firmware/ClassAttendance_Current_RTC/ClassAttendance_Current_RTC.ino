@@ -9,7 +9,7 @@
 /* ========= CONFIG - EDIT THESE ========== */
 
 // Central Apps Script endpoint (single router web app)
-const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxg_Dj_i-JrmNfHblrzBaxaxzwWArAsgzKSz0QNhfjhltZmwSYiZqXgY8FqCJYatfVM4g/exec";
+const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzEw659EL8uq2Co5kxtEbA_71AlUVX4DZg-_jUfL5dZ4zkXdGcJ84gwbc-BQwim-ap7/exec";
 
 // If you set SCRIPT_AUTH_KEY in Apps Script, put the same string here; otherwise leave empty
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
