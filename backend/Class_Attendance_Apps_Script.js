@@ -1232,6 +1232,142 @@ function exportAttendanceSheetAsXlsx(spreadsheetId) {
   return response.getBlob().setName("Attendance.xlsx");
 }
 
+/******** Initialize all class sheets from ClassMap *********/
+/*
+  Run this manually from the Apps Script editor (Run > initializeAllClassSheets) 
+  before deployment or after adding new classes to ClassMap.
+  
+  For each active class in ClassMap, creates the following sheets if missing:
+    - Attendance       : StudentID | Name | Total | Attendance %
+    - TeacherAttendance: Id | Name | Subject | Scheduled Start | Scheduled End | Date | Actual Start | Actual End
+    - Enrollment       : FingerID | UniqueID | Name | Role | Command | Status | Note | CreatedAt
+    - Timetable        : Day | Date | Start | End | Subject | TeacherID | TeacherName
+  
+  Safe to re-run: never overwrites existing data, only creates missing sheets/headers.
+*/
+function initializeAllClassSheets() {
+  var mapSS = SpreadsheetApp.openById(CLASSMAP_SPREADSHEET_ID);
+  var mapSheet = mapSS.getSheetByName(CLASSMAP_SHEET_NAME);
+  if (!mapSheet) {
+    Logger.log('ClassMap sheet not found. Nothing to initialize.');
+    return;
+  }
+
+  var tz = mapSS.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  var rows = mapSheet.getDataRange().getValues();
+  var results = [];
+
+  for (var i = 1; i < rows.length; i++) {
+    var classId   = (rows[i][0] || '').toString().trim();
+    var className = (rows[i][1] || '').toString().trim();
+    var sheetId   = (rows[i][2] || '').toString().trim();
+    var active    = (rows[i][4] || 'Y').toString().trim().toUpperCase();
+
+    if (!sheetId) { results.push('Row ' + (i+1) + ': skipped (no spreadsheetId)'); continue; }
+    if (active === 'N') { results.push(classId + ': skipped (inactive)'); continue; }
+
+    try {
+      var ss = SpreadsheetApp.openById(sheetId);
+      ss.setSpreadsheetTimeZone(tz);
+      var log = [];
+
+      // ── Attendance sheet ──────────────────────────────────────────
+      var attSheet = ss.getSheetByName(TARGET_SHEET_NAME);
+      if (!attSheet) {
+        attSheet = ss.insertSheet(TARGET_SHEET_NAME);
+        attSheet.getRange(1, 1, 1, 4).setValues([['StudentID', 'Name', 'Total', 'Attendance %']]);
+        var attHdr = attSheet.getRange(1, 1, 1, 4);
+        attHdr.setFontWeight('bold');
+        attHdr.setBackground('#4a86e8');
+        attHdr.setFontColor('#ffffff');
+        attSheet.setFrozenRows(1);
+        attSheet.setColumnWidth(1, 110);
+        attSheet.setColumnWidth(2, 160);
+        attSheet.setColumnWidth(3, 60);
+        attSheet.setColumnWidth(4, 110);
+        log.push('Attendance created');
+      } else {
+        ensureAttendancePercentHeader(attSheet);
+        log.push('Attendance exists');
+      }
+
+      // ── TeacherAttendance sheet ───────────────────────────────────
+      var taHeaders = ['Id', 'Name', 'Subject', 'Scheduled Start', 'Scheduled End', 'Date', 'Actual Start', 'Actual End'];
+      var taSheet = ss.getSheetByName(TEACHER_SHEET_NAME);
+      if (!taSheet) {
+        taSheet = ss.insertSheet(TEACHER_SHEET_NAME);
+        taSheet.getRange(1, 1, 1, taHeaders.length).setValues([taHeaders]);
+        var taHdr = taSheet.getRange(1, 1, 1, taHeaders.length);
+        taHdr.setFontWeight('bold');
+        taHdr.setBackground('#0f9d58');
+        taHdr.setFontColor('#ffffff');
+        taSheet.setFrozenRows(1);
+        taSheet.setColumnWidth(1, 100); // Id
+        taSheet.setColumnWidth(2, 150); // Name
+        taSheet.setColumnWidth(3, 130); // Subject
+        taSheet.setColumnWidth(4, 120); // Scheduled Start
+        taSheet.setColumnWidth(5, 120); // Scheduled End
+        taSheet.setColumnWidth(6, 100); // Date
+        taSheet.setColumnWidth(7, 100); // Actual Start
+        taSheet.setColumnWidth(8, 100); // Actual End
+        log.push('TeacherAttendance created');
+      } else {
+        log.push('TeacherAttendance exists');
+      }
+
+      // ── Enrollment sheet ─────────────────────────────────────────
+      var enrollSheet = ss.getSheetByName(ENROLL_SHEET_NAME);
+      if (!enrollSheet) {
+        ensureEnrollSheet(ss); // reuse existing function which handles headers + formatting
+        log.push('Enrollment created');
+      } else {
+        log.push('Enrollment exists');
+      }
+
+      // ── Timetable sheet ──────────────────────────────────────────
+      // Column names must match the idx() lookups in getTimetablePeriodsForWeek:
+      //   Day -> dayCol, Date -> dateCol, Start -> startCol, End -> endCol,
+      //   Subject -> subjectCol, TeacherID -> teacherCol, TeacherName -> teacherNameCol
+      var ttHeaders = ['Day', 'Date', 'Start', 'End', 'Subject', 'TeacherID', 'TeacherName'];
+      var ttSheet = findSheetByName(ss, TIMETABLE_SHEET_NAME);
+      if (!ttSheet) {
+        ttSheet = ss.insertSheet(TIMETABLE_SHEET_NAME);
+        ttSheet.getRange(1, 1, 1, ttHeaders.length).setValues([ttHeaders]);
+        var ttHdr = ttSheet.getRange(1, 1, 1, ttHeaders.length);
+        ttHdr.setFontWeight('bold');
+        ttHdr.setBackground('#e69138');
+        ttHdr.setFontColor('#ffffff');
+        ttSheet.setFrozenRows(1);
+        ttSheet.setColumnWidth(1, 90);  // Day
+        ttSheet.setColumnWidth(2, 100); // Date
+        ttSheet.setColumnWidth(3, 80);  // Start
+        ttSheet.setColumnWidth(4, 80);  // End
+        ttSheet.setColumnWidth(5, 130); // Subject
+        ttSheet.setColumnWidth(6, 110); // TeacherID  <-- must match enrolled UniqueID
+        ttSheet.setColumnWidth(7, 150); // TeacherName
+
+        // Add a note on the TeacherID header cell warning admins about the constraint
+        ttSheet.getRange(1, 6).setNote(
+          'IMPORTANT: TeacherID must exactly match the UniqueID ' +
+          'used when enrolling the teacher\'s fingerprint (e.g. TCH001). ' +
+          'Do NOT use the teacher\'s name here.'
+        );
+        log.push('Timetable created');
+      } else {
+        log.push('Timetable exists');
+      }
+
+      results.push(classId + ' (' + className + '): ' + log.join(', '));
+
+    } catch (err) {
+      results.push(classId + ': ERROR — ' + err.message);
+    }
+  }
+
+  Logger.log('initializeAllClassSheets complete:\n' + results.join('\n'));
+  Logger.log('Run View > Logs in the Apps Script editor to see results.');
+}
+
 /******** Weekly summary (updated: includes missed teacher lessons + late/early detection) *********/
 function sendWeeklyAttendanceSummaries() {
   const classMapSS = SpreadsheetApp.openById(CLASSMAP_SPREADSHEET_ID);
