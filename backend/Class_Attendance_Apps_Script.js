@@ -51,6 +51,7 @@ function doGet(e){ return handleRequest(e); }
 /******** Main handler (extended) *********/
 function handleRequest(e) {
   try {
+    cleanupDedupeProps();
     // Basic auth check for enrollment endpoints (if configured)
     var params = e.parameter || {};
     var api = (params.api || '').toString().trim();
@@ -456,6 +457,7 @@ function storeAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
       lock.releaseLock();
       return { code: 200, message: "Duplicate scanId ignored" };
     }
+    if (props.getKeys().length > 400) cleanupDedupeProps();
     props.setProperty(dedupeKey, '1');
     props.setProperty(dedupeKey + '-exp', '' + (new Date().getTime() + DEDUPE_TTL_MS));
 
@@ -579,6 +581,7 @@ function storeTeacherAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
       lock.releaseLock();
       return { code: 200, message: "Duplicate scanId ignored" };
     }
+    if (props.getKeys().length > 400) cleanupDedupeProps();
     props.setProperty(dedupeKey, '1');
     props.setProperty(dedupeKey + '-exp', '' + (new Date().getTime() + DEDUPE_TTL_MS));
 
@@ -1120,6 +1123,16 @@ function cleanupDedupeProps() {
         var base = keys[i].substring(0, keys[i].length - 4);
         props.deleteProperty(base);
         props.deleteProperty(keys[i]);
+      }
+    }
+  }
+  // Also purge unmapped log entries older than 7 days
+  var sevenDaysAgo = now - (7 * 24 * 3600 * 1000);
+  for (var j = 0; j < keys.length; j++) {
+    if (keys[j].startsWith('unmapped.')) {
+      var ts = parseInt(keys[j].substring(9), 10);
+      if (!isNaN(ts) && ts < sevenDaysAgo) {
+        props.deleteProperty(keys[j]);
       }
     }
   }
