@@ -638,7 +638,12 @@ function storeAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
     }
 
     sheet.getRange(rowIndex, dateCol).setValue('Present');
-    updateTotalForRow(sheet, rowIndex);
+
+    // Recalculate totals for all student rows
+    var totalRows = sheet.getLastRow();
+    for (var r = 2; r <= totalRows; r++) {
+      updateTotalForRow(sheet, r);
+    }
 
     lock.releaseLock();
     return { code: 200, message: "Marked Present" };
