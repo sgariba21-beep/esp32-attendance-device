@@ -377,8 +377,12 @@ void setupFingerprint() {
 
 /* Helper: generate a unique scanId using millis + id */
 String makeScanId(const String &id) {
-  unsigned long m = millis();
-  return String("scan-") + String(m) + "-" + id;
+  DateTime now = rtc.now();
+  char buf[32];
+  sprintf(buf, "scan-%04d%02d%02d%02d%02d%02d-",
+          now.year(), now.month(), now.day(),
+          now.hour(), now.minute(), now.second());
+  return String(buf) + id;
 }
 
 /*RTC Initialization and Sync*/
