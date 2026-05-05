@@ -982,20 +982,23 @@ void sendOrQueuePayload(const String &payloadJson) {
     return;
   }
 
-  bool pushed = false;
-  if (xSemaphoreTake(memQueueMutex, (TickType_t) (50 / portTICK_PERIOD_MS)) == pdTRUE) {
+  // Always persist to SPIFFS first so a power cut can never lose a scan.
+  // NetworkTask will delete from SPIFFS once the POST succeeds.
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+  appendToSPIFFSQueue_locked(payloadJson);
+  xSemaphoreGive(spiffsMutex);
+  Serial.println("[sendOrQueue] Persisted to SPIFFS: " + payloadJson);
+
+  // Also push to memQueue for immediate fast-send attempt.
+  if (xSemaphoreTake(memQueueMutex, (TickType_t)(50 / portTICK_PERIOD_MS)) == pdTRUE) {
     trimQueue();
     memQueue.push_back(payloadJson);
     xSemaphoreGive(memQueueMutex);
-    pushed = true;
     xSemaphoreGive(memQueueSem);
+    Serial.println("[sendOrQueue] Also pushed to memQueue for immediate send.");
   }
-  if (!pushed) {
-    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-    if (appendToSPIFFSQueue_locked(payloadJson)) {
-      Serial.println("Queued (fallback) locally: " + payloadJson);
-    }
-    xSemaphoreGive(spiffsMutex);
+  else {
+    Serial.println("[sendOrQueue] memQueue mutex timeout; SPIFFS-only path active.");
   }
 }
 
@@ -1041,7 +1044,7 @@ void flushQueue() {
     int httpCode = 0; String body;
     bool ok = postJSONToUrl(entry, SCRIPT_URL, httpCode, body);
     if (ok) {
-      Serial.println("Queued record sent OK via POST");
+      Serial.printf("flushQueue: sent OK and removed from SPIFFS: %s\n", entry.c_str());
       continue;
     }
     if (httpCode == 400 || httpCode == 404) {
@@ -1295,8 +1298,13 @@ void checkAndApplyOTA() {
 
 /* =================== NetworkTask (Core 0) =================== */
 void NetworkTask(void *pvParameters) {
-  const TickType_t flushIntervalTicks = pdMS_TO_TICKS(60000); // 60s
+  const TickType_t flushIntervalTicks = pdMS_TO_TICKS(15000); // 15s
   esp_task_wdt_delete(NULL); // this task does long HTTP calls; remove from watchdog
+  // On boot, flush any SPIFFS-queued records immediately without waiting for the interval.
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("NetworkTask: boot flush — sending any queued records.");
+    flushQueue();
+  }
   for (;;) {
     // Process any in-memory queued payloads
     String payload = "";
@@ -1315,7 +1323,7 @@ void NetworkTask(void *pvParameters) {
       int httpCode = 0; String body;
       bool ok = postJSONToUrl(payload, SCRIPT_URL, httpCode, body);
       if (ok) {
-        Serial.println("NetworkTask: POST OK");
+        Serial.println("NetworkTask: POST OK — SPIFFS flush will clear persisted copy.");
       } else {
         if (httpCode == 400 || httpCode == 404) {
           // GET fallback
