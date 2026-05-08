@@ -571,8 +571,6 @@ function storeAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
       return { code: 200, message: "Duplicate scanId ignored" };
     }
     if (props.getKeys().length > 400) cleanupDedupeProps();
-    props.setProperty(dedupeKey, '1');
-    props.setProperty(dedupeKey + '-exp', '' + (new Date().getTime() + DEDUPE_TTL_MS));
 
     var lastRow = sheet.getLastRow();
     var ids = [], names = [];
@@ -639,6 +637,8 @@ function storeAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
     }
 
     sheet.getRange(rowIndex, dateCol).setValue('Present');
+    props.setProperty(dedupeKey, '1');
+    props.setProperty(dedupeKey + '-exp', '' + (new Date().getTime() + DEDUPE_TTL_MS));
     updateTotalForRow(sheet, rowIndex);
 
     lock.releaseLock();
