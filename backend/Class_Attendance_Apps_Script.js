@@ -42,6 +42,7 @@ const TEACHER_LATE_WINDOW_MINUTES  = 10; // allow matching up to 10 minutes afte
   const adminEmails = [
     "adjeijehnissi@gmail.com",
     "sgariba21@gmail.com",
+    "hellosunkwa@gmail.com"
     // "third.admin@example.com"
   ];
 
@@ -638,12 +639,7 @@ function storeAttendanceInSpreadsheet(spreadsheetId, payload, classId) {
     }
 
     sheet.getRange(rowIndex, dateCol).setValue('Present');
-
-    // Recalculate totals for all student rows
-    var totalRows = sheet.getLastRow();
-    for (var r = 2; r <= totalRows; r++) {
-      updateTotalForRow(sheet, r);
-    }
+    updateTotalForRow(sheet, rowIndex);
 
     lock.releaseLock();
     return { code: 200, message: "Marked Present" };
@@ -1463,6 +1459,7 @@ function archiveTermSheets(dryRun) {
     try {
       var ss = SpreadsheetApp.openById(sheetId);
       var log = [];
+      var archiveBlobs = [];
 
       // ── Student Attendance ────────────────────────────────────────
       var attSheet = ss.getSheetByName(TARGET_SHEET_NAME);
@@ -1484,24 +1481,21 @@ function archiveTermSheets(dryRun) {
         }
 
         if (!DRY_RUN) {
-          // Archive: rename existing sheet
-          attSheet.setName(archiveAttName);
+          // Export the current Attendance sheet as .xlsx BEFORE touching it
+          var attBlob = exportAttendanceSheetAsXlsx(sheetId);
+          if (attBlob) {
+            attBlob.setName((className || classId).replace(/[\/\\:*?"<>|]/g, '_') + ' - ' + archiveAttName + '.xlsx');
+            archiveBlobs.push(attBlob);
+          }
 
-          // Fresh sheet: create new Attendance with same roster
-          var newAtt = ss.insertSheet(TARGET_SHEET_NAME);
-          newAtt.getRange(1, 1, 1, 4).setValues([['StudentID', 'Name', 'Total', 'Attendance %']]);
-          var attHdr = newAtt.getRange(1, 1, 1, 4);
-          attHdr.setFontWeight('bold');
-          attHdr.setBackground('#4a86e8');
-          attHdr.setFontColor('#ffffff');
-          newAtt.setFrozenRows(1);
-          newAtt.setColumnWidth(1, 110);
-          newAtt.setColumnWidth(2, 160);
-          newAtt.setColumnWidth(3, 60);
-          newAtt.setColumnWidth(4, 110);
-
+          // Reset: clear date columns and data, keep roster and headers
+          attSheet.getRange(1, 1, 1, 4).setValues([['StudentID', 'Name', 'Total', 'Attendance %']]);
+          var lastAttCol = attSheet.getLastColumn();
+          if (lastAttCol >= DATE_COL_START) {
+            attSheet.deleteColumns(DATE_COL_START, lastAttCol - DATE_COL_START + 1);
+          }
           if (roster.length > 0) {
-            newAtt.getRange(2, 1, roster.length, 4).setValues(roster);
+            attSheet.getRange(2, 1, roster.length, 4).setValues(roster);
           }
         }
         log.push((DRY_RUN ? '[DRY RUN] Would archive' : 'Archived') +
@@ -1519,33 +1513,42 @@ function archiveTermSheets(dryRun) {
         log.push('TeacherAttendance archive "' + archiveTaName + '" already exists — skipped');
       } else if (taSheet) {
         if (!DRY_RUN) {
-          // Archive: rename existing sheet
-          taSheet.setName(archiveTaName);
-
-          // Fresh sheet: create new TeacherAttendance (empty — rows are generated from timetable)
+          // Export the whole workbook (includes TeacherAttendance) — already captured above if attSheet ran first.
+          // Only export separately if attSheet was skipped (archiveBlobs may already have this class's blob).
+          // Reset: clear all data rows, keep headers
           var taHeaders = ['Id', 'Name', 'Subject', 'Scheduled Start', 'Scheduled End', 'Date', 'Actual Start', 'Actual End'];
-          var newTa = ss.insertSheet(TEACHER_SHEET_NAME);
-          newTa.getRange(1, 1, 1, taHeaders.length).setValues([taHeaders]);
-          var taHdr = newTa.getRange(1, 1, 1, taHeaders.length);
-          taHdr.setFontWeight('bold');
-          taHdr.setBackground('#0f9d58');
-          taHdr.setFontColor('#ffffff');
-          newTa.setFrozenRows(1);
-          newTa.setColumnWidth(1, 100);
-          newTa.setColumnWidth(2, 150);
-          newTa.setColumnWidth(3, 130);
-          newTa.setColumnWidth(4, 120);
-          newTa.setColumnWidth(5, 120);
-          newTa.setColumnWidth(6, 100);
-          newTa.setColumnWidth(7, 100);
-          newTa.setColumnWidth(8, 100);
+          var lastTaRow = taSheet.getLastRow();
+          if (lastTaRow >= 2) {
+            taSheet.deleteRows(2, lastTaRow - 1);
+          }
+          taSheet.getRange(1, 1, 1, taHeaders.length).setValues([taHeaders]);
         }
         log.push((DRY_RUN ? '[DRY RUN] Would archive' : 'Archived') +
                  ' TeacherAttendance → "' + archiveTaName + '"');
       } else {
         log.push('TeacherAttendance sheet not found — nothing to archive');
       }
-
+      // If we have blobs to email for this class (live run only)
+      if (!DRY_RUN && archiveBlobs.length > 0) {
+        var emailSubject = '📦 Term Archive: ' + (className || classId) + ' — ' + termLabel;
+        var emailBody = '<div style="font-family:Arial,sans-serif;line-height:1.6;">'
+          + '<p>Hello,</p>'
+          + '<p>The <strong>' + termLabel + '</strong> term has been archived for class <strong>' + (className || classId) + '</strong>.</p>'
+          + '<p>Please find the attendance records attached as an Excel file. The live sheet has been reset for the new term.</p>'
+          + '<p>Best regards,<br>Automated Attendance System</p>'
+          + '</div>';
+        for (var e = 0; e < adminEmails.length; e++) {
+          if (adminEmails[e] && adminEmails[e].trim()) {
+            MailApp.sendEmail({
+              to: adminEmails[e].trim(),
+              subject: emailSubject,
+              htmlBody: emailBody,
+              attachments: archiveBlobs
+            });
+          }
+        }
+        log.push('Archive emailed to ' + adminEmails.length + ' admin(s)');
+      }
       results.push(classId + ' (' + className + '): ' + log.join(' | '));
 
     } catch (err) {
