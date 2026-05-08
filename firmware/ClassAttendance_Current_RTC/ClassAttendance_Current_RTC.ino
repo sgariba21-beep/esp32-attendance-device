@@ -60,6 +60,9 @@ String CLASS_NAME = "";
 #define QUEUE_MAX_SPIFFS_BYTES         (256UL * 1024UL)       // SPIFFS queue: hard cap on total bytes (256 KB)
 #define QUEUE_SPIFFS_TRIM_INTERVAL_MS  (5UL * 60UL * 1000UL)  // run SPIFFS trim at most this often while offline (5 minutes)
 
+// Scan log file
+#define SCAN_LOG_FILE "/scan_log.txt"
+#define SCAN_LOG_MAX_BYTES (200UL * 1024UL)  // trim when file exceeds 200 KB
 
 /* ============ END CONFIG ================ */
 
@@ -286,6 +289,8 @@ fetch('/identity').then(r=>r.json()).then(function(d){
 });
 </script>
 <button onclick="save()">Save &amp; Connect</button>
+<br/><br/>
+<a href="/log" target="_blank"><button type="button" style="background:#2E7D32;">&#128203; View Scan Log</button></a>
 <div id="msg"></div>
 </div>
 <script>
@@ -340,6 +345,29 @@ void startCaptivePortal() {
   portalServer.on("/identity", []() {
     String json = "{\"id\":\"" + CLASS_ID + "\",\"name\":\"" + CLASS_NAME + "\"}";
     portalServer.send(200, "application/json", json);
+  });
+  portalServer.on("/log", []() {
+    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+    if (!SPIFFS.exists(SCAN_LOG_FILE)) {
+      xSemaphoreGive(spiffsMutex);
+      portalServer.send(200, "text/plain", "No scan log yet.");
+      return;
+    }
+    File f = SPIFFS.open(SCAN_LOG_FILE, FILE_READ);
+    if (!f) {
+      xSemaphoreGive(spiffsMutex);
+      portalServer.send(500, "text/plain", "Could not open log.");
+      return;
+    }
+    // Stream line by line to avoid loading full file into RAM
+    portalServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    portalServer.send(200, "text/plain", "");
+    while (f.available()) {
+      String line = f.readStringUntil('\n');
+      portalServer.sendContent(line + "\n");
+    }
+    f.close();
+    xSemaphoreGive(spiffsMutex);
   });
   portalServer.onNotFound([]() {
     portalServer.sendHeader("Location", "http://192.168.4.1/", true);
@@ -428,6 +456,28 @@ String getRTCTimestamp() {
   return String(buf);
 }
 
+void appendScanLog(const String &entry) {
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+
+  // Trim if too large: delete and recreate (simple strategy)
+  if (SPIFFS.exists(SCAN_LOG_FILE)) {
+    File check = SPIFFS.open(SCAN_LOG_FILE, FILE_READ);
+    if (check && check.size() > SCAN_LOG_MAX_BYTES) {
+      check.close();
+      SPIFFS.remove(SCAN_LOG_FILE);
+      Serial.println("Scan log trimmed (size limit reached)");
+    } else if (check) {
+      check.close();
+    }
+  }
+
+  File f = SPIFFS.open(SCAN_LOG_FILE, FILE_APPEND);
+  if (f) {
+    f.println(entry);
+    f.close();
+  }
+  xSemaphoreGive(spiffsMutex);
+}
 /* ================== SPIFFS Fid Map ================== */
 
 bool initFS() {
@@ -1582,6 +1632,8 @@ void FingerprintTask(void *pvParameters) {
           vTaskDelay(600 / portTICK_PERIOD_MS);
           showReadyState();
           vTaskDelay(10 / portTICK_PERIOD_MS);
+          String logEntry = getRTCTimestamp() + " | fid=" + String(fid) + " | COOLDOWN | id=" + fidMap[fid];
+          appendScanLog(logEntry);
           continue;
       }
       lastScanMillis[fid] = nowMs;
@@ -1617,6 +1669,7 @@ void FingerprintTask(void *pvParameters) {
             vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
             showReadyState();
             sendOrQueuePayload(payload);
+            appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | SENT_TEACHER | id=" + teacherId);
             vTaskDelay(200 / portTICK_PERIOD_MS);
           } else {
             // Default to student path (role == "student" or unknown)
@@ -1629,6 +1682,7 @@ void FingerprintTask(void *pvParameters) {
             vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
             showReadyState();
             sendOrQueuePayload(payload);
+            appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | SENT_STUDENT | id=" + studentId + " | name=" + studentName);
             vTaskDelay(200 / portTICK_PERIOD_MS);
           }
         } else {
@@ -1636,6 +1690,7 @@ void FingerprintTask(void *pvParameters) {
           setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
           vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
           showReadyState();
+          appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | NO_MAPPING");
           vTaskDelay(100 / portTICK_PERIOD_MS);
         }
       }
@@ -1648,6 +1703,7 @@ void FingerprintTask(void *pvParameters) {
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
       vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
       showReadyState();
+      appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | NO_MAPPING");
       vTaskDelay(100 / portTICK_PERIOD_MS); // brief debounce
  
     } else {
