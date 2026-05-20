@@ -42,7 +42,10 @@ const TEACHER_LATE_WINDOW_MINUTES  = 10; // allow matching up to 10 minutes afte
   const adminEmails = [
     "adjeijehnissi@gmail.com",
     "sgariba21@gmail.com",
-    "hellosunkwa@gmail.com"
+    "hellosunkwa@gmail.com",
+    "info@olagshs.edu.gh",
+    "sfrimpong@olagshs.edu.gh",
+    "phanthomvirus50@gmail.com"
     // "third.admin@example.com"
   ];
 
