@@ -9,7 +9,7 @@
 /* ========= CONFIG - EDIT THESE ========== */
 
 // Central Apps Script endpoint (single router web app)
-const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzEw659EL8uq2Co5kxtEbA_71AlUVX4DZg-_jUfL5dZ4zkXdGcJ84gwbc-BQwim-ap7/exec";
+const char* SCRIPT_URL = "http://172.10.0.36:54321/functions/v1/log-attendance";
 
 // If you set SCRIPT_AUTH_KEY in Apps Script, put the same string here; otherwise leave empty
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
@@ -570,7 +570,7 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
 
   for (int attempt = 1; attempt <= POST_MAX_RETRIES; ++attempt) {
-    WiFiClientSecure client; client.setInsecure();
+    WiFiClient client;
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(20000);
@@ -580,6 +580,7 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
       break;
     }
     http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Bearer sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH");
     int code = http.POST(jsonPayload);
     outHttpCode = code;
     if (code > 0) {
@@ -1678,7 +1679,7 @@ void FingerprintTask(void *pvParameters) {
             String scanId = makeScanId(studentId);
             String studentName = fidMapName[fid];
             String ts = getRTCTimestamp();
-            String payload ="{\"type\":\"student\",""\"classId\":\"" + String(CLASS_ID) + "\",""\"studentId\":\"" + studentId + "\",""\"studentName\":\"" + studentName + "\",""\"timestamp\":\"" + ts + "\",""\"scanId\":\"" + scanId + "\"}";
+            String payload = "{\"type\":\"student\",\"sid\":\"" + studentId + "\",\"scan_id\":\"" + scanId + "\",\"timestamp\":\"" + ts + "\"}";
             vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
             showReadyState();
             sendOrQueuePayload(payload);
