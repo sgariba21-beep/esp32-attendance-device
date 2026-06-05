@@ -34,7 +34,7 @@ Deno.serve(async (req: Request) => {
   // Get all active students
   const { data: students, error: studentsError } = await supabase
     .from("students")
-    .select("id")
+    .select("id, device_id")
     .eq("status", "active");
 
   if (studentsError || !students || students.length === 0) {
@@ -75,6 +75,7 @@ Deno.serve(async (req: Request) => {
   const absentRecords = absentStudents.map((s) => ({
     sid: s.id,
     academic_id: academic.id,
+    device_id: s.device_id,
     date: today,
     time: "23:00:00",
     status: "absent",

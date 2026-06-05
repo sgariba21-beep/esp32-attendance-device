@@ -28,7 +28,7 @@ Deno.serve(async (req: Request) => {
   // Look up the student by school ID
   const { data: student, error: studentError } = await supabase
     .from("students")
-    .select("id")
+    .select("id, device_id")
     .eq("sid", sid)
     .eq("status", "active")
     .single();
@@ -65,6 +65,7 @@ Deno.serve(async (req: Request) => {
     .insert({
       sid: student.id,
       academic_id: academic.id,
+      device_id: student.device_id,
       date,
       time,
       status: "present",
