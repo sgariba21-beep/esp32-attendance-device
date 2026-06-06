@@ -1,8 +1,17 @@
-export default function DevicesPage() {
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold">Devices</h1>
-      <p className="text-muted-foreground mt-1">Coming soon.</p>
-    </div>
-  )
+import { createAdminClient } from '@/lib/supabase/server'
+import { verifySession } from '@/lib/supabase/dal'
+import { DevicesView } from './_components/devices-view'
+import type { Device } from '@/lib/types'
+
+export default async function DevicesPage() {
+  await verifySession()
+  const supabase = createAdminClient()
+
+  const { data } = await supabase
+    .from('devices')
+    .select('id, form, class')
+    .order('form')
+    .order('class')
+
+  return <DevicesView devices={(data ?? []) as Device[]} />
 }
