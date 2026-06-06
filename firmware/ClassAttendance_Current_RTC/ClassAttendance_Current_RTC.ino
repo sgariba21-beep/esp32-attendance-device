@@ -14,6 +14,10 @@ const char* SCRIPT_URL = "http://172.10.0.36:54321/functions/v1/log-attendance";
 // If you set SCRIPT_AUTH_KEY in Apps Script, put the same string here; otherwise leave empty
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
 
+// Supabase enrollment edge functions
+const char* ENROLL_GET_URL = "http://172.10.0.36:54321/functions/v1/get-enrollment-job";
+const char* ENROLL_UPD_URL = "http://172.10.0.36:54321/functions/v1/update-enrollment-job";
+
 // Device identity / class
 #define SYSTEM_TYPE        "OLAG"   
 #define DEVICE_CONFIG_FILE "/device_config.json"
@@ -117,12 +121,13 @@ std::vector<String> fidMapName; // name per fid
 
 // Enrollment job struct
 struct EnrollJob {
-  int row; // sheet row number
-  int requestedFid;
-  String uniqueId;
-  String name;
-  String role; // student|teacher|master
-  String command; // register|delete|clearall
+  String id;           // UUID of the enrollment_jobs row
+  String studentId;    // UUID of the student (for fin1/fin2 update)
+  String uniqueId;     // student's sid text (stored in fid_map, sent with attendance)
+  String name;         // student's fullname
+  String fingerSlot;   // 'fin1' or 'fin2'
+  String command;      // 'register', 'delete', 'clearall'
+  int    requestedFid; // fid from the job (sensor slot to use)
 };
 volatile bool enrollmentJobPending = false;
 EnrollJob currentEnrollJob;
@@ -145,10 +150,10 @@ int findFidByUnique(const String &uniqueId);
 void clearAllFidMap();
 void applyFidMapToSerialPrint();
 int enrollID_toFid(int requestedFid);
-void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, int rowToReport);
-void enrollment_doDeleteByFid(int fid, int rowToReport);
-void enrollment_doDeleteByUnique(const String &uniqueId, int rowToReport);
-void reportEnrollUpdate(int row, const String &status, int fingerId, const String &note);
+void enrollment_doRegister(const EnrollJob &job);
+void enrollment_doDeleteByFid(const EnrollJob &job, int fid);
+void enrollment_doDeleteByUnique(const EnrollJob &job);
+void reportEnrollUpdate(const String &jobId, const String &status, int fingerId, const String &note, const String &fingerSlot, const String &studentId);
 bool initRTC();
 void syncRTCFromNTP();
 String getRTCTimestamp();
@@ -655,27 +660,21 @@ bool sendGETFallback(const String &studentId, const String &date, const String &
   }
 }
 
-/* ================== Enrollment support: report update to sheet ================== */
-void reportEnrollUpdate(int row, const String &status, int fingerId, const String &note) {
-  if (row <= 1) return;
-  String url = String(SCRIPT_URL) + "?api=enroll_update&classId=" + urlEncode(String(CLASS_ID));
-  url += "&row=" + String(row);
-  url += "&status=" + urlEncode(status);
-  if (fingerId > 0) url += "&fingerId=" + String(fingerId);
-  if (note.length()) url += "&note=" + urlEncode(note);
-  if (strlen(SCRIPT_AUTH) > 0) url += "&auth=" + String(SCRIPT_AUTH);
+/* ================== Enrollment support: report update to Supabase ================== */
+void reportEnrollUpdate(const String &jobId, const String &status, int fingerId, const String &note, const String &fingerSlot, const String &studentId) {
+  if (jobId.length() == 0) return;
 
-  Serial.printf("Reporting enroll_update row=%d status=%s fid=%d\n", row, status.c_str(), fingerId);
-  WiFiClientSecure client; client.setInsecure();
-  HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(20000);
-  if (http.begin(client, url)) {
-    int code = http.GET();
-    String body = (code > 0) ? http.getString() : http.errorToString(code);
-    Serial.printf("enroll_update -> code=%d body=%s\n", code, body.c_str());
-    http.end();
-  }
+  String payload = "{\"id\":\"" + jobId + "\",\"status\":\"" + status + "\"";
+  if (fingerId > 0)       payload += ",\"fid\":"          + String(fingerId);
+  if (note.length())      payload += ",\"note\":\""        + note         + "\"";
+  if (fingerSlot.length()) payload += ",\"finger_slot\":\"" + fingerSlot   + "\"";
+  if (studentId.length()) payload += ",\"student_id\":\""  + studentId    + "\"";
+  payload += "}";
+
+  Serial.printf("reportEnrollUpdate: jobId=%s status=%s fid=%d\n", jobId.c_str(), status.c_str(), fingerId);
+  int httpCode = 0; String body;
+  postJSONToUrl(payload, ENROLL_UPD_URL, httpCode, body);
+  Serial.printf("update-enrollment-job -> code=%d body=%s\n", httpCode, body.c_str());
 }
 
 /* ================== Enrollment execution helpers ================== */
@@ -750,21 +749,19 @@ int enrollID_toFid(int requestedFid) {
   }
 }
 
-/* enrollment_doRegister: handles a register command: uses requestedFid (or finds free slot) */
-void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, int rowToReport) {
-  int fidToUse = requestedFid;
+/* enrollment_doRegister: handles a register command */
+void enrollment_doRegister(const EnrollJob &job) {
+  int fidToUse = job.requestedFid;
   if (fidToUse < 1 || fidToUse > MAX_FID) {
-    // find a free fid
     for (int f = 1; f <= MAX_FID; ++f) {
       if (fidMap[f].length() == 0) { fidToUse = f; break; }
     }
     if (fidToUse < 1 || fidToUse > MAX_FID) {
       Serial.println("No free fid available on device");
-      reportEnrollUpdate(rowToReport, "error", -1, "no-free-fid");
+      reportEnrollUpdate(job.id, "failed", -1, "no-free-fid", job.fingerSlot, job.studentId);
       return;
     }
   } else {
-    // if requested fid is occupied, warn and will overwrite
     if (fidMap[fidToUse].length()) {
       Serial.printf("Warning: requested fid %d already occupied by %s; will overwrite.\n", fidToUse, fidMap[fidToUse].c_str());
     }
@@ -773,58 +770,50 @@ void enrollment_doRegister(int requestedFid, const String &uniqueId, const Strin
   setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
   int resFid = enrollID_toFid(fidToUse);
   if (resFid > 0) {
-    // success: update local mapping + persist, and update sheet
-    fidMap[resFid] = uniqueId.length() ? uniqueId : String("AUTO_") + String(resFid);
-    // Set role according to provided role string; default to "student" if missing/unknown
-    String r = role;
-    r.toLowerCase();
-    if (r == "teacher" || r == "master" || r == "student") {
-      fidMapRole[resFid] = r;
-    } else {
-      fidMapRole[resFid] = "student";
-    }
-    fidMapName[resFid] = name;
+    fidMap[resFid]     = job.uniqueId.length() ? job.uniqueId : String("AUTO_") + String(resFid);
+    fidMapRole[resFid] = "student";
+    fidMapName[resFid] = job.name;
     saveFidMapToFS();
-    Serial.printf("Saved fid %d -> %s (%s) name=%s\n", resFid, fidMap[resFid].c_str(), fidMapRole[resFid].c_str(), fidMapName[resFid].c_str());
+    Serial.printf("Saved fid %d -> %s name=%s\n", resFid, fidMap[resFid].c_str(), fidMapName[resFid].c_str());
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
-    reportEnrollUpdate(rowToReport, "registered", resFid, "");
+    reportEnrollUpdate(job.id, "completed", resFid, "", job.fingerSlot, job.studentId);
   } else {
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
-    reportEnrollUpdate(rowToReport, "error", -1, "enroll-failed");
+    reportEnrollUpdate(job.id, "failed", -1, "enroll-failed", job.fingerSlot, job.studentId);
   }
 }
 
 /* enrollment_doDeleteByFid: deletes fingerprint template at fid and mapping */
-void enrollment_doDeleteByFid(int fid, int rowToReport) {
+void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
   if (fid < 1 || fid > MAX_FID) {
-    reportEnrollUpdate(rowToReport, "error", -1, "invalid-fid");
+    reportEnrollUpdate(job.id, "failed", -1, "invalid-fid", job.fingerSlot, job.studentId);
     return;
   }
   int p = finger.deleteModel(fid);
   if (p == FINGERPRINT_OK) {
-    fidMap[fid] = "";
+    fidMap[fid]     = "";
     fidMapRole[fid] = "";
     fidMapName[fid] = "";
     saveFidMapToFS();
-    reportEnrollUpdate(rowToReport, "deleted", fid, "");
+    reportEnrollUpdate(job.id, "completed", fid, "", job.fingerSlot, job.studentId);
   } else {
     Serial.printf("deleteModel failed: %d\n", p);
-    reportEnrollUpdate(rowToReport, "error", fid, String(p));
+    reportEnrollUpdate(job.id, "failed", fid, String(p), job.fingerSlot, job.studentId);
   }
 }
 
-/* enrollment_doDeleteByUnique: find fid by uniqueId and delete */
-void enrollment_doDeleteByUnique(const String &uniqueId, int rowToReport) {
-  int fid = findFidByUnique(uniqueId);
+/* enrollment_doDeleteByUnique: find fid by student sid and delete */
+void enrollment_doDeleteByUnique(const EnrollJob &job) {
+  int fid = findFidByUnique(job.uniqueId);
   if (fid <= 0) {
-    reportEnrollUpdate(rowToReport, "error", -1, "not-found");
+    reportEnrollUpdate(job.id, "failed", -1, "not-found", job.fingerSlot, job.studentId);
     return;
   }
-  enrollment_doDeleteByFid(fid, rowToReport);
+  enrollment_doDeleteByFid(job, fid);
 }
 
 /* =============== Finger search wrapper =============== */
@@ -1466,104 +1455,74 @@ void NetworkTask(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
-/* =================== EnrollmentTask (polls Apps Script) =================== */
+/* =================== EnrollmentTask (polls Supabase) =================== */
 void EnrollmentTask(void *pvParameters) {
   (void) pvParameters;
-  esp_task_wdt_delete(NULL); // this task does long HTTP calls; remove from watchdog
+  esp_task_wdt_delete(NULL);
   for (;;) {
-    // Poll only when WiFi is connected
-    if (WiFi.status() == WL_CONNECTED) {
-      String url = String(SCRIPT_URL) + "?api=enroll_fetch&classId=" + urlEncode(String(CLASS_ID));
-      if (strlen(SCRIPT_AUTH) > 0) url += "&auth=" + String(SCRIPT_AUTH);
-      Serial.println("EnrollmentTask: polling for enroll job...");
-      WiFiClientSecure client; client.setInsecure();
-      HTTPClient http;
-      http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-      http.setTimeout(20000);
-      int code = -1;
-      String body = "";
-      if (http.begin(client, url)) {
-        code = http.GET();
-        if (code > 0) body = http.getString();
-        http.end();
-      }
+    if (WiFi.status() == WL_CONNECTED && CLASS_NAME.length() > 0) {
+      Serial.println("EnrollmentTask: polling for enrollment job...");
+      String payload = "{\"class_name\":\"" + CLASS_NAME + "\"}";
+      int code = 0; String body = "";
+      postJSONToUrl(payload, ENROLL_GET_URL, code, body);
       Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
-      {
-        if (code >= 200 && code < 300 && body.length()) {
-          // We expect JSON with "result":"ok" and a record object OR "result":"none"
-          if (body.indexOf("\"result\":\"ok\"") >= 0 && body.indexOf("\"record\"") >= 0) {
-            // parse naive JSON for required fields:
-            int posRec = body.indexOf("\"record\"");
-            int posRow = body.indexOf("\"row\"", posRec);
-            int parsedRow = -1;
-            if (posRow >= 0) {
-              int colon = body.indexOf(':', posRow);
-              int comma = body.indexOf(',', colon);
-              if (colon >= 0 && comma >= 0) {
-                String sRow = body.substring(colon+1, comma);
-                sRow.trim();
-                parsedRow = sRow.toInt();
-              }
-            }
-            int posFid = body.indexOf("\"fingerId\"", posRec);
-            int parsedFid = 0;
-            if (posFid >= 0) {
-              int colon = body.indexOf(':', posFid);
-              int comma = body.indexOf(',', colon);
-              if (comma < 0) comma = body.indexOf('}', colon);
-              if (colon >= 0 && comma >= 0) {
-                String sFid = body.substring(colon+1, comma);
-                sFid.trim();
-                parsedFid = sFid.toInt();
-              }
-            }
-            // strings: uniqueId, name, role, command
-            auto extractStringField = [&](const String &key)->String{
-              int p = body.indexOf(String("\"") + key + "\"", posRec);
-              if (p < 0) return "";
-              int q = body.indexOf(':', p);
-              if (q < 0) return "";
-              int q1 = body.indexOf('"', q+1);
-              if (q1 < 0) return "";
-              int q2 = body.indexOf('"', q1+1);
-              if (q2 < 0) return "";
-              return body.substring(q1+1, q2);
-            };
-            String uniqueId = extractStringField("uniqueId");
-            String name = extractStringField("name");
-            String role = extractStringField("role");
-            String command = extractStringField("command");
 
-            // Create job and notify FingerprintTask
-            if (parsedRow >= 2) {
-              xSemaphoreTake(enrollMutex, portMAX_DELAY);
-              currentEnrollJob.row = parsedRow;
-              currentEnrollJob.requestedFid = parsedFid;
-              currentEnrollJob.uniqueId = uniqueId;
-              currentEnrollJob.name = name;
-              currentEnrollJob.role = role;
-              currentEnrollJob.command = command;
-              enrollmentJobPending = true;
-              xSemaphoreGive(enrollMutex);
-              Serial.printf("EnrollmentTask: job queued row=%d cmd=%s fid=%d id=%s role=%s\n", parsedRow, command.c_str(), parsedFid, uniqueId.c_str(), role.c_str());
-              xSemaphoreGive(enrollSem);
-              // Fast-poll after finding a job so we notice completion quickly
-              vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
-              continue;
-            }
-          } else {
-            // none pending
-            // Serial.println("EnrollmentTask: none pending");
-          }
-        } else {
-          Serial.printf("EnrollmentTask: HTTP poll failed code=%d\n", code);
+      if (code >= 200 && code < 300 && body.length() && body.indexOf("\"job\":null") < 0) {
+        // Helper: extract a quoted string field from JSON
+        auto extractStr = [&](const String &key) -> String {
+          int p = body.indexOf("\"" + key + "\"");
+          if (p < 0) return "";
+          int colon = body.indexOf(':', p);
+          if (colon < 0) return "";
+          int valStart = colon + 1;
+          while (valStart < (int)body.length() && body[valStart] == ' ') valStart++;
+          if (body.substring(valStart, valStart + 4) == "null") return "";
+          int q1 = body.indexOf('"', colon);
+          if (q1 < 0) return "";
+          int q2 = body.indexOf('"', q1 + 1);
+          if (q2 < 0) return "";
+          return body.substring(q1 + 1, q2);
+        };
+        // Helper: extract an integer field from JSON
+        auto extractInt = [&](const String &key) -> int {
+          int p = body.indexOf("\"" + key + "\"");
+          if (p < 0) return 0;
+          int colon = body.indexOf(':', p);
+          if (colon < 0) return 0;
+          int numStart = colon + 1;
+          while (numStart < (int)body.length() && body[numStart] == ' ') numStart++;
+          if (body.substring(numStart, numStart + 4) == "null") return 0;
+          int numEnd = numStart;
+          while (numEnd < (int)body.length() && (isdigit(body[numEnd]) || body[numEnd] == '-')) numEnd++;
+          return body.substring(numStart, numEnd).toInt();
+        };
+
+        EnrollJob job;
+        job.id           = extractStr("id");
+        job.command      = extractStr("command");
+        job.fingerSlot   = extractStr("finger_slot");
+        job.studentId    = extractStr("student_id");
+        job.uniqueId     = extractStr("sid");
+        job.name         = extractStr("fullname");
+        job.requestedFid = extractInt("fid");
+
+        if (job.id.length() > 0 && job.command.length() > 0) {
+          xSemaphoreTake(enrollMutex, portMAX_DELAY);
+          currentEnrollJob = job;
+          enrollmentJobPending = true;
+          xSemaphoreGive(enrollMutex);
+          Serial.printf("EnrollmentTask: job queued id=%s cmd=%s fid=%d slot=%s uid=%s\n",
+                        job.id.c_str(), job.command.c_str(), job.requestedFid,
+                        job.fingerSlot.c_str(), job.uniqueId.c_str());
+          xSemaphoreGive(enrollSem);
+          vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
+          continue;
         }
-      } 
+      }
     } else {
-      Serial.println("EnrollmentTask: WiFi not connected; skipping poll");
+      Serial.println("EnrollmentTask: WiFi not connected or no CLASS_NAME; skipping poll");
     }
 
-    // sleep until next poll
     vTaskDelay(pdMS_TO_TICKS(enrollmentJobPending ? ENROLL_POLL_FAST_MS : ENROLL_POLL_MS));
   }
   vTaskDelete(NULL);
@@ -1593,28 +1552,25 @@ void FingerprintTask(void *pvParameters) {
         enrollmentJobPending = false;
         xSemaphoreGive(enrollMutex);
 
-        Serial.printf("Processing enroll job row=%d cmd=%s role=%s\n", job.row, job.command.c_str(), job.role.c_str());
+        Serial.printf("Processing enroll job id=%s cmd=%s slot=%s\n", job.id.c_str(), job.command.c_str(), job.fingerSlot.c_str());
         if (job.command == "register") {
-          // Pass job.role so device stores the correct role (student/teacher/master)
-          enrollment_doRegister(job.requestedFid, job.uniqueId, job.name, job.role, job.row);
+          enrollment_doRegister(job);
         } else if (job.command == "delete") {
-          if (job.requestedFid > 0) enrollment_doDeleteByFid(job.requestedFid, job.row);
-          else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job.uniqueId, job.row);
-          else reportEnrollUpdate(job.row, "error", -1, "no-id-specified");
+          if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
+          else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);
+          else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.studentId);
         } else if (job.command == "clearall") {
-          // For safety: only perform clearall if row role is master or uniqueId=='admin'
-          // (This keeps accidental clears less likely — you may change this policy)
           Serial.println("Performing clearAll on sensor and local map");
           int rc = finger.emptyDatabase();
           if (rc == FINGERPRINT_OK) {
             clearAllFidMap();
-            reportEnrollUpdate(job.row, "cleared", 0, "");
+            reportEnrollUpdate(job.id, "completed", 0, "", "", "");
           } else {
             Serial.printf("emptyDatabase returned %d\n", rc);
-            reportEnrollUpdate(job.row, "error", 0, String(rc));
+            reportEnrollUpdate(job.id, "failed", 0, String(rc), "", "");
           }
         } else {
-          reportEnrollUpdate(job.row, "error", -1, "unknown-cmd");
+          reportEnrollUpdate(job.id, "failed", -1, "unknown-cmd", "", "");
         }
       }
     }
