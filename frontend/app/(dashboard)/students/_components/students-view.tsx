@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -16,10 +17,28 @@ type Props = {
   devices: Device[]
 }
 
+type StatusFilter = 'all' | 'active' | 'inactive'
+
 export function StudentsView({ students, devices }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<StudentWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  const [search, setSearch] = useState('')
+  const [classFilter, setClassFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim()
+    return students.filter((s) => {
+      if (q && !s.fullname.toLowerCase().includes(q) && !s.sid.toLowerCase().includes(q)) return false
+      if (classFilter && s.device_id !== classFilter) return false
+      if (statusFilter !== 'all' && s.status !== statusFilter) return false
+      return true
+    })
+  }, [students, search, classFilter, statusFilter])
+
+  const hasFilters = search || classFilter || statusFilter !== 'all'
 
   function openAdd() {
     setEditing(null)
@@ -44,15 +63,61 @@ export function StudentsView({ students, devices }: Props) {
         <div>
           <h1 className="text-2xl font-semibold">Students</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {students.length} student{students.length !== 1 ? 's' : ''}
+            {filtered.length} of {students.length} student{students.length !== 1 ? 's' : ''}
           </p>
         </div>
         <Button onClick={openAdd}>Add student</Button>
       </div>
 
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <Input
+          placeholder="Search by name or ID…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-9 w-56"
+        />
+
+        <select
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value)}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="">All classes</option>
+          {devices.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.form} {d.class}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+
+        {hasFilters && (
+          <button
+            onClick={() => { setSearch(''); setClassFilter(''); setStatusFilter('all') }}
+            className="text-sm text-muted-foreground hover:text-foreground underline"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {students.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
           <p className="text-sm text-muted-foreground">No students yet. Add one to get started.</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+          <p className="text-sm text-muted-foreground">No students match your filters.</p>
         </div>
       ) : (
         <div className="rounded-md border">
@@ -69,7 +134,7 @@ export function StudentsView({ students, devices }: Props) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {students.map((s) => (
+              {filtered.map((s) => (
                 <TableRow key={s.id} className={s.status === 'inactive' ? 'opacity-60' : ''}>
                   <TableCell className="font-medium">{s.fullname}</TableCell>
                   <TableCell className="text-muted-foreground">{s.sid}</TableCell>
@@ -85,11 +150,7 @@ export function StudentsView({ students, devices }: Props) {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(s)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
                         Edit
                       </Button>
                       <Button
