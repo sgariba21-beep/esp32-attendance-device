@@ -1,8 +1,73 @@
-export default function AttendancePage() {
+import { createAdminClient } from '@/lib/supabase/server'
+import { verifySession } from '@/lib/supabase/dal'
+import { AttendanceView } from './_components/attendance-view'
+import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
+
+export default async function AttendancePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  await verifySession()
+
+  const params = await searchParams
+  const fromDate = typeof params.from === 'string' ? params.from : undefined
+  const toDate = typeof params.to === 'string' ? params.to : undefined
+  const termId = typeof params.term === 'string' ? params.term : undefined
+  const studentIds = typeof params.students === 'string'
+    ? params.students.split(',').filter(Boolean)
+    : []
+  const deviceIds = typeof params.classes === 'string'
+    ? params.classes.split(',').filter(Boolean)
+    : []
+
+  const supabase = createAdminClient()
+
+  const [studentsRes, devicesRes, academicRes] = await Promise.all([
+    supabase
+      .from('students')
+      .select('id, sid, fullname, form, device_id')
+      .eq('status', 'active')
+      .order('fullname'),
+    supabase
+      .from('devices')
+      .select('id, form, class')
+      .order('form')
+      .order('class'),
+    supabase
+      .from('academic')
+      .select('id, term, year, status')
+      .order('year', { ascending: false })
+      .order('term', { ascending: false }),
+  ])
+
+  let query = supabase
+    .from('attendance')
+    .select(`
+      id, date, time, status, scan_id,
+      student:sid(id, fullname, sid),
+      academic:academic_id(id, term, year),
+      device:device_id(id, form, class)
+    `)
+    .order('date', { ascending: false })
+    .order('time', { ascending: false })
+    .limit(200)
+
+  if (fromDate) query = query.gte('date', fromDate)
+  if (toDate) query = query.lte('date', toDate)
+  if (termId) query = query.eq('academic_id', termId)
+  if (studentIds.length > 0) query = query.in('sid', studentIds)
+  if (deviceIds.length > 0) query = query.in('device_id', deviceIds)
+
+  const { data: records } = await query
+
   return (
-    <div>
-      <h1 className="text-2xl font-semibold">Attendance</h1>
-      <p className="text-muted-foreground mt-1">Coming soon.</p>
-    </div>
+    <AttendanceView
+      records={(records ?? []) as unknown as AttendanceRecord[]}
+      students={studentsRes.data ?? []}
+      devices={(devicesRes.data ?? []) as Device[]}
+      academic={(academicRes.data ?? []) as AcademicTerm[]}
+      filters={{ fromDate, toDate, termId, studentIds, deviceIds }}
+    />
   )
 }
