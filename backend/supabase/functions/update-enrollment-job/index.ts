@@ -22,6 +22,13 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Fetch the job to know its command before updating
+  const { data: job } = await supabase
+    .from("enrollment_jobs")
+    .select("command")
+    .eq("id", id)
+    .maybeSingle();
+
   const jobUpdate: Record<string, unknown> = { status };
   if (note) jobUpdate.note = note;
   if (fid && fid > 0) jobUpdate.fid = fid;
@@ -38,14 +45,26 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // On successful registration, update the student's finger slot
-  if (status === "completed" && student_id && finger_slot && fid && fid > 0) {
-    const studentUpdate: Record<string, number> = {};
-    if (finger_slot === "fin1") studentUpdate.fin1 = fid;
-    else if (finger_slot === "fin2") studentUpdate.fin2 = fid;
+  // Sync student finger slot on completion
+  if (status === "completed" && student_id && finger_slot) {
+    const command = job?.command;
 
-    if (Object.keys(studentUpdate).length > 0) {
-      await supabase.from("students").update(studentUpdate).eq("id", student_id);
+    if (command === "register" && fid && fid > 0) {
+      // Registration succeeded — store the sensor slot
+      const studentUpdate: Record<string, number> = {};
+      if (finger_slot === "fin1") studentUpdate.fin1 = fid;
+      else if (finger_slot === "fin2") studentUpdate.fin2 = fid;
+      if (Object.keys(studentUpdate).length > 0) {
+        await supabase.from("students").update(studentUpdate).eq("id", student_id);
+      }
+    } else if (command === "delete") {
+      // Deletion succeeded — clear the sensor slot
+      const studentUpdate: Record<string, null> = {};
+      if (finger_slot === "fin1") studentUpdate.fin1 = null;
+      else if (finger_slot === "fin2") studentUpdate.fin2 = null;
+      if (Object.keys(studentUpdate).length > 0) {
+        await supabase.from("students").update(studentUpdate).eq("id", student_id);
+      }
     }
   }
 

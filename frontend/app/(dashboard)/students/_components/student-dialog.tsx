@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createStudent, updateStudent } from '../_actions'
+import { createEnrollmentJob } from '../../enrollment/_actions'
 import type { StudentWithDevice } from '../page'
 import type { Device } from '@/lib/types'
 
@@ -16,27 +17,128 @@ type Props = {
   onOpenChange: (open: boolean) => void
   student: StudentWithDevice | null
   devices: Device[]
+  /** Map of device_id → list of FIDs already in use (for slot suggestion). */
+  usedFids: Record<string, number[]>
 }
 
-const empty = { sid: '', fullname: '', device_id: '', fin1: 0, fin2: 0 }
+type EnrollStep = {
+  studentId: string
+  deviceId: string
+  fullname: string
+  deviceName: string
+}
 
-export function StudentDialog({ open, onOpenChange, student, devices }: Props) {
-  const [form, setForm] = useState(empty)
+function nextAvailableFid(deviceId: string, usedFids: Record<string, number[]>): number {
+  const used = new Set(usedFids[deviceId] ?? [])
+  for (let i = 1; i <= 127; i++) {
+    if (!used.has(i)) return i
+  }
+  return 1
+}
+
+// ─── inline finger enroll row used in step 2 ────────────────────────────────
+type FingerRowProps = {
+  label: string
+  slot: 'fin1' | 'fin2'
+  studentId: string
+  deviceId: string
+  defaultFid: number
+}
+
+function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: FingerRowProps) {
+  const [open, setOpen] = useState(false)
+  const [fid, setFid] = useState(String(defaultFid))
+  const [loading, setLoading] = useState(false)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleEnroll() {
+    const fidNum = parseInt(fid, 10)
+    if (!fidNum || fidNum < 1 || fidNum > 127) {
+      setError('Enter a slot number between 1 and 127.')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    const result = await createEnrollmentJob({
+      command: 'register',
+      device_id: deviceId,
+      student_id: studentId,
+      finger_slot: slot,
+      fid: fidNum,
+    })
+    setLoading(false)
+    if (result?.error) { setError(result.error); return }
+    setDone(true)
+  }
+
+  if (done) {
+    return (
+      <div className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">
+        <span>✓</span>
+        <span>{label} — job queued (sensor slot {fid}). Tell the student to scan when prompted.</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {!open ? (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          + Enroll {label}
+        </Button>
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="text-sm w-20 shrink-0">{label}:</span>
+          <Input
+            type="number"
+            min={1}
+            max={127}
+            value={fid}
+            onChange={(e) => setFid(e.target.value)}
+            className="h-8 w-24"
+            placeholder="Slot"
+          />
+          <Button size="sm" onClick={handleEnroll} disabled={loading}>
+            {loading ? '…' : 'Queue job'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+// ─── main dialog ─────────────────────────────────────────────────────────────
+const emptyForm = { sid: '', fullname: '', device_id: '' }
+
+export function StudentDialog({ open, onOpenChange, student, devices, usedFids }: Props) {
+  const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [enrollStep, setEnrollStep] = useState<EnrollStep | null>(null)
 
   useEffect(() => {
     if (open) {
       setError(null)
+      setEnrollStep(null)
       setForm(
         student
-          ? { sid: student.sid, fullname: student.fullname, device_id: student.device_id, fin1: student.fin1, fin2: student.fin2 }
-          : { ...empty, device_id: devices[0]?.id ?? '' }
+          ? { sid: student.sid, fullname: student.fullname, device_id: student.device_id }
+          : { ...emptyForm, device_id: devices[0]?.id ?? '' }
       )
     }
-  }, [open, student, devices])
+    // Intentionally omitting `devices` and the full `student` object — we only
+    // want to reset when the dialog opens or when a different student is loaded.
+    // Including them would cause router.refresh() (triggered by RealtimeRefresh)
+    // to re-run this effect mid-flow and wipe the enrollment step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, student?.id])
 
-  function set(field: string, value: string | number) {
+  function set(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
   }
 
@@ -47,16 +149,78 @@ export function StudentDialog({ open, onOpenChange, student, devices }: Props) {
     setLoading(true)
     setError(null)
 
-    const data = { ...form, fin1: Number(form.fin1), fin2: Number(form.fin2) }
-    const result = student
-      ? await updateStudent(student.id, data)
-      : await createStudent(data)
+    if (student) {
+      // Edit — pass fin1/fin2 through unchanged (enrollment manages them)
+      const result = await updateStudent(student.id, {
+        sid: form.sid,
+        fullname: form.fullname,
+        device_id: form.device_id,
+        fin1: student.fin1,
+        fin2: student.fin2,
+      })
+      setLoading(false)
+      if (result.error) { setError(result.error); return }
+      onOpenChange(false)
+    } else {
+      // Create — then offer to enroll fingerprints
+      const result = await createStudent({ sid: form.sid, fullname: form.fullname, device_id: form.device_id, fin1: 0, fin2: 0 })
+      setLoading(false)
+      if (result.error) { setError(result.error); return }
 
-    setLoading(false)
-    if (result.error) { setError(result.error); return }
-    onOpenChange(false)
+      const device = devices.find((d) => d.id === form.device_id)
+      setEnrollStep({
+        studentId: result.id!,
+        deviceId: form.device_id,
+        fullname: form.fullname,
+        deviceName: device ? `${device.form} ${device.class}` : '',
+      })
+    }
   }
 
+  // ── step 2: enrollment offer ───────────────────────────────────────────────
+  if (enrollStep) {
+    const baseFid = nextAvailableFid(enrollStep.deviceId, usedFids)
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Student added</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{enrollStep.fullname}</span> has been added to{' '}
+              <span className="font-medium text-foreground">{enrollStep.deviceName}</span>.
+            </p>
+            <p className="text-sm font-medium">Enroll fingerprints now?</p>
+            <div className="space-y-3">
+              <FingerEnrollRow
+                label="Finger 1"
+                slot="fin1"
+                studentId={enrollStep.studentId}
+                deviceId={enrollStep.deviceId}
+                defaultFid={baseFid}
+              />
+              <FingerEnrollRow
+                label="Finger 2"
+                slot="fin2"
+                studentId={enrollStep.studentId}
+                deviceId={enrollStep.deviceId}
+                defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              You can also enroll later using the Enroll buttons on the student row.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => onOpenChange(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // ── step 1: student info form ──────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -103,29 +267,6 @@ export function StudentDialog({ open, onOpenChange, student, devices }: Props) {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="fin1">Finger slot 1</Label>
-              <Input
-                id="fin1"
-                type="number"
-                min={0}
-                value={form.fin1}
-                onChange={(e) => set('fin1', e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="fin2">Finger slot 2</Label>
-              <Input
-                id="fin2"
-                type="number"
-                min={0}
-                value={form.fin2}
-                onChange={(e) => set('fin2', e.target.value)}
-              />
-            </div>
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}

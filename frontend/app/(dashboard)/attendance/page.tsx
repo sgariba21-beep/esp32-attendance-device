@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { verifySession } from '@/lib/supabase/dal'
 import { AttendanceView } from './_components/attendance-view'
+import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
 export default async function AttendancePage({
@@ -62,12 +63,15 @@ export default async function AttendancePage({
   const { data: records } = await query
 
   return (
-    <AttendanceView
-      records={(records ?? []) as unknown as AttendanceRecord[]}
-      students={studentsRes.data ?? []}
-      devices={(devicesRes.data ?? []) as Device[]}
-      academic={(academicRes.data ?? []) as AcademicTerm[]}
-      filters={{ fromDate, toDate, termId, studentIds, deviceIds }}
-    />
+    <>
+      <RealtimeRefresh />
+      <AttendanceView
+        records={(records ?? []) as unknown as AttendanceRecord[]}
+        students={studentsRes.data ?? []}
+        devices={(devicesRes.data ?? []) as Device[]}
+        academic={(academicRes.data ?? []) as AcademicTerm[]}
+        filters={{ fromDate, toDate, termId, studentIds, deviceIds }}
+      />
+    </>
   )
 }

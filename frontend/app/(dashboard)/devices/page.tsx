@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { verifySession } from '@/lib/supabase/dal'
 import { DevicesView } from './_components/devices-view'
+import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function DevicesPage() {
@@ -13,5 +14,10 @@ export default async function DevicesPage() {
     .order('form')
     .order('class')
 
-  return <DevicesView devices={(data ?? []) as Device[]} />
+  return (
+    <>
+      <RealtimeRefresh />
+      <DevicesView devices={(data ?? []) as Device[]} />
+    </>
+  )
 }

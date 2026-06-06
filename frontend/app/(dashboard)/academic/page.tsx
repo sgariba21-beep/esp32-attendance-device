@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { verifySession } from '@/lib/supabase/dal'
 import { AcademicView } from './_components/academic-view'
+import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AcademicTerm } from '@/lib/types'
 
 export default async function AcademicPage() {
@@ -13,5 +14,10 @@ export default async function AcademicPage() {
     .order('year', { ascending: false })
     .order('term', { ascending: false })
 
-  return <AcademicView terms={(data ?? []) as AcademicTerm[]} />
+  return (
+    <>
+      <RealtimeRefresh />
+      <AcademicView terms={(data ?? []) as AcademicTerm[]} />
+    </>
+  )
 }

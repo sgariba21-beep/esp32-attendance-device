@@ -22,25 +22,29 @@ export async function createStudent(data: StudentFormData) {
     .eq('id', data.device_id)
     .single()
 
-  if (!device.data) return { error: 'Device not found.' }
+  if (!device.data) return { error: 'Device not found.', id: null }
 
-  const { error } = await supabase.from('students').insert({
-    sid: data.sid.trim(),
-    fullname: data.fullname.trim(),
-    device_id: data.device_id,
-    form: device.data.form,
-    fin1: data.fin1,
-    fin2: data.fin2,
-    status: 'active',
-  })
+  const { data: newStudent, error } = await supabase
+    .from('students')
+    .insert({
+      sid: data.sid.trim(),
+      fullname: data.fullname.trim(),
+      device_id: data.device_id,
+      form: device.data.form,
+      fin1: 0,
+      fin2: 0,
+      status: 'active',
+    })
+    .select('id')
+    .single()
 
   if (error) {
-    if (error.code === '23505') return { error: 'A student with that school ID already exists.' }
-    return { error: error.message }
+    if (error.code === '23505') return { error: 'A student with that school ID already exists.', id: null }
+    return { error: error.message, id: null }
   }
 
   revalidatePath('/students')
-  return { error: null }
+  return { error: null, id: newStudent.id as string }
 }
 
 export async function updateStudent(id: string, data: StudentFormData) {
@@ -62,8 +66,7 @@ export async function updateStudent(id: string, data: StudentFormData) {
       fullname: data.fullname.trim(),
       device_id: data.device_id,
       form: device.data.form,
-      fin1: data.fin1,
-      fin2: data.fin2,
+      // fin1/fin2 are managed exclusively by the enrollment workflow — never touched here
     })
     .eq('id', id)
 

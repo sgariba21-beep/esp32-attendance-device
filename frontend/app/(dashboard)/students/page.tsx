@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { verifySession } from '@/lib/supabase/dal'
 import { StudentsView } from './_components/students-view'
+import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function StudentsPage() {
@@ -20,10 +21,13 @@ export default async function StudentsPage() {
   ])
 
   return (
-    <StudentsView
-      students={(studentsRes.data ?? []) as unknown as StudentWithDevice[]}
-      devices={(devicesRes.data ?? []) as Device[]}
-    />
+    <>
+      <RealtimeRefresh />
+      <StudentsView
+        students={(studentsRes.data ?? []) as unknown as StudentWithDevice[]}
+        devices={(devicesRes.data ?? []) as Device[]}
+      />
+    </>
   )
 }
 
