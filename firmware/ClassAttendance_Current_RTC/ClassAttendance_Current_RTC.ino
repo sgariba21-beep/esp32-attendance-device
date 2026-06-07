@@ -3,13 +3,13 @@
   WITH enrollment polling + master-triggered enrollment mode + fid mapping in SPIFFS
   (LED: fingerprint-only feedback — green/red briefly; treat HTTP 400 as success)
   
-  IMPORTANT: Edit WIFI_SSID, WIFI_PASS, SCRIPT_URL, CLASS_ID, SCRIPT_AUTH before use.
+  IMPORTANT: Edit WIFI_SSID, WIFI_PASS, SUPABASE_URL, CLASS_ID, SCRIPT_AUTH before use.
 */
 
 /* ========= CONFIG - EDIT THESE ========== */
 
 // Central Apps Script endpoint (single router web app)
-const char* SCRIPT_URL = "http://172.10.0.36:54321/functions/v1/log-attendance";
+const char* SUPABASE_URL = "http://172.10.0.72:54321/functions/v1/log-attendance";
 
 // If you set SCRIPT_AUTH_KEY in Apps Script, put the same string here; otherwise leave empty
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
@@ -633,7 +633,7 @@ String urlEncode(const String &str) {
 /* GET fallback for client errors (400/404) - same as before */
 bool sendGETFallback(const String &studentId, const String &date, const String &ts, int &outHttpCode, String &outBody) {
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
-  String url = String(SCRIPT_URL) + "?";
+  String url = String(SUPABASE_URL) + "?";
   url += "classId=" + urlEncode(String(CLASS_ID));
   url += "&className=" + urlEncode(String(CLASS_NAME));
   if (studentId.length()) url += "&studentId=" + urlEncode(studentId);
@@ -1082,7 +1082,7 @@ void flushQueue() {
   std::vector<String> keep;
   for (auto &entry : pending) {
     int httpCode = 0; String body;
-    bool ok = postJSONToUrl(entry, SCRIPT_URL, httpCode, body);
+    bool ok = postJSONToUrl(entry, SUPABASE_URL, httpCode, body);
     if (ok) {
       Serial.printf("flushQueue: sent OK and removed from SPIFFS: %s\n", entry.c_str());
       continue;
@@ -1361,7 +1361,7 @@ void NetworkTask(void *pvParameters) {
     if (hadPayload) {
       Serial.println("NetworkTask: sending payload from memQueue");
       int httpCode = 0; String body;
-      bool ok = postJSONToUrl(payload, SCRIPT_URL, httpCode, body);
+      bool ok = postJSONToUrl(payload, SUPABASE_URL, httpCode, body);
       if (ok) {
         Serial.println("NetworkTask: POST OK — SPIFFS flush will clear persisted copy.");
       } else {
