@@ -9,6 +9,7 @@ export type JobFormData =
   | { command: 'register'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2'; fid: number }
   | { command: 'delete'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2' }
   | { command: 'register-master'; device_id: string; fid: number; name: string }
+  | { command: 'delete-master'; device_id: string; fid: number }
 
 export async function createEnrollmentJob(data: JobFormData) {
   await verifySession()
@@ -31,6 +32,8 @@ export async function createEnrollmentJob(data: JobFormData) {
     row.fid = data.fid
     // Store the master name in note so the firmware can write it into the local fid_map
     row.note = data.name.trim()
+  } else if (data.command === 'delete-master') {
+    row.fid = data.fid
   }
 
   const { error } = await supabase.from('enrollment_jobs').insert(row)

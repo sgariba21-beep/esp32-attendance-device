@@ -137,14 +137,20 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                       {formatTime(job.created_at)}
                     </TableCell>
-                    <TableCell className="font-medium capitalize">
-                      {job.command === 'register-master' ? 'Master' : job.command}
+                    <TableCell className="font-medium">
+                      {job.command === 'register' ? 'Register'
+                        : job.command === 'delete' ? 'Delete'
+                        : job.command === 'register-master' ? 'Reg. master'
+                        : job.command === 'delete-master' ? 'Del. master'
+                        : 'Clear all'}
                     </TableCell>
                     <TableCell>{job.device ? formatClass(job.device) : '—'}</TableCell>
                     <TableCell>
                       {job.command === 'register-master'
                         ? <span className="text-xs text-muted-foreground italic">{job.note ?? 'master'}</span>
-                        : job.student?.fullname ?? '—'}
+                        : (job.command === 'delete-master' || job.command === 'clearall')
+                          ? <span className="text-xs text-muted-foreground">—</span>
+                          : job.student?.fullname ?? '—'}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{job.finger_slot ?? '—'}</TableCell>
                     <TableCell className="text-muted-foreground">{job.fid ?? '—'}</TableCell>

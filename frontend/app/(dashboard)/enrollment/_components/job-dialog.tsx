@@ -11,7 +11,7 @@ import { createEnrollmentJob } from '../_actions'
 import type { StudentOption } from '../page'
 import type { Device } from '@/lib/types'
 
-type Command = 'register' | 'delete' | 'clearall' | 'register-master'
+type Command = 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
 type FingerSlot = 'fin1' | 'fin2'
 
 type Props = {
@@ -22,10 +22,11 @@ type Props = {
 }
 
 const COMMANDS: { value: Command; label: string; description: string }[] = [
-  { value: 'register',        label: 'Register',       description: 'Enroll a fingerprint for a student.' },
-  { value: 'delete',          label: 'Delete',         description: "Remove a student's fingerprint from the device." },
-  { value: 'register-master', label: 'Master',         description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
-  { value: 'clearall',        label: 'Clear all',      description: 'Wipe all fingerprints stored on the device.' },
+  { value: 'register',        label: 'Register',        description: 'Enroll a fingerprint for a student.' },
+  { value: 'delete',          label: 'Delete',          description: "Remove a student's fingerprint from the device." },
+  { value: 'register-master', label: 'Reg. master',     description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
+  { value: 'delete-master',   label: 'Del. master',     description: 'Remove a master fingerprint from the device by its sensor slot number.' },
+  { value: 'clearall',        label: 'Clear all',       description: 'Wipe all fingerprints stored on the device.' },
 ]
 
 const empty = {
@@ -55,7 +56,7 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
 
   const deviceStudents = students.filter((s) => s.device_id === form.device_id)
   const needsStudent = form.command === 'register' || form.command === 'delete'
-  const needsFid = form.command === 'register' || form.command === 'register-master'
+  const needsFid = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
   const needsMasterName = form.command === 'register-master'
 
   async function handleSubmit(e: React.FormEvent) {
@@ -86,12 +87,18 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
         student_id: form.student_id,
         finger_slot: form.finger_slot,
       }
-    } else {
+    } else if (form.command === 'register-master') {
       jobData = {
         command: 'register-master',
         device_id: form.device_id,
         fid: Number(form.fid),
         name: form.master_name.trim(),
+      }
+    } else {
+      jobData = {
+        command: 'delete-master',
+        device_id: form.device_id,
+        fid: Number(form.fid),
       }
     }
 
@@ -113,7 +120,7 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
           <div className="space-y-2">
             <Label>Command</Label>
             <div className="grid grid-cols-2 gap-2">
-              {COMMANDS.map(({ value, label }) => (
+              {COMMANDS.filter(c => c.value !== 'clearall').map(({ value, label }) => (
                 <button
                   key={value}
                   type="button"
@@ -127,6 +134,17 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
                   {label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => set('command', 'clearall')}
+                className={`col-span-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  form.command === 'clearall'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-input bg-background hover:bg-muted'
+                }`}
+              >
+                Clear all
+              </button>
             </div>
             <p className="text-xs text-muted-foreground">
               {COMMANDS.find((c) => c.value === form.command)?.description}

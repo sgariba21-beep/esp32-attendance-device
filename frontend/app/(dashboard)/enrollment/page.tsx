@@ -5,7 +5,7 @@ import type { Device } from '@/lib/types'
 
 export type EnrollmentJob = {
   id: string
-  command: 'register' | 'delete' | 'clearall' | 'register-master'
+  command: 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
   status: 'pending' | 'in_progress' | 'completed' | 'failed'
   finger_slot: 'fin1' | 'fin2' | null
   fid: number | null

@@ -1557,7 +1557,7 @@ void FingerprintTask(void *pvParameters) {
           enrollment_doRegister(job, "student");
         } else if (job.command == "register-master") {
           enrollment_doRegister(job, "master");
-        } else if (job.command == "delete") {
+        } else if (job.command == "delete" || job.command == "delete-master") {
           if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
           else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);
           else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.studentId);
