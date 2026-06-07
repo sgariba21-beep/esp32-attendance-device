@@ -25,6 +25,34 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Parse date and time from timestamp
+  const dt = new Date(timestamp);
+  const date = dt.toISOString().split("T")[0];             // "2025-06-02"
+  const time = dt.toISOString().split("T")[1].slice(0, 8); // "08:30:00"
+
+  // Check 1: Skip weekends (0 = Sunday, 6 = Saturday)
+  const dayOfWeek = dt.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return new Response(
+      JSON.stringify({ message: "Weekend — scan ignored" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Check 2: Skip public holidays
+  const { data: holiday } = await supabase
+    .from("holidays")
+    .select("label")
+    .eq("date", date)
+    .maybeSingle();
+
+  if (holiday) {
+    return new Response(
+      JSON.stringify({ message: `Holiday (${holiday.label}) — scan ignored` }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   // Look up the student by school ID
   const { data: student, error: studentError } = await supabase
     .from("students")
@@ -43,7 +71,7 @@ Deno.serve(async (req: Request) => {
   // Find the currently active academic record
   const { data: academic, error: academicError } = await supabase
     .from("academic")
-    .select("id")
+    .select("id, start_date, end_date")
     .eq("status", "active")
     .single();
 
@@ -54,10 +82,19 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Parse date and time from timestamp
-  const dt = new Date(timestamp);
-  const date = dt.toISOString().split("T")[0];        // "2025-06-02"
-  const time = dt.toISOString().split("T")[1].slice(0, 8); // "08:30:00"
+  // Check 3: Skip if outside the active term's date range
+  if (academic.start_date && date < academic.start_date) {
+    return new Response(
+      JSON.stringify({ message: "Before term start — scan ignored" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  if (academic.end_date && date > academic.end_date) {
+    return new Response(
+      JSON.stringify({ message: "After term end — scan ignored" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
   // Insert attendance record
   const { error: insertError } = await supabase
