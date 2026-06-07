@@ -1,5 +1,7 @@
 import { verifySession } from '@/lib/supabase/dal'
 import { Sidebar } from '@/components/sidebar'
+import { MobileHeader } from '@/components/mobile-header'
+import { MobileBottomNav } from '@/components/mobile-bottom-nav'
 
 export default async function DashboardLayout({
   children,
@@ -11,9 +13,13 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto bg-muted/20 p-6">
-        {children}
-      </main>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <MobileHeader />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-16 md:pb-6">
+          {children}
+        </main>
+        <MobileBottomNav />
+      </div>
     </div>
   )
 }

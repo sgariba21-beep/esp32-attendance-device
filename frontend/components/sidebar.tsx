@@ -15,12 +15,12 @@ import {
 } from 'lucide-react'
 
 const navItems = [
-  { href: '/attendance',  label: 'Attendance',   icon: CalendarDays  },
-  { href: '/students',    label: 'Students',     icon: Users         },
-  { href: '/devices',     label: 'Devices',      icon: Cpu           },
-  { href: '/academic',    label: 'Academic',     icon: BookOpen      },
-  { href: '/enrollment',  label: 'Enrollment',   icon: ClipboardList },
-  { href: '/promotion',   label: 'Promotion',    icon: ArrowUpCircle },
+  { href: '/attendance',  label: 'Attendance',  icon: CalendarDays  },
+  { href: '/students',    label: 'Students',    icon: Users         },
+  { href: '/devices',     label: 'Devices',     icon: Cpu           },
+  { href: '/academic',    label: 'Academic',    icon: BookOpen      },
+  { href: '/enrollment',  label: 'Enrollment',  icon: ClipboardList },
+  { href: '/promotion',   label: 'Promotion',   icon: ArrowUpCircle },
 ]
 
 export function Sidebar() {
@@ -35,21 +35,30 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-56 flex flex-col border-r bg-background shrink-0">
-      <div className="px-5 py-5 border-b">
-        <span className="font-semibold text-sm tracking-wide">OLAG Attendance</span>
+    <aside className="hidden md:flex w-60 flex-col bg-sidebar shrink-0">
+      {/* Logo / brand */}
+      <div className="flex items-center gap-3 px-5 py-5 border-b border-sidebar-border">
+        <div className="h-10 w-10 shrink-0 rounded-full overflow-hidden ring-2 ring-sidebar-border">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/olag-logo.jpg" alt="OLAG SHS" className="h-full w-full object-cover" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-sidebar-foreground leading-tight">OLAG SHS</p>
+          <p className="text-xs text-sidebar-foreground/55 leading-tight">Attendance System</p>
+        </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      {/* Navigation */}
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
         {navItems.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
             className={cn(
-              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+              'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
               pathname.startsWith(href)
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
             )}
           >
             <Icon className="h-4 w-4 shrink-0" />
@@ -58,10 +67,11 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-3 py-4 border-t">
+      {/* Sign out */}
+      <div className="px-3 py-4 border-t border-sidebar-border">
         <button
           onClick={handleSignOut}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
         >
           <LogOut className="h-4 w-4 shrink-0" />
           Sign out
