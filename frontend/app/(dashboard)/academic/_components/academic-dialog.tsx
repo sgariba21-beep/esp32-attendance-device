@@ -18,7 +18,7 @@ type Props = {
   term: AcademicTerm | null
 }
 
-const empty = { term: 'Term 1', year: '' }
+const empty = { term: 'Term 1', year: '', start_date: '', end_date: '' }
 
 export function AcademicDialog({ open, onOpenChange, term }: Props) {
   const [form, setForm] = useState(empty)
@@ -28,7 +28,14 @@ export function AcademicDialog({ open, onOpenChange, term }: Props) {
   useEffect(() => {
     if (open) {
       setError(null)
-      setForm(term ? { term: term.term, year: term.year } : empty)
+      setForm(term
+        ? {
+            term: term.term,
+            year: term.year,
+            start_date: term.start_date ?? '',
+            end_date: term.end_date ?? '',
+          }
+        : empty)
     }
   }, [open, term])
 
@@ -38,6 +45,10 @@ export function AcademicDialog({ open, onOpenChange, term }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (form.start_date && form.end_date && form.end_date < form.start_date) {
+      setError('End date must be after start date.')
+      return
+    }
     setLoading(true)
     setError(null)
 
@@ -82,6 +93,30 @@ export function AcademicDialog({ open, onOpenChange, term }: Props) {
               required
             />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="start_date">Start date</Label>
+              <Input
+                id="start_date"
+                type="date"
+                value={form.start_date}
+                onChange={(e) => set('start_date', e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="end_date">End date</Label>
+              <Input
+                id="end_date"
+                type="date"
+                value={form.end_date}
+                onChange={(e) => set('end_date', e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Optional. When set, absences are only recorded within this range.
+          </p>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 

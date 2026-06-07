@@ -44,4 +44,6 @@ export type AcademicTerm = {
   term: string
   year: string
   status: 'active' | 'inactive'
+  start_date: string | null
+  end_date: string | null
 }

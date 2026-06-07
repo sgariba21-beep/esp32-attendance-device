@@ -4,9 +4,42 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { verifySession } from '@/lib/supabase/dal'
 
+// ── Holidays ─────────────────────────────────────────────────────────────────
+
+export async function createHoliday(data: { date: string; label: string }) {
+  await verifySession()
+  const supabase = createAdminClient()
+
+  const { error } = await supabase.from('holidays').insert({
+    date: data.date,
+    label: data.label.trim(),
+  })
+
+  if (error) {
+    if (error.code === '23505') return { error: 'A holiday is already set for that date.' }
+    return { error: error.message }
+  }
+
+  revalidatePath('/academic')
+  return { error: null }
+}
+
+export async function deleteHoliday(id: string) {
+  await verifySession()
+  const supabase = createAdminClient()
+
+  const { error } = await supabase.from('holidays').delete().eq('id', id)
+  if (error) return { error: error.message }
+
+  revalidatePath('/academic')
+  return { error: null }
+}
+
 export type AcademicFormData = {
   term: string
   year: string
+  start_date: string
+  end_date: string
 }
 
 export async function createAcademicTerm(data: AcademicFormData) {
@@ -17,6 +50,8 @@ export async function createAcademicTerm(data: AcademicFormData) {
     term: data.term,
     year: data.year.trim(),
     status: 'inactive',
+    start_date: data.start_date || null,
+    end_date: data.end_date || null,
   })
 
   if (error) {
@@ -34,7 +69,12 @@ export async function updateAcademicTerm(id: string, data: AcademicFormData) {
 
   const { error } = await supabase
     .from('academic')
-    .update({ term: data.term, year: data.year.trim() })
+    .update({
+      term: data.term,
+      year: data.year.trim(),
+      start_date: data.start_date || null,
+      end_date: data.end_date || null,
+    })
     .eq('id', id)
 
   if (error) {

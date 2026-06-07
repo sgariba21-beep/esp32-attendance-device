@@ -17,10 +17,33 @@ Deno.serve(async (req: Request) => {
   // Get today's date in YYYY-MM-DD format
   const today = new Date().toISOString().split("T")[0];
 
+  // Check 1: Skip weekends (0 = Sunday, 6 = Saturday)
+  const dayOfWeek = new Date().getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return new Response(
+      JSON.stringify({ message: "Weekend — absent marking skipped" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Check 2: Skip public holidays
+  const { data: holiday } = await supabase
+    .from("holidays")
+    .select("label")
+    .eq("date", today)
+    .maybeSingle();
+
+  if (holiday) {
+    return new Response(
+      JSON.stringify({ message: `Holiday (${holiday.label}) — absent marking skipped` }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   // Find the currently active academic record
   const { data: academic, error: academicError } = await supabase
     .from("academic")
-    .select("id")
+    .select("id, start_date, end_date")
     .eq("status", "active")
     .single();
 
@@ -29,6 +52,20 @@ Deno.serve(async (req: Request) => {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Check 3: Skip if today falls outside the active term's date range (vacation period)
+  if (academic.start_date && today < academic.start_date) {
+    return new Response(
+      JSON.stringify({ message: "Before term start — absent marking skipped" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  if (academic.end_date && today > academic.end_date) {
+    return new Response(
+      JSON.stringify({ message: "After term end — absent marking skipped" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   // Get all active students

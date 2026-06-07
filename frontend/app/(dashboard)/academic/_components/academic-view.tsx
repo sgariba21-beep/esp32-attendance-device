@@ -49,14 +49,11 @@ export function AcademicView({ terms }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Academic Terms</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {activeTerm
-              ? <>Active: <span className="font-medium text-foreground">{activeTerm.term} {activeTerm.year}</span></>
-              : 'No active term set'}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {activeTerm
+            ? <>Active term: <span className="font-medium text-foreground">{activeTerm.term} {activeTerm.year}</span></>
+            : 'No active term set'}
+        </p>
         <Button onClick={openAdd}>Add term</Button>
       </div>
 
@@ -71,6 +68,7 @@ export function AcademicView({ terms }: Props) {
               <TableRow>
                 <TableHead>Term</TableHead>
                 <TableHead>Year</TableHead>
+                <TableHead>Dates</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -81,6 +79,11 @@ export function AcademicView({ terms }: Props) {
                   <TableRow key={t.id}>
                     <TableCell className="font-medium">{t.term}</TableCell>
                     <TableCell>{t.year}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      {t.start_date && t.end_date
+                        ? `${t.start_date} → ${t.end_date}`
+                        : <span className="italic">Not set</span>}
+                    </TableCell>
                     <TableCell>
                       {t.status === 'active' ? (
                         <Badge>Active</Badge>
