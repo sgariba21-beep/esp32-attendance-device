@@ -15,8 +15,8 @@ const char* SCRIPT_URL = "http://172.10.0.36:54321/functions/v1/log-attendance";
 const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
 
 // Supabase enrollment edge functions
-const char* ENROLL_GET_URL = "http://172.10.0.36:54321/functions/v1/get-enrollment-job";
-const char* ENROLL_UPD_URL = "http://172.10.0.36:54321/functions/v1/update-enrollment-job";
+const char* ENROLL_GET_URL = "http://172.10.0.72:54321/functions/v1/get-enrollment-job";
+const char* ENROLL_UPD_URL = "http://172.10.0.72:54321/functions/v1/update-enrollment-job";
 
 // Device identity / class
 #define SYSTEM_TYPE        "OLAG"   
@@ -150,7 +150,7 @@ int findFidByUnique(const String &uniqueId);
 void clearAllFidMap();
 void applyFidMapToSerialPrint();
 int enrollID_toFid(int requestedFid);
-void enrollment_doRegister(const EnrollJob &job);
+void enrollment_doRegister(const EnrollJob &job, const String &role = "student");
 void enrollment_doDeleteByFid(const EnrollJob &job, int fid);
 void enrollment_doDeleteByUnique(const EnrollJob &job);
 void reportEnrollUpdate(const String &jobId, const String &status, int fingerId, const String &note, const String &fingerSlot, const String &studentId);
@@ -750,7 +750,7 @@ int enrollID_toFid(int requestedFid) {
 }
 
 /* enrollment_doRegister: handles a register command */
-void enrollment_doRegister(const EnrollJob &job) {
+void enrollment_doRegister(const EnrollJob &job, const String &role) {
   int fidToUse = job.requestedFid;
   if (fidToUse < 1 || fidToUse > MAX_FID) {
     for (int f = 1; f <= MAX_FID; ++f) {
@@ -771,7 +771,7 @@ void enrollment_doRegister(const EnrollJob &job) {
   int resFid = enrollID_toFid(fidToUse);
   if (resFid > 0) {
     fidMap[resFid]     = job.uniqueId.length() ? job.uniqueId : String("AUTO_") + String(resFid);
-    fidMapRole[resFid] = "student";
+    fidMapRole[resFid] = role;
     fidMapName[resFid] = job.name;
     saveFidMapToFS();
     Serial.printf("Saved fid %d -> %s name=%s\n", resFid, fidMap[resFid].c_str(), fidMapName[resFid].c_str());
@@ -1554,7 +1554,9 @@ void FingerprintTask(void *pvParameters) {
 
         Serial.printf("Processing enroll job id=%s cmd=%s slot=%s\n", job.id.c_str(), job.command.c_str(), job.fingerSlot.c_str());
         if (job.command == "register") {
-          enrollment_doRegister(job);
+          enrollment_doRegister(job, "student");
+        } else if (job.command == "register-master") {
+          enrollment_doRegister(job, "master");
         } else if (job.command == "delete") {
           if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
           else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);

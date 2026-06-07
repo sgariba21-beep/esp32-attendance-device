@@ -11,7 +11,7 @@ import { createEnrollmentJob } from '../_actions'
 import type { StudentOption } from '../page'
 import type { Device } from '@/lib/types'
 
-type Command = 'register' | 'delete' | 'clearall'
+type Command = 'register' | 'delete' | 'clearall' | 'register-master'
 type FingerSlot = 'fin1' | 'fin2'
 
 type Props = {
@@ -21,7 +21,21 @@ type Props = {
   students: StudentOption[]
 }
 
-const empty = { command: 'register' as Command, device_id: '', student_id: '', finger_slot: 'fin1' as FingerSlot, fid: 1 }
+const COMMANDS: { value: Command; label: string; description: string }[] = [
+  { value: 'register',        label: 'Register',       description: 'Enroll a fingerprint for a student.' },
+  { value: 'delete',          label: 'Delete',         description: "Remove a student's fingerprint from the device." },
+  { value: 'register-master', label: 'Master',         description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
+  { value: 'clearall',        label: 'Clear all',      description: 'Wipe all fingerprints stored on the device.' },
+]
+
+const empty = {
+  command: 'register' as Command,
+  device_id: '',
+  student_id: '',
+  finger_slot: 'fin1' as FingerSlot,
+  fid: 1,
+  master_name: '',
+}
 
 export function JobDialog({ open, onOpenChange, devices, students }: Props) {
   const [form, setForm] = useState(empty)
@@ -41,12 +55,14 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
 
   const deviceStudents = students.filter((s) => s.device_id === form.device_id)
   const needsStudent = form.command === 'register' || form.command === 'delete'
-  const needsFid = form.command === 'register'
+  const needsFid = form.command === 'register' || form.command === 'register-master'
+  const needsMasterName = form.command === 'register-master'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.device_id) { setError('Please select a device.'); return }
     if (needsStudent && !form.student_id) { setError('Please select a student.'); return }
+    if (needsMasterName && !form.master_name.trim()) { setError('Please enter a name for the master.'); return }
 
     setLoading(true)
     setError(null)
@@ -63,12 +79,19 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
         finger_slot: form.finger_slot,
         fid: Number(form.fid),
       }
-    } else {
+    } else if (form.command === 'delete') {
       jobData = {
         command: 'delete',
         device_id: form.device_id,
         student_id: form.student_id,
         finger_slot: form.finger_slot,
+      }
+    } else {
+      jobData = {
+        command: 'register-master',
+        device_id: form.device_id,
+        fid: Number(form.fid),
+        name: form.master_name.trim(),
       }
     }
 
@@ -86,31 +109,31 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
+          {/* Command selector */}
           <div className="space-y-2">
             <Label>Command</Label>
-            <div className="flex gap-2">
-              {(['register', 'delete', 'clearall'] as Command[]).map((cmd) => (
+            <div className="grid grid-cols-2 gap-2">
+              {COMMANDS.map(({ value, label }) => (
                 <button
-                  key={cmd}
+                  key={value}
                   type="button"
-                  onClick={() => set('command', cmd)}
-                  className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors capitalize ${
-                    form.command === cmd
+                  onClick={() => set('command', value)}
+                  className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    form.command === value
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'border-input bg-background hover:bg-muted'
                   }`}
                 >
-                  {cmd}
+                  {label}
                 </button>
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {form.command === 'register' && 'Enroll a fingerprint for a student.'}
-              {form.command === 'delete'   && 'Remove a student\'s fingerprint from the device.'}
-              {form.command === 'clearall' && 'Wipe all fingerprints stored on the device.'}
+              {COMMANDS.find((c) => c.value === form.command)?.description}
             </p>
           </div>
 
+          {/* Device */}
           <div className="space-y-2">
             <Label htmlFor="device_id">Device</Label>
             <select
@@ -127,6 +150,24 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
             </select>
           </div>
 
+          {/* Master name */}
+          {needsMasterName && (
+            <div className="space-y-2">
+              <Label htmlFor="master_name">Name</Label>
+              <Input
+                id="master_name"
+                value={form.master_name}
+                onChange={(e) => set('master_name', e.target.value)}
+                placeholder="e.g. Principal"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Stored in the device's local map for identification.
+              </p>
+            </div>
+          )}
+
+          {/* Student (register / delete only) */}
           {needsStudent && (
             <div className="space-y-2">
               <Label htmlFor="student_id">Student</Label>
@@ -148,6 +189,7 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
             </div>
           )}
 
+          {/* Finger slot (register / delete only) */}
           {needsStudent && (
             <div className="space-y-2">
               <Label>Finger slot</Label>
@@ -170,13 +212,15 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
             </div>
           )}
 
+          {/* FID (register / register-master only) */}
           {needsFid && (
             <div className="space-y-2">
-              <Label htmlFor="fid">Fingerprint ID (fid)</Label>
+              <Label htmlFor="fid">Sensor slot (1–127)</Label>
               <Input
                 id="fid"
                 type="number"
                 min={1}
+                max={127}
                 value={form.fid}
                 onChange={(e) => set('fid', parseInt(e.target.value) || 1)}
               />

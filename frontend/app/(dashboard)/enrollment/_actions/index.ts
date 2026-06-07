@@ -8,6 +8,7 @@ export type JobFormData =
   | { command: 'clearall'; device_id: string }
   | { command: 'register'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2'; fid: number }
   | { command: 'delete'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2' }
+  | { command: 'register-master'; device_id: string; fid: number; name: string }
 
 export async function createEnrollmentJob(data: JobFormData) {
   await verifySession()
@@ -19,13 +20,17 @@ export async function createEnrollmentJob(data: JobFormData) {
     status: 'pending',
   }
 
-  if (data.command !== 'clearall') {
+  if (data.command === 'register') {
     row.student_id = data.student_id
     row.finger_slot = data.finger_slot
-  }
-
-  if (data.command === 'register') {
     row.fid = data.fid
+  } else if (data.command === 'delete') {
+    row.student_id = data.student_id
+    row.finger_slot = data.finger_slot
+  } else if (data.command === 'register-master') {
+    row.fid = data.fid
+    // Store the master name in note so the firmware can write it into the local fid_map
+    row.note = data.name.trim()
   }
 
   const { error } = await supabase.from('enrollment_jobs').insert(row)

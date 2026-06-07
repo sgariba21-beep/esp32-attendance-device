@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
   const { data: job, error } = await supabase
     .from("enrollment_jobs")
     .select(`
-      id, command, fid, finger_slot,
+      id, command, fid, finger_slot, note,
       student:student_id(id, sid, fullname)
     `)
     .eq("device_id", device.id)
@@ -75,6 +75,7 @@ Deno.serve(async (req: Request) => {
     .eq("id", job.id);
 
   const student = job.student as { id: string; sid: string; fullname: string } | null;
+  const isMaster = job.command === "register-master";
 
   return new Response(
     JSON.stringify({
@@ -85,7 +86,8 @@ Deno.serve(async (req: Request) => {
         finger_slot: job.finger_slot ?? "",
         student_id: student?.id ?? "",
         sid: student?.sid ?? "",
-        fullname: student?.fullname ?? "",
+        // For master jobs the name comes from the note field; for students it's the DB fullname
+        fullname: isMaster ? (job.note ?? "Master") : (student?.fullname ?? ""),
       },
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }

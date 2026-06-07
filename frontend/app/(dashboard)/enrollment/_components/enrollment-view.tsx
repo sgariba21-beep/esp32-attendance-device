@@ -137,9 +137,15 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                       {formatTime(job.created_at)}
                     </TableCell>
-                    <TableCell className="font-medium capitalize">{job.command}</TableCell>
+                    <TableCell className="font-medium capitalize">
+                      {job.command === 'register-master' ? 'Master' : job.command}
+                    </TableCell>
                     <TableCell>{job.device ? formatClass(job.device) : '—'}</TableCell>
-                    <TableCell>{job.student?.fullname ?? '—'}</TableCell>
+                    <TableCell>
+                      {job.command === 'register-master'
+                        ? <span className="text-xs text-muted-foreground italic">{job.note ?? 'master'}</span>
+                        : job.student?.fullname ?? '—'}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{job.finger_slot ?? '—'}</TableCell>
                     <TableCell className="text-muted-foreground">{job.fid ?? '—'}</TableCell>
                     <TableCell>
