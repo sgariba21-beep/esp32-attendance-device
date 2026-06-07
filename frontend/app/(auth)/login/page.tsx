@@ -28,6 +28,7 @@ export default function LoginPage() {
       return
     }
 
+    sessionStorage.setItem('app_session_active', '1')
     router.push('/attendance')
     router.refresh()
   }

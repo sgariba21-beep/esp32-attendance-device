@@ -38,6 +38,7 @@ export function MobileBottomNav() {
 
   async function handleSignOut() {
     setOpen(false)
+    sessionStorage.removeItem('app_session_active')
     const supabase = createClient()
     await supabase.auth.signOut()
     router.push('/login')

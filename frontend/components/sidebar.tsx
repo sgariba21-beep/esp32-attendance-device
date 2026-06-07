@@ -28,6 +28,7 @@ export function Sidebar() {
   const router = useRouter()
 
   async function handleSignOut() {
+    sessionStorage.removeItem('app_session_active')
     const supabase = createClient()
     await supabase.auth.signOut()
     router.push('/login')
