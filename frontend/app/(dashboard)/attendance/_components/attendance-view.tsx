@@ -37,6 +37,15 @@ function formatClass(device: { form: string; class: string }) {
   return `${device.form} ${device.class}`
 }
 
+function formatDate(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 function formatTime(time: string) {
   const [h, m] = time.split(':')
   const hour = parseInt(h)
@@ -259,7 +268,7 @@ export function AttendanceView({ records, students, devices, academic, filters }
                 <TableBody>
                   {records.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="whitespace-nowrap">{r.date}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatDate(r.date)}</TableCell>
                       <TableCell>{r.student?.fullname ?? '—'}</TableCell>
                       <TableCell className="text-muted-foreground text-xs">{r.student?.sid ?? '—'}</TableCell>
                       <TableCell>
