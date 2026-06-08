@@ -16,10 +16,10 @@ type Props = {
   students: StudentOption[]
 }
 
-const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  pending:     { label: 'Pending',     variant: 'secondary' },
-  in_progress: { label: 'In progress', variant: 'outline'   },
-  completed:   { label: 'Completed',   variant: 'default'   },
+const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
+  pending:     { label: 'Pending',     variant: 'secondary'   },
+  in_progress: { label: 'In progress', variant: 'outline'     },
+  completed:   { label: 'Completed',   variant: 'success'     },
   failed:      { label: 'Failed',      variant: 'destructive' },
 }
 
