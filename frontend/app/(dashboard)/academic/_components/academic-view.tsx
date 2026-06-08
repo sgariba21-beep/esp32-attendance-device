@@ -88,7 +88,7 @@ export function AcademicView({ terms }: Props) {
                     </TableCell>
                     <TableCell>
                       {t.status === 'active' ? (
-                        <Badge>Active</Badge>
+                        <Badge variant="success">Active</Badge>
                       ) : (
                         <Badge variant="secondary">Inactive</Badge>
                       )}

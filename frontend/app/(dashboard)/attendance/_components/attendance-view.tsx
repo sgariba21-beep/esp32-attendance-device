@@ -279,7 +279,7 @@ export function AttendanceView({ records, students, devices, academic, filters }
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
                       <TableCell>
-                        <Badge variant={r.status === 'present' ? 'default' : 'destructive'}>
+                        <Badge variant={r.status === 'present' ? 'success' : 'destructive'}>
                           {r.status}
                         </Badge>
                       </TableCell>

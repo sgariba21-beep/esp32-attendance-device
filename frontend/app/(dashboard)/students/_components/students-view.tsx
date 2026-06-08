@@ -224,7 +224,7 @@ export function StudentsView({ students, devices }: Props) {
                   <TableCell><FingerCell student={s} slot="fin1" /></TableCell>
                   <TableCell><FingerCell student={s} slot="fin2" /></TableCell>
                   <TableCell>
-                    <Badge variant={s.status === 'active' ? 'default' : 'secondary'}>
+                    <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
                       {s.status}
                     </Badge>
                   </TableCell>
