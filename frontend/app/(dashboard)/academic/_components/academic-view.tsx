@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -75,8 +75,8 @@ export function AcademicView({ terms }: Props) {
             </TableHeader>
             <TableBody>
               {terms.map((t) => (
-                <>
-                  <TableRow key={t.id}>
+                <Fragment key={t.id}>
+                  <TableRow>
                     <TableCell className="font-medium">{t.term}</TableCell>
                     <TableCell>{t.year}</TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
@@ -123,13 +123,13 @@ export function AcademicView({ terms }: Props) {
                     </TableCell>
                   </TableRow>
                   {rowError?.id === t.id && (
-                    <TableRow key={`${t.id}-error`}>
+                    <TableRow>
                       <TableCell colSpan={4} className="py-2 text-sm text-destructive bg-destructive/5">
                         {rowError.message}
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>

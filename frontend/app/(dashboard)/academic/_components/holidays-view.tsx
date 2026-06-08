@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -65,8 +65,8 @@ export function HolidaysView({ holidays }: Props) {
             </TableHeader>
             <TableBody>
               {sorted.map((h) => (
-                <>
-                  <TableRow key={h.id}>
+                <Fragment key={h.id}>
+                  <TableRow>
                     <TableCell className="whitespace-nowrap font-medium">{formatDate(h.date)}</TableCell>
                     <TableCell>{h.label}</TableCell>
                     <TableCell className="text-right">
@@ -82,13 +82,13 @@ export function HolidaysView({ holidays }: Props) {
                     </TableCell>
                   </TableRow>
                   {rowError?.id === h.id && (
-                    <TableRow key={`${h.id}-error`}>
+                    <TableRow>
                       <TableCell colSpan={3} className="py-2 text-sm text-destructive bg-destructive/5">
                         {rowError.message}
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))}
             </TableBody>
           </Table>
