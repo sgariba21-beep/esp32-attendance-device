@@ -2,6 +2,7 @@
 
 import { useState, Fragment } from 'react'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -29,6 +30,7 @@ export function HolidaysView({ holidays }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<Holiday | null>(null)
 
   async function handleDelete(id: string) {
     setLoadingId(id)
@@ -74,7 +76,7 @@ export function HolidaysView({ holidays }: Props) {
                         variant="ghost"
                         size="sm"
                         disabled={loadingId === h.id}
-                        onClick={() => handleDelete(h.id)}
+                        onClick={() => setConfirmTarget(h)}
                         className="text-destructive hover:text-destructive"
                       >
                         {loadingId === h.id ? '…' : 'Delete'}
@@ -94,6 +96,20 @@ export function HolidaysView({ holidays }: Props) {
           </Table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
+        title="Delete holiday?"
+        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatDate(confirmTarget.date)}) from the holiday list.` : ''}
+        confirmLabel="Delete holiday"
+        loading={loadingId === confirmTarget?.id}
+        onConfirm={async () => {
+          if (!confirmTarget) return
+          await handleDelete(confirmTarget.id)
+          setConfirmTarget(null)
+        }}
+      />
 
       <HolidayDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>

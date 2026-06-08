@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -25,6 +26,7 @@ export function StudentsView({ students, devices }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<StudentWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<StudentWithDevice | null>(null)
 
   const [search, setSearch] = useState('')
   const [classFilter, setClassFilter] = useState('')
@@ -235,7 +237,7 @@ export function StudentsView({ students, devices }: Props) {
                         variant="ghost"
                         size="sm"
                         disabled={togglingId === s.id}
-                        onClick={() => handleToggleStatus(s)}
+                        onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
                         className={s.status === 'active' ? 'text-destructive hover:text-destructive' : ''}
                       >
                         {togglingId === s.id
@@ -259,6 +261,20 @@ export function StudentsView({ students, devices }: Props) {
         student={editing}
         devices={devices}
         usedFids={usedFids}
+      />
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
+        title="Deactivate student?"
+        description={confirmTarget ? `${confirmTarget.fullname} will be marked inactive and won't be able to scan in. You can reactivate them at any time.` : ''}
+        confirmLabel="Deactivate"
+        loading={togglingId === confirmTarget?.id}
+        onConfirm={async () => {
+          if (!confirmTarget) return
+          await handleToggleStatus(confirmTarget)
+          setConfirmTarget(null)
+        }}
       />
 
       <EnrollFingerDialog

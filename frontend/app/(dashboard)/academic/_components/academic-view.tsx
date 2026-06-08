@@ -3,6 +3,7 @@
 import { useState, Fragment } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -17,6 +18,7 @@ export function AcademicView({ terms }: Props) {
   const [editing, setEditing] = useState<AcademicTerm | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<AcademicTerm | null>(null)
 
   function openAdd() {
     setEditing(null)
@@ -114,7 +116,7 @@ export function AcademicView({ terms }: Props) {
                           variant="ghost"
                           size="sm"
                           disabled={loadingId === t.id}
-                          onClick={() => handleDelete(t)}
+                          onClick={() => setConfirmTarget(t)}
                           className="text-destructive hover:text-destructive"
                         >
                           {loadingId === t.id ? '…' : 'Delete'}
@@ -135,6 +137,20 @@ export function AcademicView({ terms }: Props) {
           </Table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
+        title="Delete term?"
+        description={confirmTarget ? `This will permanently delete ${confirmTarget.term} ${confirmTarget.year}. All attendance records for this term will be unlinked.` : ''}
+        confirmLabel="Delete term"
+        loading={loadingId === confirmTarget?.id}
+        onConfirm={async () => {
+          if (!confirmTarget) return
+          await handleDelete(confirmTarget)
+          setConfirmTarget(null)
+        }}
+      />
 
       <AcademicDialog
         open={dialogOpen}

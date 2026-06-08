@@ -2,6 +2,7 @@
 
 import { useState, Fragment } from 'react'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -14,25 +15,25 @@ type Props = { devices: Device[] }
 export function DevicesView({ devices }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Device | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<Device | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null)
 
-  function openAdd() {
-    setEditing(null)
-    setDialogOpen(true)
-  }
+  function openAdd() { setEditing(null); setDialogOpen(true) }
+  function openEdit(device: Device) { setEditing(device); setDialogOpen(true) }
 
-  function openEdit(device: Device) {
-    setEditing(device)
-    setDialogOpen(true)
-  }
-
-  async function handleDelete(device: Device) {
-    setDeletingId(device.id)
+  async function handleDelete() {
+    if (!confirmTarget) return
+    setDeleting(true)
     setDeleteError(null)
-    const result = await deleteDevice(device.id)
-    setDeletingId(null)
-    if (result.error) setDeleteError({ id: device.id, message: result.error })
+    const result = await deleteDevice(confirmTarget.id)
+    setDeleting(false)
+    if (result.error) {
+      setDeleteError({ id: confirmTarget.id, message: result.error })
+      setConfirmTarget(null)
+      return
+    }
+    setConfirmTarget(null)
   }
 
   return (
@@ -56,8 +57,8 @@ export function DevicesView({ devices }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Class</TableHead>
                 <TableHead>Form</TableHead>
+                <TableHead>Class</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -65,8 +66,8 @@ export function DevicesView({ devices }: Props) {
               {devices.map((d) => (
                 <Fragment key={d.id}>
                   <TableRow>
-                    <TableCell className="font-medium">{d.form} {d.class}</TableCell>
-                    <TableCell className="text-muted-foreground">{d.form}</TableCell>
+                    <TableCell className="font-medium">{d.form}</TableCell>
+                    <TableCell className="text-muted-foreground">{d.class}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Button variant="ghost" size="sm" onClick={() => openEdit(d)}>
@@ -75,11 +76,10 @@ export function DevicesView({ devices }: Props) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={deletingId === d.id}
-                          onClick={() => handleDelete(d)}
+                          onClick={() => setConfirmTarget(d)}
                           className="text-destructive hover:text-destructive"
                         >
-                          {deletingId === d.id ? '…' : 'Delete'}
+                          Delete
                         </Button>
                       </div>
                     </TableCell>
@@ -98,10 +98,16 @@ export function DevicesView({ devices }: Props) {
         </div>
       )}
 
-      <DeviceDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        device={editing}
+      <DeviceDialog open={dialogOpen} onOpenChange={setDialogOpen} device={editing} />
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
+        title="Delete device?"
+        description={confirmTarget ? `This will permanently delete the ${confirmTarget.form} ${confirmTarget.class} device. Students assigned to it will lose their class assignment.` : ''}
+        confirmLabel="Delete device"
+        loading={deleting}
+        onConfirm={handleDelete}
       />
     </div>
   )
