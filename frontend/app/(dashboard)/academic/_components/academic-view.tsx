@@ -64,7 +64,7 @@ export function AcademicView({ terms }: Props) {
           <p className="text-sm text-muted-foreground">No academic terms yet. Add one to get started.</p>
         </div>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

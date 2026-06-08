@@ -200,7 +200,7 @@ export function StudentsView({ students, devices }: Props) {
           <p className="text-sm text-muted-foreground">No students match your filters.</p>
         </div>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

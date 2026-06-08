@@ -231,7 +231,7 @@ export function AttendanceView({ records, students, devices, academic, filters }
           {records.length === 0 ? (
             <EmptyState message="No attendance records match your filters." />
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -279,7 +279,7 @@ export function AttendanceView({ records, students, devices, academic, filters }
           {summary.length === 0 ? (
             <EmptyState message="No data to summarise. Add attendance records first." />
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
