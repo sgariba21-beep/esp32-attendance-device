@@ -14,11 +14,13 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Get today's date in YYYY-MM-DD format
-  const today = new Date().toISOString().split("T")[0];
+  // Capture the exact moment the function runs
+  const now = new Date();
+  const today = now.toISOString().split("T")[0];
+  const currentTime = now.toISOString().split("T")[1].slice(0, 8); // HH:MM:SS
 
   // Check 1: Skip weekends (0 = Sunday, 6 = Saturday)
-  const dayOfWeek = new Date().getDay();
+  const dayOfWeek = now.getDay();
   if (dayOfWeek === 0 || dayOfWeek === 6) {
     return new Response(
       JSON.stringify({ message: "Weekend — absent marking skipped" }),
@@ -114,7 +116,7 @@ Deno.serve(async (req: Request) => {
     academic_id: academic.id,
     device_id: s.device_id,
     date: today,
-    time: "23:00:00",
+    time: currentTime,
     status: "absent",
     scan_id: null,
   }));
