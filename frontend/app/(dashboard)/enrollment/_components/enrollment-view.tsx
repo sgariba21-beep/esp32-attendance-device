@@ -158,7 +158,7 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
                       <Badge variant={badge.variant}>{badge.label}</Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground max-w-48 truncate">
-                      {job.note ?? '—'}
+                      {job.command === 'register-master' ? '—' : (job.note ?? '—')}
                     </TableCell>
                   </TableRow>
                 )
