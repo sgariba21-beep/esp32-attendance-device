@@ -13,6 +13,14 @@ import type { AcademicTerm } from '@/lib/types'
 
 type Props = { terms: AcademicTerm[] }
 
+function formatDate(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export function AcademicView({ terms }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<AcademicTerm | null>(null)
@@ -83,7 +91,7 @@ export function AcademicView({ terms }: Props) {
                     <TableCell>{t.year}</TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {t.start_date && t.end_date
-                        ? `${t.start_date} → ${t.end_date}`
+                        ? `${formatDate(t.start_date)} → ${formatDate(t.end_date)}`
                         : <span className="italic">Not set</span>}
                     </TableCell>
                     <TableCell>
