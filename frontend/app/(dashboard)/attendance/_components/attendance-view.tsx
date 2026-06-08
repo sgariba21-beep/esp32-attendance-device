@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, usePathname } from 'next/navigation'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -123,10 +123,15 @@ export function AttendanceView({ records, students, devices, academic, filters }
   const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0
   const summary = buildSummary(records)
 
-  const studentOptions = students.map((s) => ({
-    value: s.id,
-    label: `${s.fullname} (${s.sid})`,
-  }))
+  const studentOptions = useMemo(() => {
+    const base = deviceIds.length > 0
+      ? students.filter((s) => deviceIds.includes(s.device_id))
+      : students
+    return base.map((s) => ({
+      value: s.id,
+      label: `${s.fullname} (${s.sid})`,
+    }))
+  }, [students, deviceIds])
 
   const classOptions = devices.map((d) => ({
     value: d.id,
@@ -214,7 +219,14 @@ export function AttendanceView({ records, students, devices, academic, filters }
             selected={deviceIds}
             onChange={(val) => {
               setDeviceIds(val)
-              applyFilters({ classes: val })
+              const validIds = val.length > 0
+                ? new Set(students.filter((s) => val.includes(s.device_id)).map((s) => s.id))
+                : null
+              const nextStudentIds = validIds
+                ? studentIds.filter((id) => validIds.has(id))
+                : studentIds
+              if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
+              applyFilters({ classes: val, students: nextStudentIds })
             }}
             placeholder="All classes"
           />
