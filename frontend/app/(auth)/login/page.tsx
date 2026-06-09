@@ -37,10 +37,11 @@ export default function LoginPage() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
       {/* Logo + school name */}
       <div className="flex flex-col items-center mb-8 text-center">
-        <div className="h-24 w-24 rounded-full overflow-hidden ring-4 ring-border shadow-md mb-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/olag-logo.jpg" alt="OLAG SHS" className="h-full w-full object-cover" />
-        </div>
+        <img
+          src="/olag-logo.jpg"
+          alt="OLAG SHS logo"
+          className="h-24 w-24 rounded-full object-cover ring-4 ring-border shadow-md mb-4"
+        />
         <h1 className="text-xl font-bold text-foreground leading-tight">Our Lady Of Grace SHS</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Attendance System</p>
       </div>
