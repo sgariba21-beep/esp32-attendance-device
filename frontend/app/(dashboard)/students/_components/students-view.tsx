@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -199,10 +199,12 @@ export function StudentsView({ students, devices }: Props) {
 
       {students.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+          <Users className="h-8 w-8 mb-3 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">No students yet. Add one to get started.</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+          <Users className="h-8 w-8 mb-3 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">No students match your filters.</p>
         </div>
       ) : (

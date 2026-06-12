@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { CalendarDays } from 'lucide-react'
 import { MultiSelect } from './multi-select'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
@@ -378,6 +379,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+      <CalendarDays className="h-8 w-8 mb-3 text-muted-foreground" />
       <p className="text-sm text-muted-foreground">{message}</p>
     </div>
   )

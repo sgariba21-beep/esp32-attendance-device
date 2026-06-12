@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, Fragment } from 'react'
+import { Cpu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
@@ -50,6 +51,7 @@ export function DevicesView({ devices }: Props) {
 
       {devices.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+          <Cpu className="h-8 w-8 mb-3 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">No devices yet. Add one to get started.</p>
         </div>
       ) : (

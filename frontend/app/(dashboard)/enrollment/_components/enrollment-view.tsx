@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { ClipboardList } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -108,6 +109,7 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
 
       {jobs.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+          <ClipboardList className="h-8 w-8 mb-3 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">No enrollment jobs yet.</p>
         </div>
       ) : (

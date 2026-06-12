@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, Fragment } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, BookOpen } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -70,6 +70,7 @@ export function AcademicView({ terms }: Props) {
 
       {terms.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
+          <BookOpen className="h-8 w-8 mb-3 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">No academic terms yet. Add one to get started.</p>
         </div>
       ) : (
