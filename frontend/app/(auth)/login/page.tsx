@@ -1,21 +1,50 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/browser'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
+const MAX_ATTEMPTS = 3
+const LOCKOUT_MS = 5 * 60 * 1000
+const KEY_ATTEMPTS = 'login_attempts'
+const KEY_LOCKOUT = 'login_lockout_until'
+
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [countdown, setCountdown] = useState(0)
   const router = useRouter()
+
+  useEffect(() => {
+    const lockoutUntil = parseInt(localStorage.getItem(KEY_LOCKOUT) ?? '0', 10)
+    const remaining = Math.max(0, lockoutUntil - Date.now())
+    if (remaining > 0) setCountdown(Math.ceil(remaining / 1000))
+  }, [])
+
+  useEffect(() => {
+    if (countdown <= 0) return
+    const id = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          localStorage.removeItem(KEY_LOCKOUT)
+          localStorage.removeItem(KEY_ATTEMPTS)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(id)
+  }, [countdown])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (countdown > 0) return
+
     setLoading(true)
     setError(null)
 
@@ -23,15 +52,29 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
-      setError('Invalid email or password.')
+      const attempts = parseInt(localStorage.getItem(KEY_ATTEMPTS) ?? '0', 10) + 1
+      if (attempts >= MAX_ATTEMPTS) {
+        localStorage.setItem(KEY_LOCKOUT, (Date.now() + LOCKOUT_MS).toString())
+        localStorage.removeItem(KEY_ATTEMPTS)
+        setCountdown(LOCKOUT_MS / 1000)
+      } else {
+        localStorage.setItem(KEY_ATTEMPTS, attempts.toString())
+        const left = MAX_ATTEMPTS - attempts
+        setError(`Invalid email or password. ${left} attempt${left === 1 ? '' : 's'} remaining.`)
+      }
       setLoading(false)
       return
     }
 
+    localStorage.removeItem(KEY_ATTEMPTS)
+    localStorage.removeItem(KEY_LOCKOUT)
     sessionStorage.setItem('app_session_active', '1')
     router.push('/attendance')
     router.refresh()
   }
+
+  const mins = Math.floor(countdown / 60)
+  const secs = String(countdown % 60).padStart(2, '0')
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
@@ -64,6 +107,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
+              disabled={countdown > 0}
             />
           </div>
           <div className="space-y-1.5">
@@ -75,13 +119,20 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
+              disabled={countdown > 0}
             />
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {countdown > 0 ? (
+            <p className="text-sm text-destructive">
+              Too many failed attempts. Try again in {mins}:{secs}.
+            </p>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : null}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
+          <Button type="submit" className="w-full" disabled={loading || countdown > 0}>
+            {countdown > 0 ? `Locked out — ${mins}:${secs}` : loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
       </div>
