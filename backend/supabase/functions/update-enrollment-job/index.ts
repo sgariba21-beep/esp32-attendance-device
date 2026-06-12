@@ -66,10 +66,10 @@ Deno.serve(async (req: Request) => {
         await supabase.from("students").update(studentUpdate).eq("id", student_id);
       }
     } else if (command === "delete") {
-      // Deletion succeeded — clear the sensor slot
-      const studentUpdate: Record<string, null> = {};
-      if (finger_slot === "fin1") studentUpdate.fin1 = null;
-      else if (finger_slot === "fin2") studentUpdate.fin2 = null;
+      // Deletion succeeded — clear the sensor slot (column is NOT NULL, so use 0)
+      const studentUpdate: Record<string, number> = {};
+      if (finger_slot === "fin1") studentUpdate.fin1 = 0;
+      else if (finger_slot === "fin2") studentUpdate.fin2 = 0;
       if (Object.keys(studentUpdate).length > 0) {
         await supabase.from("students").update(studentUpdate).eq("id", student_id);
       }
