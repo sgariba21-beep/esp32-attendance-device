@@ -41,6 +41,7 @@ export function HolidaysView({ holidays }: Props) {
     if (result.error) setRowError({ id, message: result.error })
   }
 
+  const today = new Date().toISOString().slice(0, 10)
   const sorted = [...holidays].sort((a, b) => a.date.localeCompare(b.date))
 
   return (
@@ -71,8 +72,8 @@ export function HolidaysView({ holidays }: Props) {
               {sorted.map((h) => (
                 <Fragment key={h.id}>
                   <TableRow>
-                    <TableCell className="whitespace-nowrap font-medium">{formatDate(h.date)}</TableCell>
-                    <TableCell>{h.label}</TableCell>
+                    <TableCell className={`whitespace-nowrap font-medium${h.date < today ? ' text-muted-foreground' : ''}`}>{formatDate(h.date)}</TableCell>
+                    <TableCell className={h.date < today ? 'text-muted-foreground' : undefined}>{h.label}</TableCell>
                     <TableCell className="text-right">
                       <Button
                         variant="ghost"
