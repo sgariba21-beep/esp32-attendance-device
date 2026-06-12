@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -32,6 +34,31 @@ function formatTime(iso: string) {
     dateStyle: 'short',
     timeStyle: 'short',
   })
+}
+
+function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'error' }) {
+  if (status === 'connected') {
+    return (
+      <Badge variant="success" className="gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
+        Live
+      </Badge>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <Badge variant="destructive" className="gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-destructive" />
+        Disconnected
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" className="gap-1.5">
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+      Connecting…
+    </Badge>
+  )
 }
 
 export function EnrollmentView({ initialJobs, devices }: Props) {
@@ -92,32 +119,20 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Enrollment</h1>
-          <span className={`mt-0.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-            sseStatus === 'connected' ? 'border-green-500/30 bg-green-500/10 text-green-700' :
-            sseStatus === 'error'     ? 'border-destructive/50 bg-destructive/10 text-destructive' :
-                                        'border-muted bg-muted text-muted-foreground'
-          }`}>
-            <span className={`inline-block h-1.5 w-1.5 rounded-full ${
-              sseStatus === 'connected' ? 'bg-green-500' :
-              sseStatus === 'error'     ? 'bg-destructive' :
-                                          'bg-muted-foreground'
-            }`} />
-            {sseStatus === 'connected' ? 'Live' : sseStatus === 'error' ? 'Disconnected' : 'Connecting…'}
-          </span>
-        </div>
-        <Button onClick={() => setDialogOpen(true)}>New job</Button>
-      </div>
+      <PageHeader
+        title="Enrollment"
+        subtitle={<SseStatusBadge status={sseStatus} />}
+        actions={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
+      />
 
       {jobs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-          <ClipboardList className="h-8 w-8 mb-3 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No enrollment jobs yet.</p>
-        </div>
+        <EmptyState
+          icon={ClipboardList}
+          message="No enrollment jobs yet."
+          action={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
+        />
       ) : (
-        <div className="rounded-md border overflow-x-auto">
+        <div className="rounded-xl border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -172,8 +187,11 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
                         {noteTruncated}
                       </span>
                       {(job.finger_slot || job.fid) && (
-                        <span className="text-xs text-muted-foreground">
-                          {[job.finger_slot, job.fid].filter(Boolean).join(' · ')}
+                        <span className="tabular-nums text-xs text-muted-foreground">
+                          {[
+                            job.finger_slot === 'fin1' ? 'Finger 1' : job.finger_slot === 'fin2' ? 'Finger 2' : job.finger_slot,
+                            job.fid,
+                          ].filter(Boolean).join(' · ')}
                         </span>
                       )}
                     </TableCell>

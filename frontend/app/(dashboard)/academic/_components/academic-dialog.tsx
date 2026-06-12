@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { createAcademicTerm, updateAcademicTerm } from '../_actions'
 import type { AcademicTerm } from '@/lib/types'
 
@@ -71,16 +73,15 @@ export function AcademicDialog({ open, onOpenChange, term }: Props) {
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
             <Label htmlFor="term">Term</Label>
-            <select
+            <NativeSelect
               id="term"
               value={form.term}
               onChange={(e) => set('term', e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
               {TERMS.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           <div className="space-y-2">
@@ -118,7 +119,11 @@ export function AcademicDialog({ open, onOpenChange, term }: Props) {
             Optional. When set, absences are only recorded within this range.
           </p>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <Alert variant="error">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

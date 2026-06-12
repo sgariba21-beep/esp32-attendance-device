@@ -2,9 +2,11 @@
 
 import { useState, Fragment } from 'react'
 import { Loader2, BookOpen } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -70,7 +72,7 @@ export function AcademicView({ terms }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         {activeTerm ? (
-          <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-sm">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1 text-sm">
             Active term: <span className="font-medium">{activeTerm.term} {activeTerm.year}</span>
           </span>
         ) : (
@@ -80,12 +82,13 @@ export function AcademicView({ terms }: Props) {
       </div>
 
       {terms.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-          <BookOpen className="h-8 w-8 mb-3 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No academic terms yet. Add one to get started.</p>
-        </div>
+        <EmptyState
+          icon={BookOpen}
+          message="No academic terms yet. Add one to get started."
+          action={<Button onClick={openAdd}>Add term</Button>}
+        />
       ) : (
-        <div className="rounded-md border overflow-x-auto">
+        <div className="rounded-xl border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -147,8 +150,10 @@ export function AcademicView({ terms }: Props) {
                   </TableRow>
                   {rowError?.id === t.id && (
                     <TableRow>
-                      <TableCell colSpan={3} className="py-2 text-sm text-destructive bg-destructive/5">
-                        {rowError.message}
+                      <TableCell colSpan={4} className="py-2">
+                        <Alert variant="error">
+                          <AlertDescription>{rowError.message}</AlertDescription>
+                        </Alert>
                       </TableCell>
                     </TableRow>
                   )}

@@ -2,8 +2,11 @@
 
 import { useState } from 'react'
 import { Cpu, Pencil, Trash2 } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EmptyState } from '@/components/ui/empty-state'
+import { PageHeader } from '@/components/ui/page-header'
 import { DeviceDialog } from './device-dialog'
 import { deleteDevice } from '../_actions'
 import type { Device } from '@/lib/types'
@@ -36,21 +39,18 @@ export function DevicesView({ devices }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Devices</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {devices.length} device{devices.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <Button onClick={openAdd}>Add device</Button>
-      </div>
+      <PageHeader
+        title="Devices"
+        subtitle={`${devices.length} device${devices.length !== 1 ? 's' : ''}`}
+        actions={<Button onClick={openAdd}>Add device</Button>}
+      />
 
       {devices.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-          <Cpu className="h-8 w-8 mb-3 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No devices yet. Add one to get started.</p>
-        </div>
+        <EmptyState
+          icon={Cpu}
+          message="No devices yet. Add one to get started."
+          action={<Button onClick={openAdd}>Add device</Button>}
+        />
       ) : (
         <div className="space-y-4">
           {Object.entries(
@@ -70,7 +70,7 @@ export function DevicesView({ devices }: Props) {
                     .map((d) => (
                       <div
                         key={d.id}
-                        className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
+                        className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm"
                       >
                         <span>{d.class}</span>
                         <button
@@ -93,7 +93,9 @@ export function DevicesView({ devices }: Props) {
               </div>
             ))}
           {deleteError && (
-            <p className="text-sm text-destructive">{deleteError.message}</p>
+            <Alert variant="error">
+              <AlertDescription>{deleteError.message}</AlertDescription>
+            </Alert>
           )}
         </div>
       )}

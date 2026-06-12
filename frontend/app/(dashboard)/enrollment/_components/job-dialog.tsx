@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
 import type { StudentOption } from '../_actions'
 import type { Device } from '@/lib/types'
@@ -21,11 +23,16 @@ type Props = {
 }
 
 const COMMANDS: { value: Command; label: string; description: string }[] = [
-  { value: 'register',        label: 'Register',        description: 'Enroll a fingerprint for a student.' },
-  { value: 'delete',          label: 'Delete',          description: "Remove a student's fingerprint from the device." },
-  { value: 'register-master', label: 'Reg. master',     description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
-  { value: 'delete-master',   label: 'Del. master',     description: 'Remove a master fingerprint from the device by its sensor slot number.' },
-  { value: 'clearall',        label: 'Clear all',       description: 'Wipe all fingerprints stored on the device.' },
+  { value: 'register',        label: 'Register',      description: 'Enroll a fingerprint for a student.' },
+  { value: 'delete',          label: 'Delete',        description: "Remove a student's fingerprint from the device." },
+  { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
+  { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
+  { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
+]
+
+const FINGER_SLOTS: { value: FingerSlot; label: string }[] = [
+  { value: 'fin1', label: 'Finger 1' },
+  { value: 'fin2', label: 'Finger 2' },
 ]
 
 const empty = {
@@ -67,7 +74,7 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
   function set<K extends keyof typeof empty>(field: K, value: (typeof empty)[K]) {
     setForm((f) => ({ ...f, [field]: value }))
   }
-  const needsFid    = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
+  const needsFid       = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
   const needsMasterName = form.command === 'register-master'
 
   async function handleSubmit(e: React.FormEvent) {
@@ -132,30 +139,25 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
             <Label>Command</Label>
             <div className="grid grid-cols-2 gap-2">
               {COMMANDS.filter(c => c.value !== 'clearall').map(({ value, label }) => (
-                <button
+                <Button
                   key={value}
                   type="button"
+                  variant={form.command === value ? 'default' : 'outline'}
+                  size="sm"
                   onClick={() => set('command', value)}
-                  className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    form.command === value
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'border-input bg-background hover:bg-muted'
-                  }`}
                 >
                   {label}
-                </button>
+                </Button>
               ))}
-              <button
+              <Button
                 type="button"
+                variant={form.command === 'clearall' ? 'default' : 'outline'}
+                size="sm"
+                className="col-span-2"
                 onClick={() => set('command', 'clearall')}
-                className={`col-span-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                  form.command === 'clearall'
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-input bg-background hover:bg-muted'
-                }`}
               >
                 Clear all
-              </button>
+              </Button>
             </div>
             <p className="text-xs text-muted-foreground">
               {COMMANDS.find((c) => c.value === form.command)?.description}
@@ -165,18 +167,17 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
           {/* Device */}
           <div className="space-y-2">
             <Label htmlFor="device_id">Device</Label>
-            <select
+            <NativeSelect
               id="device_id"
               value={form.device_id}
               onChange={(e) => { set('device_id', e.target.value); set('student_id', '') }}
               required
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">Select a device…</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>{d.form} {d.class}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           {/* Master name */}
@@ -200,19 +201,18 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
           {needsStudent && (
             <div className="space-y-2">
               <Label htmlFor="student_id">Student</Label>
-              <select
+              <NativeSelect
                 id="student_id"
                 value={form.student_id}
                 onChange={(e) => set('student_id', e.target.value)}
                 required
                 disabled={loadingStudents}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
                 <option value="">{loadingStudents ? 'Loading…' : 'Select a student…'}</option>
                 {deviceStudents.map((s) => (
                   <option key={s.id} value={s.id}>{s.fullname} ({s.sid})</option>
                 ))}
-              </select>
+              </NativeSelect>
               {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
                 <p className="text-xs text-muted-foreground">No active students in this class.</p>
               )}
@@ -224,25 +224,23 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
             <div className="space-y-2">
               <Label>Finger slot</Label>
               <div className="flex gap-2">
-                {(['fin1', 'fin2'] as FingerSlot[]).map((slot) => (
-                  <button
-                    key={slot}
+                {FINGER_SLOTS.map(({ value, label }) => (
+                  <Button
+                    key={value}
                     type="button"
-                    onClick={() => set('finger_slot', slot)}
-                    className={`flex-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-                      form.finger_slot === slot
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'border-input bg-background hover:bg-muted'
-                    }`}
+                    variant={form.finger_slot === value ? 'default' : 'outline'}
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => set('finger_slot', value)}
                   >
-                    {slot}
-                  </button>
+                    {label}
+                  </Button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* FID (register / register-master only) */}
+          {/* FID (register / register-master / delete-master) */}
           {needsFid && (
             <div className="space-y-2">
               <Label htmlFor="fid">Sensor slot (1–127)</Label>
@@ -260,7 +258,11 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
             </div>
           )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <Alert variant="error">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

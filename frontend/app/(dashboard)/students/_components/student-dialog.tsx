@@ -1,13 +1,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Check, Loader2 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { createStudent, updateStudent } from '../_actions'
 import { createEnrollmentJob } from '../../enrollment/_actions'
 import type { StudentWithDevice } from '../page'
@@ -75,10 +77,12 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
 
   if (done) {
     return (
-      <div className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">
-        <span>✓</span>
-        <span>{label} — job queued (sensor slot {fid}). Tell the student to scan when prompted.</span>
-      </div>
+      <Alert variant="success">
+        <Check className="mt-0.5 size-4 shrink-0" />
+        <AlertDescription>
+          {label} — job queued (sensor slot {fid}). Tell the student to scan when prompted.
+        </AlertDescription>
+      </Alert>
     )
   }
 
@@ -108,7 +112,11 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
           </Button>
         </div>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && (
+        <Alert variant="error">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
     </div>
   )
 }
@@ -147,7 +155,7 @@ function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: Fi
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-sm w-20 shrink-0 text-muted-foreground">{label}</span>
-          <span className="text-sm">Slot {fid}</span>
+          <span className="tabular-nums text-sm">Slot {fid}</span>
           <Button
             type="button"
             variant="ghost"
@@ -159,7 +167,11 @@ function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: Fi
             {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
           </Button>
         </div>
-        {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
+        {deleteError && (
+          <Alert variant="error">
+            <AlertDescription>{deleteError}</AlertDescription>
+          </Alert>
+        )}
       </div>
     )
   }
@@ -316,12 +328,11 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
 
           <div className="space-y-2">
             <Label htmlFor="device_id">Class</Label>
-            <select
+            <NativeSelect
               id="device_id"
               value={form.device_id}
               onChange={(e) => set('device_id', e.target.value)}
               required
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">Select a class…</option>
               {devices.map((d) => (
@@ -329,7 +340,7 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
                   {d.form} {d.class}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           {student && (() => {
@@ -337,7 +348,7 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
             return (
               <div className="space-y-2">
                 <Label>Fingerprints</Label>
-                <div className="space-y-2 rounded-md border p-3">
+                <div className="space-y-2 rounded-lg border p-3">
                   <FingerEditRow
                     label="Finger 1"
                     slot="fin1"
@@ -359,7 +370,11 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
             )
           })()}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <Alert variant="error">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

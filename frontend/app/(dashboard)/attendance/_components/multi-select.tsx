@@ -57,32 +57,34 @@ export function MultiSelect({ options, selected, onChange, placeholder, searchPl
 
   return (
     <div ref={ref} className="relative">
+      {/* Clear button — rendered as a real <button> outside the trigger to avoid button-in-button */}
+      {selected.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onChange([])}
+          aria-label="Clear selection"
+          className="absolute right-7 top-1/2 z-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-9 min-w-[160px] items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm shadow-sm hover:bg-muted/50 focus:outline-none focus:ring-1 focus:ring-ring"
+        className={cn(
+          'flex h-8 min-w-[160px] items-center justify-between gap-2 rounded-lg border border-input bg-background pl-2.5 text-sm transition-colors outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+          selected.length > 0 ? 'pr-10' : 'pr-2.5',
+        )}
       >
         <span className={cn('truncate', selected.length === 0 && 'text-muted-foreground')}>
           {label}
         </span>
-        <div className="flex items-center gap-1 shrink-0">
-          {selected.length > 0 && (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => { e.stopPropagation(); onChange([]) }}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onChange([]) } }}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3 w-3" />
-            </span>
-          )}
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        </div>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-full min-w-[220px] rounded-md border bg-background shadow-md flex flex-col">
+        <div className="absolute top-full left-0 z-50 mt-1 w-full min-w-[220px] rounded-lg border bg-background shadow-md flex flex-col">
           <div className="flex items-center gap-2 border-b px-3 py-2">
             <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <input

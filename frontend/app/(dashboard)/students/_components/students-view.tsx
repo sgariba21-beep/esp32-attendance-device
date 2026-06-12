@@ -1,14 +1,19 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Loader2, Users } from 'lucide-react'
+import { Fingerprint, Loader2, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EmptyState } from '@/components/ui/empty-state'
+import { NativeSelect } from '@/components/ui/native-select'
+import { PageHeader } from '@/components/ui/page-header'
+import { Pagination } from '@/components/ui/pagination'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import { StudentDialog } from './student-dialog'
 import { setStudentStatus } from '../_actions'
 import type { StudentWithDevice } from '../page'
@@ -75,15 +80,11 @@ export function StudentsView({ students, devices }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Students</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {filtered.length} of {students.length} student{students.length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <Button onClick={openAdd}>Add student</Button>
-      </div>
+      <PageHeader
+        title="Students"
+        subtitle={`${filtered.length} of ${students.length} student${students.length !== 1 ? 's' : ''}`}
+        actions={<Button onClick={openAdd}>Add student</Button>}
+      />
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-3 items-center">
@@ -91,13 +92,12 @@ export function StudentsView({ students, devices }: Props) {
           placeholder="Search by name or ID…"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-          className="h-9 w-56"
+          className="w-56"
         />
 
-        <select
+        <NativeSelect
           value={classFilter}
           onChange={(e) => { setClassFilter(e.target.value); setPage(1) }}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="">All classes</option>
           {devices.map((d) => (
@@ -105,41 +105,42 @@ export function StudentsView({ students, devices }: Props) {
               {d.form} {d.class}
             </option>
           ))}
-        </select>
+        </NativeSelect>
 
-        <select
+        <NativeSelect
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value as StatusFilter); setPage(1) }}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
-        </select>
+        </NativeSelect>
 
         {hasFilters && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => { setSearch(''); setClassFilter(''); setStatusFilter('all'); setPage(1) }}
-            className="text-sm text-muted-foreground hover:text-foreground underline"
           >
             Clear
-          </button>
+          </Button>
         )}
       </div>
 
       {students.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-          <Users className="h-8 w-8 mb-3 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No students yet. Add one to get started.</p>
-        </div>
+        <EmptyState
+          icon={Users}
+          message="No students yet. Add one to get started."
+          action={<Button onClick={openAdd}>Add student</Button>}
+        />
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-          <Users className="h-8 w-8 mb-3 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No students match your filters.</p>
-        </div>
+        <EmptyState
+          icon={Users}
+          message="No students match your filters."
+        />
       ) : (
-        <>
-          <div className="rounded-md border overflow-x-auto">
+        <div className="space-y-3">
+          <div className="rounded-xl border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -152,77 +153,67 @@ export function StudentsView({ students, devices }: Props) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginated.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell className={`font-medium${s.status === 'inactive' ? ' opacity-60' : ''}`}>{s.fullname}</TableCell>
-                    <TableCell className={`text-muted-foreground${s.status === 'inactive' ? ' opacity-60' : ''}`}>{s.sid}</TableCell>
-                    <TableCell className={s.status === 'inactive' ? 'opacity-60' : undefined}>
-                      {s.device ? `${s.device.form} ${s.device.class}` : '—'}
-                    </TableCell>
-                    <TableCell className={s.status === 'inactive' ? 'opacity-60' : undefined}>
-                      <span className="flex items-center gap-1.5">
-                        <span className={s.fin1 ? 'text-foreground' : 'text-muted-foreground'}>{s.fin1 ? '●' : '○'}</span>
-                        <span className={s.fin2 ? 'text-foreground' : 'text-muted-foreground'}>{s.fin2 ? '●' : '○'}</span>
-                      </span>
-                    </TableCell>
-                    <TableCell className={s.status === 'inactive' ? 'opacity-60' : undefined}>
-                      <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
-                        {s.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={togglingId === s.id}
-                          onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
-                          className={s.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
-                        >
-                          {togglingId === s.id
-                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            : s.status === 'active'
-                              ? 'Deactivate'
-                              : 'Activate'}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {paginated.map((s) => {
+                  const inactive = s.status === 'inactive'
+                  return (
+                    <TableRow key={s.id}>
+                      <TableCell className={cn('font-medium', inactive && 'opacity-60')}>
+                        {s.fullname}
+                      </TableCell>
+                      <TableCell className={cn('font-mono tabular-nums text-muted-foreground text-xs', inactive && 'opacity-60')}>
+                        {s.sid}
+                      </TableCell>
+                      <TableCell className={cn(inactive && 'opacity-60')}>
+                        {s.device ? `${s.device.form} ${s.device.class}` : '—'}
+                      </TableCell>
+                      <TableCell className={cn(inactive && 'opacity-60')}>
+                        <span className="flex items-center gap-1.5" title={`Finger 1: ${s.fin1 ? `slot ${s.fin1}` : 'not enrolled'} · Finger 2: ${s.fin2 ? `slot ${s.fin2}` : 'not enrolled'}`}>
+                          <Fingerprint className={cn('size-3.5', s.fin1 ? 'text-success-foreground' : 'text-muted-foreground/40')} />
+                          <Fingerprint className={cn('size-3.5', s.fin2 ? 'text-success-foreground' : 'text-muted-foreground/40')} />
+                        </span>
+                      </TableCell>
+                      <TableCell className={cn(inactive && 'opacity-60')}>
+                        <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
+                          {s.status === 'active' ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={togglingId === s.id}
+                            onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
+                            className={s.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
+                          >
+                            {togglingId === s.id
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : s.status === 'active'
+                                ? 'Deactivate'
+                                : 'Activate'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-3">
-              <p className="text-xs text-muted-foreground">
-                Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length.toLocaleString()}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage(page - 1)}
-                  disabled={page <= 1}
-                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Previous
-                </button>
-                <span className="text-sm text-muted-foreground">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(page + 1)}
-                  disabled={page >= totalPages}
-                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={filtered.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+            />
           )}
-        </>
+        </div>
       )}
 
       <StudentDialog

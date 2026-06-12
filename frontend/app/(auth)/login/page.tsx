@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/browser'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -89,8 +90,8 @@ export default function LoginPage() {
         <p className="text-sm text-muted-foreground mt-0.5">Attendance System</p>
       </div>
 
-      {/* Login card */}
-      <div className="w-full max-w-sm bg-card border border-border rounded-xl shadow-md p-6 space-y-5">
+      {/* Login card — ring-based elevation to match the design system */}
+      <div className="w-full max-w-sm bg-card ring-1 ring-foreground/10 rounded-xl p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold text-foreground">Sign in</h2>
           <p className="text-sm text-muted-foreground mt-0.5">Enter your admin credentials to continue.</p>
@@ -126,11 +127,15 @@ export default function LoginPage() {
           </div>
 
           {countdown > 0 ? (
-            <p className="text-sm text-destructive">
-              Too many failed attempts. Try again in {mins}:{secs}.
-            </p>
+            <Alert variant="error">
+              <AlertDescription>
+                Too many failed attempts. Try again in {mins}:{secs}.
+              </AlertDescription>
+            </Alert>
           ) : error ? (
-            <p className="text-sm text-destructive">{error}</p>
+            <Alert variant="error">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           ) : null}
 
           <Button type="submit" className="w-full" disabled={loading || countdown > 0}>

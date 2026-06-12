@@ -4,6 +4,9 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useState, useCallback, useMemo } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Table,
   TableBody,
@@ -12,7 +15,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
+import { CalendarDays } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { NativeSelect } from '@/components/ui/native-select'
+import { PageHeader } from '@/components/ui/page-header'
+import { Pagination } from '@/components/ui/pagination'
 import { MultiSelect } from './multi-select'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
@@ -144,11 +151,12 @@ export function AttendanceView({ records, students, devices, academic, filters, 
     setTermId('')
     setStudentIds([])
     setDeviceIds([])
-    router.push(pathname)  // drops all params including page
+    router.push(pathname)
   }
 
   const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0
   const summary = buildSummary(records)
+  const totalPages = Math.ceil(totalCount / pageSize)
 
   const studentOptions = useMemo(() => {
     const base = deviceIds.length > 0
@@ -167,57 +175,56 @@ export function AttendanceView({ records, students, devices, academic, filters, 
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Attendance</h1>
-        {hasFilters && (
-          <button
-            onClick={clearFilters}
-            className="text-sm text-muted-foreground hover:text-foreground underline"
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Attendance"
+        actions={
+          hasFilters ? (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-3 items-end">
         <div className="flex items-end gap-2">
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground font-medium">From</label>
-            <input
+            <Label htmlFor="from-date" className="text-xs">From</Label>
+            <Input
+              id="from-date"
               type="date"
               value={fromDate}
               onChange={(e) => {
                 setFromDate(e.target.value)
                 applyFilters({ from: e.target.value })
               }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground font-medium">To</label>
-            <input
+            <Label htmlFor="to-date" className="text-xs">To</Label>
+            <Input
+              id="to-date"
               type="date"
               value={toDate}
               onChange={(e) => {
                 setToDate(e.target.value)
                 applyFilters({ to: e.target.value })
               }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">Term</label>
-          <select
+          <Label htmlFor="term-filter" className="text-xs">Term</Label>
+          <NativeSelect
+            id="term-filter"
             value={termId}
             onChange={(e) => {
               setTermId(e.target.value)
               applyFilters({ term: e.target.value })
             }}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="">All terms</option>
             {academic.map((a) => (
@@ -225,14 +232,14 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 {a.term} {a.year}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
 
         <div className="w-px self-stretch bg-border mx-1" />
 
         <div className="flex items-end gap-2">
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground font-medium">Students</label>
+            <Label className="text-xs">Students</Label>
             <MultiSelect
               options={studentOptions}
               selected={studentIds}
@@ -245,7 +252,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground font-medium">Classes</label>
+            <Label className="text-xs">Classes</Label>
             <MultiSelect
               options={classOptions}
               selected={deviceIds}
@@ -272,11 +279,14 @@ export function AttendanceView({ records, students, devices, academic, filters, 
           <TabsTrigger value="summary">Summary</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="records" className="mt-4">
+        <TabsContent value="records" className="mt-4 space-y-3">
           {records.length === 0 ? (
-            <EmptyState message="No attendance records match your filters." />
+            <EmptyState
+              icon={CalendarDays}
+              message="No attendance records match your filters."
+            />
           ) : (
-            <div className="rounded-md border overflow-x-auto">
+            <div className="rounded-xl border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -294,7 +304,9 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                     <TableRow key={r.id}>
                       <TableCell className="whitespace-nowrap">{formatDate(r.date)}</TableCell>
                       <TableCell>{r.student?.fullname ?? '—'}</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">{r.student?.sid ?? '—'}</TableCell>
+                      <TableCell className="font-mono tabular-nums text-muted-foreground text-xs">
+                        {r.student?.sid ?? '—'}
+                      </TableCell>
                       <TableCell>
                         {r.device ? formatClass(r.device) : '—'}
                       </TableCell>
@@ -304,7 +316,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                       <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
                       <TableCell>
                         <Badge variant={r.status === 'present' ? 'success' : 'destructive'}>
-                          {r.status}
+                          {r.status === 'present' ? 'Present' : 'Absent'}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -314,40 +326,24 @@ export function AttendanceView({ records, students, devices, academic, filters, 
             </div>
           )}
           {totalCount > pageSize && (
-            <div className="flex items-center justify-between mt-3">
-              <p className="text-xs text-muted-foreground">
-                Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount.toLocaleString()} records
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => goToPage(page - 1)}
-                  disabled={page <= 1}
-                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Previous
-                </button>
-                <span className="text-sm text-muted-foreground">
-                  Page {page} of {Math.ceil(totalCount / pageSize)}
-                </span>
-                <button
-                  onClick={() => goToPage(page + 1)}
-                  disabled={page >= Math.ceil(totalCount / pageSize)}
-                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              pageSize={pageSize}
+              onPageChange={goToPage}
+            />
           )}
         </TabsContent>
 
         <TabsContent value="summary" className="mt-4">
           {summary.length === 0 ? (
-            <EmptyState message="No data to summarise. Add attendance records first." />
+            <EmptyState
+              icon={CalendarDays}
+              message="No data to summarise. Add attendance records first."
+            />
           ) : (
-            <div className="rounded-md border overflow-x-auto">
+            <div className="rounded-xl border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -366,12 +362,16 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                       <TableCell>{row.classLabel}</TableCell>
                       <TableCell>{row.term}</TableCell>
                       <TableCell>{row.year}</TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="text-right font-medium tabular-nums">
                         {row.total > 0 ? `${Math.round((row.present / row.total) * 100)}%` : '—'}
                       </TableCell>
-                      <TableCell className="text-right text-green-600 font-medium">{row.present}</TableCell>
-                      <TableCell className="text-right text-destructive font-medium">{row.absent}</TableCell>
-                      <TableCell className="text-right">{row.total}</TableCell>
+                      <TableCell className="text-right tabular-nums text-success-foreground font-medium">
+                        {row.present}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-destructive font-medium">
+                        {row.absent}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{row.total}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -380,15 +380,6 @@ export function AttendanceView({ records, students, devices, academic, filters, 
           )}
         </TabsContent>
       </Tabs>
-    </div>
-  )
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-      <CalendarDays className="h-8 w-8 mb-3 text-muted-foreground" />
-      <p className="text-sm text-muted-foreground">{message}</p>
     </div>
   )
 }

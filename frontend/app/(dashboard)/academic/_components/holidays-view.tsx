@@ -2,8 +2,10 @@
 
 import { useState, Fragment } from 'react'
 import { Loader2, CalendarOff } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EmptyState } from '@/components/ui/empty-state'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -54,12 +56,13 @@ export function HolidaysView({ holidays }: Props) {
       </div>
 
       {sorted.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-16 text-center">
-          <CalendarOff className="h-8 w-8 mb-3 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No holidays added yet.</p>
-        </div>
+        <EmptyState
+          icon={CalendarOff}
+          message="No holidays added yet."
+          action={<Button onClick={() => setDialogOpen(true)}>Add holiday</Button>}
+        />
       ) : (
-        <div className="rounded-md border overflow-x-auto">
+        <div className="rounded-xl border overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -69,32 +72,39 @@ export function HolidaysView({ holidays }: Props) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.map((h) => (
-                <Fragment key={h.id}>
-                  <TableRow>
-                    <TableCell className={`whitespace-nowrap font-medium${h.date < today ? ' text-muted-foreground' : ''}`}>{formatDate(h.date)}</TableCell>
-                    <TableCell className={h.date < today ? 'text-muted-foreground' : undefined}>{h.label}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={loadingId === h.id}
-                        onClick={() => setConfirmTarget(h)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        {loadingId === h.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                  {rowError?.id === h.id && (
+              {sorted.map((h) => {
+                const isPast = h.date < today
+                return (
+                  <Fragment key={h.id}>
                     <TableRow>
-                      <TableCell colSpan={3} className="py-2 text-sm text-destructive bg-destructive/5">
-                        {rowError.message}
+                      <TableCell className={`whitespace-nowrap font-medium${isPast ? ' text-muted-foreground' : ''}`}>
+                        {formatDate(h.date)}
+                      </TableCell>
+                      <TableCell className={isPast ? 'text-muted-foreground' : undefined}>{h.label}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={loadingId === h.id}
+                          onClick={() => setConfirmTarget(h)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          {loadingId === h.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
+                        </Button>
                       </TableCell>
                     </TableRow>
-                  )}
-                </Fragment>
-              ))}
+                    {rowError?.id === h.id && (
+                      <TableRow>
+                        <TableCell colSpan={3} className="py-2">
+                          <Alert variant="error">
+                            <AlertDescription>{rowError.message}</AlertDescription>
+                          </Alert>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
