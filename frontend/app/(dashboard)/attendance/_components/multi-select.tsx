@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Check, ChevronDown, X } from 'lucide-react'
+import { Check, ChevronDown, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 type Option = { value: string; label: string }
@@ -11,21 +11,30 @@ type Props = {
   selected: string[]
   onChange: (values: string[]) => void
   placeholder: string
+  searchPlaceholder?: string
 }
 
-export function MultiSelect({ options, selected, onChange, placeholder }: Props) {
+export function MultiSelect({ options, selected, onChange, placeholder, searchPlaceholder = 'Search…' }: Props) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false)
+        setQuery('')
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus()
+    else setQuery('')
+  }, [open])
 
   function toggle(value: string) {
     onChange(
@@ -34,6 +43,10 @@ export function MultiSelect({ options, selected, onChange, placeholder }: Props)
         : [...selected, value]
     )
   }
+
+  const filtered = query.trim()
+    ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options
 
   const label =
     selected.length === 0
@@ -69,29 +82,47 @@ export function MultiSelect({ options, selected, onChange, placeholder }: Props)
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 max-h-60 w-full min-w-[200px] overflow-auto rounded-md border bg-background shadow-md">
-          {options.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-muted-foreground">No options available.</p>
-          ) : (
-            options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => toggle(option.value)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted text-left"
-              >
-                <div className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center rounded border border-input',
-                  selected.includes(option.value) && 'bg-primary border-primary'
-                )}>
-                  {selected.includes(option.value) && (
-                    <Check className="h-3 w-3 text-primary-foreground" />
-                  )}
-                </div>
-                <span className="truncate">{option.label}</span>
+        <div className="absolute top-full left-0 z-50 mt-1 w-full min-w-[220px] rounded-md border bg-background shadow-md flex flex-col">
+          <div className="flex items-center gap-2 border-b px-3 py-2">
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} className="text-muted-foreground hover:text-foreground">
+                <X className="h-3 w-3" />
               </button>
-            ))
-          )}
+            )}
+          </div>
+
+          <div className="max-h-56 overflow-auto">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-muted-foreground">No results.</p>
+            ) : (
+              filtered.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => toggle(option.value)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted text-left"
+                >
+                  <div className={cn(
+                    'flex h-4 w-4 shrink-0 items-center justify-center rounded border border-input',
+                    selected.includes(option.value) && 'bg-primary border-primary'
+                  )}>
+                    {selected.includes(option.value) && (
+                      <Check className="h-3 w-3 text-primary-foreground" />
+                    )}
+                  </div>
+                  <span className="truncate">{option.label}</span>
+                </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
