@@ -121,8 +121,6 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
                 <TableHead>Command</TableHead>
                 <TableHead>Device</TableHead>
                 <TableHead>Student</TableHead>
-                <TableHead>Slot</TableHead>
-                <TableHead>FID</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Note</TableHead>
               </TableRow>
@@ -150,13 +148,18 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
                           ? <span className="text-xs text-muted-foreground">—</span>
                           : job.student?.fullname ?? '—'}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{job.finger_slot ?? '—'}</TableCell>
-                    <TableCell className="text-muted-foreground">{job.fid ?? '—'}</TableCell>
                     <TableCell>
                       <Badge variant={badge.variant}>{badge.label}</Badge>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground max-w-48 truncate">
-                      {job.command === 'register-master' ? '—' : (job.note ?? '—')}
+                    <TableCell className="text-sm text-muted-foreground max-w-48">
+                      <span className="block truncate">
+                        {job.command === 'register-master' ? '—' : (job.note ?? '—')}
+                      </span>
+                      {(job.finger_slot || job.fid) && (
+                        <span className="text-xs text-muted-foreground">
+                          {[job.finger_slot, job.fid].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
                     </TableCell>
                   </TableRow>
                 )
