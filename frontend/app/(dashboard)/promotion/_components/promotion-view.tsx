@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -109,12 +109,15 @@ export function PromotionView({ groups, totalActive }: Props) {
             Review what will happen, then apply when ready.
           </p>
         </div>
-        <Button
-          onClick={() => setConfirmOpen(true)}
-          disabled={totalMatched === 0}
-        >
-          Apply promotion
-        </Button>
+        <div className="flex flex-col items-end">
+          <Button
+            onClick={() => setConfirmOpen(true)}
+            disabled={totalMatched === 0}
+          >
+            Apply promotion
+          </Button>
+          <p className="text-xs text-muted-foreground mt-0.5">Irreversible — affects all students</p>
+        </div>
       </div>
 
       {error && (
@@ -127,7 +130,7 @@ export function PromotionView({ groups, totalActive }: Props) {
           <div key={g.fromForm} className="rounded-md border p-4 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">{g.fromForm}</span>
-              <span className="text-muted-foreground text-sm">→</span>
+              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
               {g.toForm
                 ? <span className="text-sm font-medium">{g.toForm}</span>
                 : <Badge variant="secondary">Inactive</Badge>
@@ -212,7 +215,7 @@ export function PromotionView({ groups, totalActive }: Props) {
               </button>
 
               {isOpen && (
-                <div className="border-t px-4 py-3 space-y-1">
+                <div className="border-t px-4 py-3 space-y-1 transition-all duration-150">
                   {visible.map((s) => {
                     const isUnmatched = g.unmatched.includes(s)
                     return (
