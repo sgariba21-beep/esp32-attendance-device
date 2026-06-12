@@ -113,6 +113,68 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
   )
 }
 
+// ─── finger edit row used in edit dialog ─────────────────────────────────────
+type FingerEditRowProps = {
+  label: string
+  slot: 'fin1' | 'fin2'
+  fid: number
+  studentId: string
+  deviceId: string
+  defaultFid: number
+}
+
+function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: FingerEditRowProps) {
+  const [deleting, setDeleting] = useState(false)
+  const [deleted, setDeleted] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  async function handleDelete() {
+    setDeleting(true)
+    setDeleteError(null)
+    const result = await createEnrollmentJob({
+      command: 'delete',
+      device_id: deviceId,
+      student_id: studentId,
+      finger_slot: slot,
+    })
+    setDeleting(false)
+    if (result?.error) { setDeleteError(result.error); return }
+    setDeleted(true)
+  }
+
+  if (fid && !deleted) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm w-20 shrink-0 text-muted-foreground">{label}</span>
+          <span className="text-sm">Slot {fid}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="h-7 px-2 text-xs text-destructive hover:text-destructive ml-auto"
+          >
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
+          </Button>
+        </div>
+        {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <FingerEnrollRow
+      label={label}
+      slot={slot}
+      studentId={studentId}
+      deviceId={deviceId}
+      defaultFid={defaultFid}
+    />
+  )
+}
+
 // ─── main dialog ─────────────────────────────────────────────────────────────
 const emptyForm = { sid: '', fullname: '', device_id: '' }
 
@@ -269,6 +331,33 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
               ))}
             </select>
           </div>
+
+          {student && (() => {
+            const baseFid = nextAvailableFid(student.device_id, usedFids)
+            return (
+              <div className="space-y-2">
+                <Label>Fingerprints</Label>
+                <div className="space-y-2 rounded-md border p-3">
+                  <FingerEditRow
+                    label="Finger 1"
+                    slot="fin1"
+                    fid={student.fin1 ?? 0}
+                    studentId={student.id}
+                    deviceId={student.device_id}
+                    defaultFid={baseFid}
+                  />
+                  <FingerEditRow
+                    label="Finger 2"
+                    slot="fin2"
+                    fid={student.fin2 ?? 0}
+                    studentId={student.id}
+                    deviceId={student.device_id}
+                    defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid}
+                  />
+                </div>
+              </div>
+            )
+          })()}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 

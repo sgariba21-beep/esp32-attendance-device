@@ -10,9 +10,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { StudentDialog } from './student-dialog'
-import { EnrollFingerDialog } from './enroll-finger-dialog'
 import { setStudentStatus } from '../_actions'
-import { createEnrollmentJob } from '../../enrollment/_actions'
 import type { StudentWithDevice } from '../page'
 import type { Device } from '@/lib/types'
 
@@ -36,15 +34,6 @@ export function StudentsView({ students, devices }: Props) {
 
   const PAGE_SIZE = 50
 
-  // Enroll dialog state
-  const [enrollTarget, setEnrollTarget] = useState<{
-    student: StudentWithDevice
-    slot: 'fin1' | 'fin2'
-  } | null>(null)
-
-  // Delete loading state: "studentId:slot"
-  const [deletingKey, setDeletingKey] = useState<string | null>(null)
-
   // ── computed ──────────────────────────────────────────────────────────────
 
   const usedFids = useMemo(() => {
@@ -56,14 +45,6 @@ export function StudentsView({ students, devices }: Props) {
     }
     return map
   }, [students])
-
-  function nextFid(deviceId: string): number {
-    const used = new Set(usedFids[deviceId] ?? [])
-    for (let i = 1; i <= 127; i++) {
-      if (!used.has(i)) return i
-    }
-    return 1
-  }
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
@@ -88,57 +69,6 @@ export function StudentsView({ students, devices }: Props) {
     setTogglingId(student.id)
     await setStudentStatus(student.id, student.status === 'active' ? 'inactive' : 'active')
     setTogglingId(null)
-  }
-
-  async function handleDeleteFinger(student: StudentWithDevice, slot: 'fin1' | 'fin2') {
-    const key = `${student.id}:${slot}`
-    setDeletingKey(key)
-    await createEnrollmentJob({
-      command: 'delete',
-      device_id: student.device_id,
-      student_id: student.id,
-      finger_slot: slot,
-    })
-    setDeletingKey(null)
-  }
-
-  function openEnroll(student: StudentWithDevice, slot: 'fin1' | 'fin2') {
-    setEnrollTarget({ student, slot })
-  }
-
-  // ── finger cell helper ────────────────────────────────────────────────────
-
-  function FingerCell({ student, slot }: { student: StudentWithDevice; slot: 'fin1' | 'fin2' }) {
-    const fid = student[slot]
-    const key = `${student.id}:${slot}`
-    const isDeleting = deletingKey === key
-
-    if (fid) {
-      return (
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm text-muted-foreground">Slot {fid}</span>
-          <button
-            onClick={() => handleDeleteFinger(student, slot)}
-            disabled={isDeleting}
-            title="Delete fingerprint"
-            className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-          >
-            {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '×'}
-          </button>
-        </div>
-      )
-    }
-
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-        onClick={() => openEnroll(student, slot)}
-      >
-        + Enroll
-      </Button>
-    )
   }
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -216,8 +146,7 @@ export function StudentsView({ students, devices }: Props) {
                   <TableHead>Name</TableHead>
                   <TableHead>School ID</TableHead>
                   <TableHead>Class</TableHead>
-                  <TableHead>Finger 1</TableHead>
-                  <TableHead>Finger 2</TableHead>
+                  <TableHead>Fingerprints</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -230,8 +159,12 @@ export function StudentsView({ students, devices }: Props) {
                     <TableCell>
                       {s.device ? `${s.device.form} ${s.device.class}` : '—'}
                     </TableCell>
-                    <TableCell><FingerCell student={s} slot="fin1" /></TableCell>
-                    <TableCell><FingerCell student={s} slot="fin2" /></TableCell>
+                    <TableCell>
+                      <span className="flex items-center gap-1.5">
+                        <span className={s.fin1 ? 'text-foreground' : 'text-muted-foreground'}>{s.fin1 ? '●' : '○'}</span>
+                        <span className={s.fin2 ? 'text-foreground' : 'text-muted-foreground'}>{s.fin2 ? '●' : '○'}</span>
+                      </span>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
                         {s.status}
@@ -314,13 +247,6 @@ export function StudentsView({ students, devices }: Props) {
         }}
       />
 
-      <EnrollFingerDialog
-        open={enrollTarget !== null}
-        onOpenChange={(v) => { if (!v) setEnrollTarget(null) }}
-        student={enrollTarget?.student ?? null}
-        slot={enrollTarget?.slot ?? null}
-        defaultFid={enrollTarget ? nextFid(enrollTarget.student.device_id) : 1}
-      />
     </div>
   )
 }
