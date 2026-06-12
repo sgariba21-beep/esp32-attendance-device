@@ -31,6 +31,9 @@ export function StudentsView({ students, devices }: Props) {
   const [search, setSearch] = useState('')
   const [classFilter, setClassFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [page, setPage] = useState(1)
+
+  const PAGE_SIZE = 50
 
   // Enroll dialog state
   const [enrollTarget, setEnrollTarget] = useState<{
@@ -72,6 +75,8 @@ export function StudentsView({ students, devices }: Props) {
   }, [students, search, classFilter, statusFilter])
 
   const hasFilters = search || classFilter || statusFilter !== 'all'
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // ── handlers ─────────────────────────────────────────────────────────────
 
@@ -154,13 +159,13 @@ export function StudentsView({ students, devices }: Props) {
         <Input
           placeholder="Search by name or ID…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
           className="h-9 w-56"
         />
 
         <select
           value={classFilter}
-          onChange={(e) => setClassFilter(e.target.value)}
+          onChange={(e) => { setClassFilter(e.target.value); setPage(1) }}
           className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="">All classes</option>
@@ -173,7 +178,7 @@ export function StudentsView({ students, devices }: Props) {
 
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          onChange={(e) => { setStatusFilter(e.target.value as StatusFilter); setPage(1) }}
           className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="all">All statuses</option>
@@ -183,7 +188,7 @@ export function StudentsView({ students, devices }: Props) {
 
         {hasFilters && (
           <button
-            onClick={() => { setSearch(''); setClassFilter(''); setStatusFilter('all') }}
+            onClick={() => { setSearch(''); setClassFilter(''); setStatusFilter('all'); setPage(1) }}
             className="text-sm text-muted-foreground hover:text-foreground underline"
           >
             Clear
@@ -200,59 +205,88 @@ export function StudentsView({ students, devices }: Props) {
           <p className="text-sm text-muted-foreground">No students match your filters.</p>
         </div>
       ) : (
-        <div className="rounded-md border overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>School ID</TableHead>
-                <TableHead>Class</TableHead>
-                <TableHead>Finger 1</TableHead>
-                <TableHead>Finger 2</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((s) => (
-                <TableRow key={s.id} className={s.status === 'inactive' ? 'opacity-60' : ''}>
-                  <TableCell className="font-medium">{s.fullname}</TableCell>
-                  <TableCell className="text-muted-foreground">{s.sid}</TableCell>
-                  <TableCell>
-                    {s.device ? `${s.device.form} ${s.device.class}` : '—'}
-                  </TableCell>
-                  <TableCell><FingerCell student={s} slot="fin1" /></TableCell>
-                  <TableCell><FingerCell student={s} slot="fin2" /></TableCell>
-                  <TableCell>
-                    <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
-                      {s.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={togglingId === s.id}
-                        onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
-                        className={s.status === 'active' ? 'text-destructive hover:text-destructive' : ''}
-                      >
-                        {togglingId === s.id
-                          ? '…'
-                          : s.status === 'active'
-                            ? 'Deactivate'
-                            : 'Activate'}
-                      </Button>
-                    </div>
-                  </TableCell>
+        <>
+          <div className="rounded-md border overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>School ID</TableHead>
+                  <TableHead>Class</TableHead>
+                  <TableHead>Finger 1</TableHead>
+                  <TableHead>Finger 2</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {paginated.map((s) => (
+                  <TableRow key={s.id} className={s.status === 'inactive' ? 'opacity-60' : ''}>
+                    <TableCell className="font-medium">{s.fullname}</TableCell>
+                    <TableCell className="text-muted-foreground">{s.sid}</TableCell>
+                    <TableCell>
+                      {s.device ? `${s.device.form} ${s.device.class}` : '—'}
+                    </TableCell>
+                    <TableCell><FingerCell student={s} slot="fin1" /></TableCell>
+                    <TableCell><FingerCell student={s} slot="fin2" /></TableCell>
+                    <TableCell>
+                      <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
+                        {s.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={togglingId === s.id}
+                          onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
+                          className={s.status === 'active' ? 'text-destructive hover:text-destructive' : ''}
+                        >
+                          {togglingId === s.id
+                            ? '…'
+                            : s.status === 'active'
+                              ? 'Deactivate'
+                              : 'Activate'}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-muted-foreground">
+                Showing {((page - 1) * PAGE_SIZE) + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length.toLocaleString()}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage(page - 1)}
+                  disabled={page <= 1}
+                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(page + 1)}
+                  disabled={page >= totalPages}
+                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <StudentDialog
