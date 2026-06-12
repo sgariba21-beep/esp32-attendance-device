@@ -181,30 +181,32 @@ export function AttendanceView({ records, students, devices, academic, filters, 
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-3 items-end">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">From</label>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => {
-              setFromDate(e.target.value)
-              applyFilters({ from: e.target.value })
-            }}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-        </div>
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">From</label>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value)
+                applyFilters({ from: e.target.value })
+              }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">To</label>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => {
-              setToDate(e.target.value)
-              applyFilters({ to: e.target.value })
-            }}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-          />
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">To</label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => {
+                setToDate(e.target.value)
+                applyFilters({ to: e.target.value })
+              }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
         </div>
 
         <div className="flex flex-col gap-1">
@@ -226,37 +228,41 @@ export function AttendanceView({ records, students, devices, academic, filters, 
           </select>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">Students</label>
-          <MultiSelect
-            options={studentOptions}
-            selected={studentIds}
-            onChange={(val) => {
-              setStudentIds(val)
-              applyFilters({ students: val })
-            }}
-            placeholder="All students"
-          />
-        </div>
+        <div className="w-px self-stretch bg-border mx-1" />
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground font-medium">Classes</label>
-          <MultiSelect
-            options={classOptions}
-            selected={deviceIds}
-            onChange={(val) => {
-              setDeviceIds(val)
-              const validIds = val.length > 0
-                ? new Set(students.filter((s) => val.includes(s.device_id)).map((s) => s.id))
-                : null
-              const nextStudentIds = validIds
-                ? studentIds.filter((id) => validIds.has(id))
-                : studentIds
-              if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
-              applyFilters({ classes: val, students: nextStudentIds })
-            }}
-            placeholder="All classes"
-          />
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">Students</label>
+            <MultiSelect
+              options={studentOptions}
+              selected={studentIds}
+              onChange={(val) => {
+                setStudentIds(val)
+                applyFilters({ students: val })
+              }}
+              placeholder="All students"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground font-medium">Classes</label>
+            <MultiSelect
+              options={classOptions}
+              selected={deviceIds}
+              onChange={(val) => {
+                setDeviceIds(val)
+                const validIds = val.length > 0
+                  ? new Set(students.filter((s) => val.includes(s.device_id)).map((s) => s.id))
+                  : null
+                const nextStudentIds = validIds
+                  ? studentIds.filter((id) => validIds.has(id))
+                  : studentIds
+                if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
+                applyFilters({ classes: val, students: nextStudentIds })
+              }}
+              placeholder="All classes"
+            />
+          </div>
         </div>
       </div>
 
