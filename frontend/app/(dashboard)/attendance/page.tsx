@@ -4,6 +4,8 @@ import { AttendanceView } from './_components/attendance-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
+const PAGE_SIZE = 50
+
 export default async function AttendancePage({
   searchParams,
 }: {
@@ -21,6 +23,8 @@ export default async function AttendancePage({
   const deviceIds = typeof params.classes === 'string'
     ? params.classes.split(',').filter(Boolean)
     : []
+  const page = typeof params.page === 'string' ? Math.max(1, parseInt(params.page, 10)) : 1
+  const offset = (page - 1) * PAGE_SIZE
 
   const supabase = createAdminClient()
 
@@ -49,10 +53,10 @@ export default async function AttendancePage({
       student:sid(id, fullname, sid),
       academic:academic_id(id, term, year),
       device:device_id(id, form, class)
-    `)
+    `, { count: 'exact' })
     .order('date', { ascending: false })
     .order('time', { ascending: false })
-    .limit(200)
+    .range(offset, offset + PAGE_SIZE - 1)
 
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
@@ -60,7 +64,7 @@ export default async function AttendancePage({
   if (studentIds.length > 0) query = query.in('sid', studentIds)
   if (deviceIds.length > 0) query = query.in('device_id', deviceIds)
 
-  const { data: records } = await query
+  const { data: records, count } = await query
 
   return (
     <>
@@ -71,6 +75,9 @@ export default async function AttendancePage({
         devices={(devicesRes.data ?? []) as Device[]}
         academic={(academicRes.data ?? []) as AcademicTerm[]}
         filters={{ fromDate, toDate, termId, studentIds, deviceIds }}
+        page={page}
+        pageSize={PAGE_SIZE}
+        totalCount={count ?? 0}
       />
     </>
   )

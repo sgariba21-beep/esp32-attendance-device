@@ -31,6 +31,9 @@ type Props = {
   devices: Device[]
   academic: AcademicTerm[]
   filters: Filters
+  page: number
+  pageSize: number
+  totalCount: number
 }
 
 function formatClass(device: { form: string; class: string }) {
@@ -89,7 +92,7 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
-export function AttendanceView({ records, students, devices, academic, filters }: Props) {
+export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount }: Props) {
   const router = useRouter()
   const pathname = usePathname()
 
@@ -99,14 +102,15 @@ export function AttendanceView({ records, students, devices, academic, filters }
   const [studentIds, setStudentIds] = useState<string[]>(filters.studentIds)
   const [deviceIds, setDeviceIds] = useState<string[]>(filters.deviceIds)
 
-  const applyFilters = useCallback(
-    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[] }>) => {
+  const buildParams = useCallback(
+    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[]; page: number }>) => {
       const current = {
         from: fromDate,
         to: toDate,
         term: termId,
         students: studentIds,
         classes: deviceIds,
+        page: 1,
         ...overrides,
       }
       const params = new URLSearchParams()
@@ -115,9 +119,22 @@ export function AttendanceView({ records, students, devices, academic, filters }
       if (current.term) params.set('term', current.term)
       if (current.students.length) params.set('students', current.students.join(','))
       if (current.classes.length) params.set('classes', current.classes.join(','))
-      router.push(`${pathname}?${params.toString()}`)
+      if (current.page > 1) params.set('page', current.page.toString())
+      return params.toString()
     },
-    [fromDate, toDate, termId, studentIds, deviceIds, pathname, router]
+    [fromDate, toDate, termId, studentIds, deviceIds]
+  )
+
+  const applyFilters = useCallback(
+    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[] }>) => {
+      router.push(`${pathname}?${buildParams(overrides)}`)
+    },
+    [buildParams, pathname, router]
+  )
+
+  const goToPage = useCallback(
+    (p: number) => router.push(`${pathname}?${buildParams({ page: p })}`),
+    [buildParams, pathname, router]
   )
 
   function clearFilters() {
@@ -126,7 +143,7 @@ export function AttendanceView({ records, students, devices, academic, filters }
     setTermId('')
     setStudentIds([])
     setDeviceIds([])
-    router.push(pathname)
+    router.push(pathname)  // drops all params including page
   }
 
   const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0
@@ -244,7 +261,7 @@ export function AttendanceView({ records, students, devices, academic, filters }
 
       <Tabs defaultValue="records">
         <TabsList>
-          <TabsTrigger value="records">Records ({records.length})</TabsTrigger>
+          <TabsTrigger value="records">Records ({totalCount.toLocaleString()})</TabsTrigger>
           <TabsTrigger value="summary">Summary</TabsTrigger>
         </TabsList>
 
@@ -289,10 +306,31 @@ export function AttendanceView({ records, students, devices, academic, filters }
               </Table>
             </div>
           )}
-          {records.length === 200 && (
-            <p className="text-xs text-muted-foreground mt-2">
-              Showing first 200 records. Use filters to narrow results.
-            </p>
+          {totalCount > pageSize && (
+            <div className="flex items-center justify-between mt-3">
+              <p className="text-xs text-muted-foreground">
+                Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount.toLocaleString()} records
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => goToPage(page - 1)}
+                  disabled={page <= 1}
+                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} of {Math.ceil(totalCount / pageSize)}
+                </span>
+                <button
+                  onClick={() => goToPage(page + 1)}
+                  disabled={page >= Math.ceil(totalCount / pageSize)}
+                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           )}
         </TabsContent>
 
