@@ -90,7 +90,7 @@ export default function LoginPage() {
       </div>
 
       {/* Login card */}
-      <div className="w-full max-w-sm bg-card border border-border rounded-xl shadow-sm p-6 space-y-5">
+      <div className="w-full max-w-sm bg-card border border-border rounded-xl shadow-md p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold text-foreground">Sign in</h2>
           <p className="text-sm text-muted-foreground mt-0.5">Enter your admin credentials to continue.</p>
@@ -107,7 +107,8 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              disabled={countdown > 0}
+              disabled={loading || countdown > 0}
+              className={loading ? 'opacity-75' : ''}
             />
           </div>
           <div className="space-y-1.5">
@@ -119,7 +120,8 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              disabled={countdown > 0}
+              disabled={loading || countdown > 0}
+              className={loading ? 'opacity-75' : ''}
             />
           </div>
 
@@ -132,7 +134,7 @@ export default function LoginPage() {
           ) : null}
 
           <Button type="submit" className="w-full" disabled={loading || countdown > 0}>
-            {countdown > 0 ? `Locked out — ${mins}:${secs}` : loading ? 'Signing in…' : 'Sign in'}
+            {countdown > 0 ? `Try again in ${mins}:${secs}` : loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
       </div>
