@@ -153,19 +153,19 @@ export function StudentsView({ students, devices }: Props) {
               </TableHeader>
               <TableBody>
                 {paginated.map((s) => (
-                  <TableRow key={s.id} className={s.status === 'inactive' ? 'opacity-60' : ''}>
-                    <TableCell className="font-medium">{s.fullname}</TableCell>
-                    <TableCell className="text-muted-foreground">{s.sid}</TableCell>
-                    <TableCell>
+                  <TableRow key={s.id}>
+                    <TableCell className={`font-medium${s.status === 'inactive' ? ' opacity-60' : ''}`}>{s.fullname}</TableCell>
+                    <TableCell className={`text-muted-foreground${s.status === 'inactive' ? ' opacity-60' : ''}`}>{s.sid}</TableCell>
+                    <TableCell className={s.status === 'inactive' ? 'opacity-60' : undefined}>
                       {s.device ? `${s.device.form} ${s.device.class}` : '—'}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className={s.status === 'inactive' ? 'opacity-60' : undefined}>
                       <span className="flex items-center gap-1.5">
                         <span className={s.fin1 ? 'text-foreground' : 'text-muted-foreground'}>{s.fin1 ? '●' : '○'}</span>
                         <span className={s.fin2 ? 'text-foreground' : 'text-muted-foreground'}>{s.fin2 ? '●' : '○'}</span>
                       </span>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className={s.status === 'inactive' ? 'opacity-60' : undefined}>
                       <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
                         {s.status}
                       </Badge>
