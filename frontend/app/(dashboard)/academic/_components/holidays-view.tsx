@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, Fragment } from 'react'
+import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
@@ -79,7 +80,7 @@ export function HolidaysView({ holidays }: Props) {
                         onClick={() => setConfirmTarget(h)}
                         className="text-destructive hover:text-destructive"
                       >
-                        {loadingId === h.id ? '…' : 'Delete'}
+                        {loadingId === h.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
                       </Button>
                     </TableCell>
                   </TableRow>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, Fragment } from 'react'
+import { Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -110,7 +111,7 @@ export function AcademicView({ terms }: Props) {
                             disabled={loadingId === t.id}
                             onClick={() => handleSetActive(t)}
                           >
-                            {loadingId === t.id ? '…' : 'Set active'}
+                            {loadingId === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Set active'}
                           </Button>
                         )}
                         <Button
@@ -127,7 +128,7 @@ export function AcademicView({ terms }: Props) {
                           onClick={() => setConfirmTarget(t)}
                           className="text-destructive hover:text-destructive"
                         >
-                          {loadingId === t.id ? '…' : 'Delete'}
+                          {loadingId === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
                         </Button>
                       </div>
                     </TableCell>

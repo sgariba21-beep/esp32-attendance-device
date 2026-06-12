@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -122,7 +123,7 @@ export function StudentsView({ students, devices }: Props) {
             title="Delete fingerprint"
             className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
           >
-            {isDeleting ? '…' : '×'}
+            {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '×'}
           </button>
         </div>
       )
@@ -247,7 +248,7 @@ export function StudentsView({ students, devices }: Props) {
                           className={s.status === 'active' ? 'text-destructive hover:text-destructive' : ''}
                         >
                           {togglingId === s.id
-                            ? '…'
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             : s.status === 'active'
                               ? 'Deactivate'
                               : 'Activate'}

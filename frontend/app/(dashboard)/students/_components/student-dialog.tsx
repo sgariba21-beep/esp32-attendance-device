@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -100,7 +101,7 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
             placeholder="Slot"
           />
           <Button size="sm" onClick={handleEnroll} disabled={loading}>
-            {loading ? '…' : 'Queue job'}
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Queue job'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
             Cancel
