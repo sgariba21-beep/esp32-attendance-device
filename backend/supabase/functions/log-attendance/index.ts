@@ -14,6 +14,15 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Authenticate the device — every ESP32 must send the shared secret as X-Device-Secret.
+  // The secret lives in an env var so it never appears in source code.
+  if (req.headers.get("x-device-secret") !== Deno.env.get("DEVICE_SHARED_SECRET")) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   // Parse the request body
   const { sid, scan_id, timestamp } = await req.json();
 
