@@ -14,11 +14,10 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Authenticate the caller — only pg_cron (which sends the service role key as a Bearer token)
-  // should be able to trigger absent-marking. SUPABASE_SERVICE_ROLE_KEY is auto-injected by the
-  // platform, so it never needs to appear in source code or .env files.
-  const expected = `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`;
-  if (req.headers.get("authorization") !== expected) {
+  // Authenticate the caller — only pg_cron should be able to trigger absent-marking.
+  // We use x-cron-secret rather than Authorization because Kong intercepts and strips
+  // the Authorization header before it reaches the function, even with verify_jwt = false.
+  if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
