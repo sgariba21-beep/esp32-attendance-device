@@ -4,6 +4,25 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { verifySession } from '@/lib/supabase/dal'
 
+export type StudentOption = {
+  id: string
+  fullname: string
+  sid: string
+  device_id: string
+}
+
+export async function getStudentsByDevice(deviceId: string): Promise<StudentOption[]> {
+  await verifySession()
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('students')
+    .select('id, fullname, sid, device_id')
+    .eq('status', 'active')
+    .eq('device_id', deviceId)
+    .order('fullname')
+  return (data ?? []) as StudentOption[]
+}
+
 export type JobFormData =
   | { command: 'clearall'; device_id: string }
   | { command: 'register'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2'; fid: number }

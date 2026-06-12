@@ -7,13 +7,12 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { JobDialog } from './job-dialog'
-import type { EnrollmentJob, StudentOption } from '../page'
+import type { EnrollmentJob } from '../page'
 import type { Device } from '@/lib/types'
 
 type Props = {
   initialJobs: EnrollmentJob[]
   devices: Device[]
-  students: StudentOption[]
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -34,7 +33,7 @@ function formatTime(iso: string) {
   })
 }
 
-export function EnrollmentView({ initialJobs, devices, students }: Props) {
+export function EnrollmentView({ initialJobs, devices }: Props) {
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
@@ -54,13 +53,10 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
       }
 
       if (payload.eventType === 'INSERT') {
-        // New job: add at top, then fetch full row with joins from current list
-        // We only have flat data from Realtime, so insert a minimal row and let
-        // the next server re-render reconcile the joined fields.
         setJobs((prev) => {
           const exists = prev.find((j) => j.id === (payload.new.id as string))
           if (exists) return prev
-          // Build a partial job from the flat payload; joins come on next page load
+          // Joins (student name, device) resolve on next page load.
           const newJob: EnrollmentJob = {
             id: payload.new.id as string,
             command: payload.new.command as EnrollmentJob['command'],
@@ -70,7 +66,7 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
             note: (payload.new.note as string) ?? null,
             created_at: payload.new.created_at as string,
             device: devices.find((d) => d.id === payload.new.device_id) ?? null,
-            student: students.find((s) => s.id === payload.new.student_id) ?? null,
+            student: null,
           }
           return [newJob, ...prev]
         })
@@ -91,7 +87,7 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
     }
 
     return () => source.close()
-  }, [devices, students])
+  }, [devices])
 
   return (
     <div className="space-y-4">
@@ -172,7 +168,6 @@ export function EnrollmentView({ initialJobs, devices, students }: Props) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         devices={devices}
-        students={students}
       />
     </div>
   )

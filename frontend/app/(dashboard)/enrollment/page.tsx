@@ -3,6 +3,8 @@ import { verifySession } from '@/lib/supabase/dal'
 import { EnrollmentView } from './_components/enrollment-view'
 import type { Device } from '@/lib/types'
 
+export type { StudentOption } from './_actions'
+
 export type EnrollmentJob = {
   id: string
   command: 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
@@ -15,18 +17,11 @@ export type EnrollmentJob = {
   student: { id: string; fullname: string; sid: string } | null
 }
 
-export type StudentOption = {
-  id: string
-  fullname: string
-  sid: string
-  device_id: string
-}
-
 export default async function EnrollmentPage() {
   await verifySession()
   const supabase = createAdminClient()
 
-  const [jobsRes, devicesRes, studentsRes] = await Promise.all([
+  const [jobsRes, devicesRes] = await Promise.all([
     supabase
       .from('enrollment_jobs')
       .select(`
@@ -41,18 +36,12 @@ export default async function EnrollmentPage() {
       .select('id, form, class')
       .order('form')
       .order('class'),
-    supabase
-      .from('students')
-      .select('id, fullname, sid, device_id')
-      .eq('status', 'active')
-      .order('fullname'),
   ])
 
   return (
     <EnrollmentView
       initialJobs={(jobsRes.data ?? []) as unknown as EnrollmentJob[]}
       devices={(devicesRes.data ?? []) as Device[]}
-      students={(studentsRes.data ?? []) as StudentOption[]}
     />
   )
 }

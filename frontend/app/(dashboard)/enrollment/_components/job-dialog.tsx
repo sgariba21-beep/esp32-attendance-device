@@ -7,8 +7,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createEnrollmentJob } from '../_actions'
-import type { StudentOption } from '../page'
+import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
+import type { StudentOption } from '../_actions'
 import type { Device } from '@/lib/types'
 
 type Command = 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
@@ -18,7 +18,6 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   devices: Device[]
-  students: StudentOption[]
 }
 
 const COMMANDS: { value: Command; label: string; description: string }[] = [
@@ -38,25 +37,37 @@ const empty = {
   master_name: '',
 }
 
-export function JobDialog({ open, onOpenChange, devices, students }: Props) {
+export function JobDialog({ open, onOpenChange, devices }: Props) {
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [deviceStudents, setDeviceStudents] = useState<StudentOption[]>([])
+  const [loadingStudents, setLoadingStudents] = useState(false)
 
   useEffect(() => {
     if (open) {
       setError(null)
+      setDeviceStudents([])
       setForm({ ...empty, device_id: devices[0]?.id ?? '' })
     }
   }, [open, devices])
 
+  const needsStudent = form.command === 'register' || form.command === 'delete'
+
+  useEffect(() => {
+    if (!form.device_id || !needsStudent) { setDeviceStudents([]); return }
+    let cancelled = false
+    setLoadingStudents(true)
+    getStudentsByDevice(form.device_id).then((data) => {
+      if (!cancelled) { setDeviceStudents(data); setLoadingStudents(false) }
+    })
+    return () => { cancelled = true }
+  }, [form.device_id, needsStudent])
+
   function set<K extends keyof typeof empty>(field: K, value: (typeof empty)[K]) {
     setForm((f) => ({ ...f, [field]: value }))
   }
-
-  const deviceStudents = students.filter((s) => s.device_id === form.device_id)
-  const needsStudent = form.command === 'register' || form.command === 'delete'
-  const needsFid = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
+  const needsFid    = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
   const needsMasterName = form.command === 'register-master'
 
   async function handleSubmit(e: React.FormEvent) {
@@ -194,14 +205,15 @@ export function JobDialog({ open, onOpenChange, devices, students }: Props) {
                 value={form.student_id}
                 onChange={(e) => set('student_id', e.target.value)}
                 required
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                disabled={loadingStudents}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
-                <option value="">Select a student…</option>
+                <option value="">{loadingStudents ? 'Loading…' : 'Select a student…'}</option>
                 {deviceStudents.map((s) => (
                   <option key={s.id} value={s.id}>{s.fullname} ({s.sid})</option>
                 ))}
               </select>
-              {form.device_id && deviceStudents.length === 0 && (
+              {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
                 <p className="text-xs text-muted-foreground">No active students in this class.</p>
               )}
             </div>
