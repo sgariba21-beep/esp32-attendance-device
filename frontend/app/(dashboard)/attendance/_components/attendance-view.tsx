@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { CalendarDays } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { MultiSelect } from './multi-select'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
@@ -298,7 +298,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                       <TableCell>
                         {r.device ? formatClass(r.device) : '—'}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">
+                      <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
                         {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
@@ -322,8 +322,9 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 <button
                   onClick={() => goToPage(page - 1)}
                   disabled={page <= 1}
-                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                 >
+                  <ChevronLeft className="h-3.5 w-3.5" />
                   Previous
                 </button>
                 <span className="text-sm text-muted-foreground">
@@ -332,9 +333,10 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 <button
                   onClick={() => goToPage(page + 1)}
                   disabled={page >= Math.ceil(totalCount / pageSize)}
-                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-8 px-3 rounded-md border border-input text-sm hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                 >
                   Next
+                  <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -352,10 +354,10 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                     <TableHead>Class</TableHead>
                     <TableHead>Term</TableHead>
                     <TableHead>Year</TableHead>
+                    <TableHead className="text-right">Attendance %</TableHead>
                     <TableHead className="text-right">Present</TableHead>
                     <TableHead className="text-right">Absent</TableHead>
                     <TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right">Attendance %</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -364,12 +366,12 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                       <TableCell>{row.classLabel}</TableCell>
                       <TableCell>{row.term}</TableCell>
                       <TableCell>{row.year}</TableCell>
-                      <TableCell className="text-right text-green-600 font-medium">{row.present}</TableCell>
-                      <TableCell className="text-right text-destructive font-medium">{row.absent}</TableCell>
-                      <TableCell className="text-right">{row.total}</TableCell>
                       <TableCell className="text-right font-medium">
                         {row.total > 0 ? `${Math.round((row.present / row.total) * 100)}%` : '—'}
                       </TableCell>
+                      <TableCell className="text-right text-green-600 font-medium">{row.present}</TableCell>
+                      <TableCell className="text-right text-destructive font-medium">{row.absent}</TableCell>
+                      <TableCell className="text-right">{row.total}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
