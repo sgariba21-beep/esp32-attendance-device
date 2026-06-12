@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter, usePathname } from 'next/navigation'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useTransition } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -103,6 +103,7 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
 export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount }: Props) {
   const router = useRouter()
   const pathname = usePathname()
+  const [isPending, startTransition] = useTransition()
 
   const [fromDate, setFromDate] = useState(filters.fromDate ?? '')
   const [toDate, setToDate] = useState(filters.toDate ?? '')
@@ -135,13 +136,19 @@ export function AttendanceView({ records, students, devices, academic, filters, 
 
   const applyFilters = useCallback(
     (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[] }>) => {
-      router.push(`${pathname}?${buildParams(overrides)}`)
+      startTransition(() => {
+        router.push(`${pathname}?${buildParams(overrides)}`)
+      })
     },
     [buildParams, pathname, router]
   )
 
   const goToPage = useCallback(
-    (p: number) => router.push(`${pathname}?${buildParams({ page: p })}`),
+    (p: number) => {
+      startTransition(() => {
+        router.push(`${pathname}?${buildParams({ page: p })}`)
+      })
+    },
     [buildParams, pathname, router]
   )
 
@@ -151,7 +158,9 @@ export function AttendanceView({ records, students, devices, academic, filters, 
     setTermId('')
     setStudentIds([])
     setDeviceIds([])
-    router.push(pathname)
+    startTransition(() => {
+      router.push(pathname)
+    })
   }
 
   const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0
@@ -273,6 +282,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
         </div>
       </div>
 
+      <div className={`transition-opacity duration-150 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
       <Tabs defaultValue="records">
         <TabsList>
           <TabsTrigger value="records">Records ({totalCount.toLocaleString()})</TabsTrigger>
@@ -380,6 +390,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
           )}
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   )
 }
