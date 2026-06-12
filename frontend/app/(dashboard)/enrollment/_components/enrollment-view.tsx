@@ -95,14 +95,18 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Enrollment</h1>
-          <p className="text-sm text-muted-foreground mt-0.5 flex items-center gap-1.5">
-            <span className={`inline-block h-2 w-2 rounded-full ${
+          <span className={`mt-0.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+            sseStatus === 'connected' ? 'border-green-500/30 bg-green-500/10 text-green-700' :
+            sseStatus === 'error'     ? 'border-destructive/50 bg-destructive/10 text-destructive' :
+                                        'border-muted bg-muted text-muted-foreground'
+          }`}>
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${
               sseStatus === 'connected' ? 'bg-green-500' :
               sseStatus === 'error'     ? 'bg-destructive' :
                                           'bg-muted-foreground'
             }`} />
             {sseStatus === 'connected' ? 'Live' : sseStatus === 'error' ? 'Disconnected' : 'Connecting…'}
-          </p>
+          </span>
         </div>
         <Button onClick={() => setDialogOpen(true)}>New job</Button>
       </div>
