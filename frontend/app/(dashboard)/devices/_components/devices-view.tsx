@@ -1,12 +1,9 @@
 'use client'
 
-import { useState, Fragment } from 'react'
-import { Cpu } from 'lucide-react'
+import { useState } from 'react'
+import { Cpu, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table'
 import { DeviceDialog } from './device-dialog'
 import { deleteDevice } from '../_actions'
 import type { Device } from '@/lib/types'
@@ -55,48 +52,49 @@ export function DevicesView({ devices }: Props) {
           <p className="text-sm text-muted-foreground">No devices yet. Add one to get started.</p>
         </div>
       ) : (
-        <div className="rounded-md border overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Form</TableHead>
-                <TableHead>Class</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {devices.map((d) => (
-                <Fragment key={d.id}>
-                  <TableRow>
-                    <TableCell className="font-medium">{d.form}</TableCell>
-                    <TableCell className="text-muted-foreground">{d.class}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(d)}>
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setConfirmTarget(d)}
-                          className="text-destructive hover:text-destructive ml-1"
+        <div className="space-y-4">
+          {Object.entries(
+            devices.reduce((acc, d) => {
+              if (!acc[d.form]) acc[d.form] = []
+              acc[d.form].push(d)
+              return acc
+            }, {} as Record<string, Device[]>)
+          )
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([form, group]) => (
+              <div key={form}>
+                <p className="text-sm font-medium text-muted-foreground mb-2">Form {form}</p>
+                <div className="flex flex-wrap gap-2">
+                  {group
+                    .sort((a, b) => a.class.localeCompare(b.class))
+                    .map((d) => (
+                      <div
+                        key={d.id}
+                        className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm"
+                      >
+                        <span>{d.class}</span>
+                        <button
+                          onClick={() => openEdit(d)}
+                          title="Edit"
+                          className="text-muted-foreground hover:text-foreground transition-colors"
                         >
-                          Delete
-                        </Button>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setConfirmTarget(d)}
+                          title="Delete"
+                          className="text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                  {deleteError?.id === d.id && (
-                    <TableRow>
-                      <TableCell colSpan={3} className="py-2 text-sm text-destructive bg-destructive/5">
-                        {deleteError.message}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
+                    ))}
+                </div>
+              </div>
+            ))}
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError.message}</p>
+          )}
         </div>
       )}
 
