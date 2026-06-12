@@ -104,7 +104,7 @@ export function AcademicView({ terms }: Props) {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-3">
                         {t.status !== 'active' && (
                           <Button
                             variant="ghost"
@@ -127,7 +127,7 @@ export function AcademicView({ terms }: Props) {
                           size="sm"
                           disabled={loadingId === t.id}
                           onClick={() => setConfirmTarget(t)}
-                          className="text-destructive hover:text-destructive"
+                          className="text-destructive hover:text-destructive ml-1"
                         >
                           {loadingId === t.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
                         </Button>

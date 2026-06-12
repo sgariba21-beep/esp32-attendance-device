@@ -238,7 +238,7 @@ export function StudentsView({ students, devices }: Props) {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-3">
                         <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
                           Edit
                         </Button>
@@ -247,7 +247,7 @@ export function StudentsView({ students, devices }: Props) {
                           size="sm"
                           disabled={togglingId === s.id}
                           onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
-                          className={s.status === 'active' ? 'text-destructive hover:text-destructive' : ''}
+                          className={s.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
                         >
                           {togglingId === s.id
                             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />

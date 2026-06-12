@@ -71,7 +71,7 @@ export function DevicesView({ devices }: Props) {
                     <TableCell className="font-medium">{d.form}</TableCell>
                     <TableCell className="text-muted-foreground">{d.class}</TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-3">
                         <Button variant="ghost" size="sm" onClick={() => openEdit(d)}>
                           Edit
                         </Button>
@@ -79,7 +79,7 @@ export function DevicesView({ devices }: Props) {
                           variant="ghost"
                           size="sm"
                           onClick={() => setConfirmTarget(d)}
-                          className="text-destructive hover:text-destructive"
+                          className="text-destructive hover:text-destructive ml-1"
                         >
                           Delete
                         </Button>
