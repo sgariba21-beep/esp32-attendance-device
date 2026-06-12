@@ -128,17 +128,26 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
             <TableBody>
               {jobs.map((job) => {
                 const badge = STATUS_BADGE[job.status]
+                const noteText = job.command === 'register-master' ? '—' : (job.note ?? '—')
+                const noteTruncated = noteText.length > 40 ? noteText.slice(0, 40) + '…' : noteText
                 return (
                   <TableRow key={job.id}>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                       {formatTime(job.created_at)}
                     </TableCell>
-                    <TableCell className="font-medium">
-                      {job.command === 'register' ? 'Register'
-                        : job.command === 'delete' ? 'Delete'
-                        : job.command === 'register-master' ? 'Reg. master'
-                        : job.command === 'delete-master' ? 'Del. master'
-                        : 'Clear all'}
+                    <TableCell>
+                      <Badge variant={
+                        job.command === 'register' ? 'success'
+                          : job.command === 'delete' ? 'destructive'
+                          : job.command === 'clearall' ? 'secondary'
+                          : 'outline'
+                      }>
+                        {job.command === 'register' ? 'Register'
+                          : job.command === 'delete' ? 'Delete'
+                          : job.command === 'register-master' ? 'Reg. master'
+                          : job.command === 'delete-master' ? 'Del. master'
+                          : 'Clear all'}
+                      </Badge>
                     </TableCell>
                     <TableCell>{job.device ? formatClass(job.device) : '—'}</TableCell>
                     <TableCell>
@@ -152,8 +161,11 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
                       <Badge variant={badge.variant}>{badge.label}</Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground max-w-48">
-                      <span className="block truncate">
-                        {job.command === 'register-master' ? '—' : (job.note ?? '—')}
+                      <span
+                        className="block truncate"
+                        title={noteText.length > 40 ? noteText : undefined}
+                      >
+                        {noteTruncated}
                       </span>
                       {(job.finger_slot || job.fid) && (
                         <span className="text-xs text-muted-foreground">
