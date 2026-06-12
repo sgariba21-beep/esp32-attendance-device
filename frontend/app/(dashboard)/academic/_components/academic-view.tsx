@@ -14,12 +14,21 @@ import type { AcademicTerm } from '@/lib/types'
 
 type Props = { terms: AcademicTerm[] }
 
-function formatDate(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+function formatDateRange(start: string, end: string) {
+  const s = new Date(start + 'T00:00:00')
+  const e = new Date(end + 'T00:00:00')
+  const sameYear = s.getFullYear() === e.getFullYear()
+  const startStr = s.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  })
+  const endStr = e.toLocaleDateString(undefined, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   })
+  return `${startStr} – ${endStr}`
 }
 
 export function AcademicView({ terms }: Props) {
@@ -60,11 +69,13 @@ export function AcademicView({ terms }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {activeTerm
-            ? <>Active term: <span className="font-medium text-foreground">{activeTerm.term} {activeTerm.year}</span></>
-            : 'No active term set'}
-        </p>
+        {activeTerm ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-sm">
+            Active term: <span className="font-medium">{activeTerm.term} {activeTerm.year}</span>
+          </span>
+        ) : (
+          <p className="text-sm text-muted-foreground">No active term set</p>
+        )}
         <Button onClick={openAdd}>Add term</Button>
       </div>
 
@@ -79,7 +90,6 @@ export function AcademicView({ terms }: Props) {
             <TableHeader>
               <TableRow>
                 <TableHead>Term</TableHead>
-                <TableHead>Year</TableHead>
                 <TableHead>Dates</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -89,11 +99,12 @@ export function AcademicView({ terms }: Props) {
               {terms.map((t) => (
                 <Fragment key={t.id}>
                   <TableRow>
-                    <TableCell className="font-medium">{t.term}</TableCell>
-                    <TableCell>{t.year}</TableCell>
+                    <TableCell className="font-medium whitespace-nowrap">
+                      {t.term} <span className="text-muted-foreground font-normal">· {t.year}</span>
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                       {t.start_date && t.end_date
-                        ? `${formatDate(t.start_date)} → ${formatDate(t.end_date)}`
+                        ? formatDateRange(t.start_date, t.end_date)
                         : <span className="italic">Not set</span>}
                     </TableCell>
                     <TableCell>
@@ -136,7 +147,7 @@ export function AcademicView({ terms }: Props) {
                   </TableRow>
                   {rowError?.id === t.id && (
                     <TableRow>
-                      <TableCell colSpan={4} className="py-2 text-sm text-destructive bg-destructive/5">
+                      <TableCell colSpan={3} className="py-2 text-sm text-destructive bg-destructive/5">
                         {rowError.message}
                       </TableCell>
                     </TableRow>
