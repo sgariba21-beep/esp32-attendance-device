@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -8,6 +9,9 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { applyPromotion } from '../_actions'
 import type { PromotionGroup } from '../page'
+
+const GROUP_PREVIEW = 50
+const UNMATCHED_PREVIEW = 15
 
 type Props = {
   groups: PromotionGroup[]
@@ -19,6 +23,22 @@ export function PromotionView({ groups, totalActive }: Props) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ promoted: number; deactivated: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [fullGroups, setFullGroups] = useState<Set<string>>(new Set())
+  const [showAllUnmatched, setShowAllUnmatched] = useState(false)
+
+  function toggleGroup(form: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      next.has(form) ? next.delete(form) : next.add(form)
+      return next
+    })
+  }
+
+  function expandFull(form: string) {
+    setFullGroups((prev) => new Set(prev).add(form))
+  }
 
   const totalMatched = groups.reduce((n, g) => n + g.matched.length, 0)
   const totalUnmatched = groups.reduce((n, g) => n + g.unmatched.length, 0)
@@ -127,64 +147,100 @@ export function PromotionView({ groups, totalActive }: Props) {
       </div>
 
       {/* Warnings */}
-      {totalUnmatched > 0 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-4 space-y-3">
-          <p className="text-sm font-medium text-amber-800">
-            ⚠ {totalUnmatched} student{totalUnmatched !== 1 ? 's' : ''} cannot be promoted
-          </p>
-          <p className="text-xs text-amber-700">
-            No device exists for their next form + class combination. Add the missing devices first,
-            or they will be skipped when you apply.
-          </p>
-          <div className="space-y-1">
-            {groups.flatMap((g) =>
-              g.unmatched.map((s) => (
+      {totalUnmatched > 0 && (() => {
+        const allUnmatched = groups.flatMap((g) =>
+          g.unmatched.map((s) => ({ ...s, toForm: g.toForm }))
+        )
+        const visible = showAllUnmatched ? allUnmatched : allUnmatched.slice(0, UNMATCHED_PREVIEW)
+        const hidden = allUnmatched.length - visible.length
+        return (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-4 space-y-3">
+            <p className="text-sm font-medium text-amber-800">
+              ⚠ {totalUnmatched} student{totalUnmatched !== 1 ? 's' : ''} cannot be promoted
+            </p>
+            <p className="text-xs text-amber-700">
+              No device exists for their next form + class combination. Add the missing devices first,
+              or they will be skipped when you apply.
+            </p>
+            <div className="space-y-1">
+              {visible.map((s) => (
                 <div key={s.id} className="flex items-center gap-2 text-xs text-amber-800">
                   <span className="font-medium">{s.fullname}</span>
                   <span className="text-amber-600">({s.sid})</span>
                   <span className="text-amber-600">
-                    — no {g.toForm} {s.fromClass} device
+                    — no {s.toForm} {s.fromClass} device
                   </span>
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Detailed breakdown — collapsible per group */}
-      <div className="space-y-4">
-        {groups.map((g) => (
-          <details key={g.fromForm} className="rounded-md border">
-            <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium select-none hover:bg-muted/50">
-              <span>
-                {g.fromForm} → {g.toForm ?? 'Inactive'}
-                <span className="ml-2 font-normal text-muted-foreground">
-                  ({g.matched.length + g.unmatched.length} students)
-                </span>
-              </span>
-              <span className="text-muted-foreground text-xs">Click to expand</span>
-            </summary>
-            <div className="border-t px-4 py-3 space-y-1">
-              {g.matched.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 text-sm py-0.5">
-                  <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
-                  <span>{s.fullname}</span>
-                  <span className="text-muted-foreground">{s.sid}</span>
-                  <span className="text-muted-foreground">· {s.fromClass}</span>
-                </div>
               ))}
-              {g.unmatched.map((s) => (
-                <div key={s.id} className="flex items-center gap-2 text-sm py-0.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                  <span>{s.fullname}</span>
-                  <span className="text-muted-foreground">{s.sid}</span>
-                  <span className="text-amber-600">· no {g.toForm} {s.fromClass} device</span>
-                </div>
-              ))}
+              {hidden > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllUnmatched(true)}
+                  className="text-xs text-amber-700 underline hover:text-amber-900 mt-1"
+                >
+                  + {hidden} more
+                </button>
+              )}
             </div>
-          </details>
-        ))}
+          </div>
+        )
+      })()}
+
+      {/* Detailed breakdown — collapsible per group, lazily rendered */}
+      <div className="space-y-2">
+        {groups.map((g) => {
+          const isOpen = expandedGroups.has(g.fromForm)
+          const isFull = fullGroups.has(g.fromForm)
+          const all = [...g.matched, ...g.unmatched]
+          const visible = isFull ? all : all.slice(0, GROUP_PREVIEW)
+          const hidden = all.length - visible.length
+
+          return (
+            <div key={g.fromForm} className="rounded-md border">
+              <button
+                type="button"
+                onClick={() => toggleGroup(g.fromForm)}
+                className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium select-none hover:bg-muted/50"
+              >
+                <span>
+                  {g.fromForm} → {g.toForm ?? 'Inactive'}
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    ({all.length} students)
+                  </span>
+                </span>
+                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isOpen && (
+                <div className="border-t px-4 py-3 space-y-1">
+                  {visible.map((s) => {
+                    const isUnmatched = g.unmatched.includes(s)
+                    return (
+                      <div key={s.id} className="flex items-center gap-2 text-sm py-0.5">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${isUnmatched ? 'bg-amber-400' : 'bg-green-500'}`} />
+                        <span>{s.fullname}</span>
+                        <span className="text-muted-foreground">{s.sid}</span>
+                        {isUnmatched
+                          ? <span className="text-amber-600">· no {g.toForm} {s.fromClass} device</span>
+                          : <span className="text-muted-foreground">· {s.fromClass}</span>
+                        }
+                      </div>
+                    )
+                  })}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => expandFull(g.fromForm)}
+                      className="text-xs text-muted-foreground underline hover:text-foreground mt-1"
+                    >
+                      Show {hidden} more
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Confirmation dialog */}
