@@ -1,8 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/browser'
+import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
   CalendarDays,
@@ -25,14 +24,11 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
 
   async function handleSignOut() {
     sessionStorage.removeItem('app_session_active')
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
+    await fetch('/api/signout', { method: 'POST' })
+    window.location.href = '/login'
   }
 
   return (

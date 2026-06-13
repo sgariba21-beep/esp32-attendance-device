@@ -1,10 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/browser'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -19,7 +16,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [countdown, setCountdown] = useState(0)
-  const router = useRouter()
 
   useEffect(() => {
     const lockoutUntil = parseInt(localStorage.getItem(KEY_LOCKOUT) ?? '0', 10)
@@ -42,36 +38,54 @@ export default function LoginPage() {
     return () => clearInterval(id)
   }, [countdown])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (countdown > 0) return
+  async function handleSignIn() {
+    if (loading || countdown > 0) return
 
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (error) {
-      const attempts = parseInt(localStorage.getItem(KEY_ATTEMPTS) ?? '0', 10) + 1
-      if (attempts >= MAX_ATTEMPTS) {
-        localStorage.setItem(KEY_LOCKOUT, (Date.now() + LOCKOUT_MS).toString())
-        localStorage.removeItem(KEY_ATTEMPTS)
-        setCountdown(LOCKOUT_MS / 1000)
-      } else {
-        localStorage.setItem(KEY_ATTEMPTS, attempts.toString())
-        const left = MAX_ATTEMPTS - attempts
-        setError(`Invalid email or password. ${left} attempt${left === 1 ? '' : 's'} remaining.`)
+    try {
+      const res = await fetch('/api/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+      })
+      const contentType = res.headers.get('content-type') ?? ''
+      if (!contentType.includes('application/json')) {
+        const text = await res.text()
+        throw new Error(`Server returned ${res.status}: ${text.slice(0, 300)}`)
       }
-      setLoading(false)
-      return
-    }
+      const data = await res.json()
 
-    localStorage.removeItem(KEY_ATTEMPTS)
-    localStorage.removeItem(KEY_LOCKOUT)
-    sessionStorage.setItem('app_session_active', '1')
-    router.push('/attendance')
-    router.refresh()
+      if (data.error) {
+        const isCredentialError = data.error.toLowerCase().includes('invalid') ||
+          data.error.toLowerCase().includes('credentials')
+        if (isCredentialError) {
+          const attempts = parseInt(localStorage.getItem(KEY_ATTEMPTS) ?? '0', 10) + 1
+          if (attempts >= MAX_ATTEMPTS) {
+            localStorage.setItem(KEY_LOCKOUT, (Date.now() + LOCKOUT_MS).toString())
+            localStorage.removeItem(KEY_ATTEMPTS)
+            setCountdown(LOCKOUT_MS / 1000)
+          } else {
+            localStorage.setItem(KEY_ATTEMPTS, attempts.toString())
+            const left = MAX_ATTEMPTS - attempts
+            setError(`Invalid email or password. ${left} attempt${left === 1 ? '' : 's'} remaining.`)
+          }
+        } else {
+          setError(data.error)
+        }
+        setLoading(false)
+        return
+      }
+
+      localStorage.removeItem(KEY_ATTEMPTS)
+      localStorage.removeItem(KEY_LOCKOUT)
+      sessionStorage.setItem('app_session_active', '1')
+      window.location.href = '/attendance?session_init=1'
+    } catch (err) {
+      setError(`Network error: ${err instanceof Error ? err.message : String(err)}`)
+      setLoading(false)
+    }
   }
 
   const mins = Math.floor(countdown / 60)
@@ -79,7 +93,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
-      {/* Logo + school name */}
       <div className="flex flex-col items-center mb-8 text-center">
         <img
           src="/olag-logo.jpg"
@@ -90,14 +103,13 @@ export default function LoginPage() {
         <p className="text-sm text-muted-foreground mt-0.5">Attendance System</p>
       </div>
 
-      {/* Login card — ring-based elevation to match the design system */}
       <div className="w-full max-w-sm bg-card ring-1 ring-foreground/10 rounded-xl p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold text-foreground">Sign in</h2>
           <p className="text-sm text-muted-foreground mt-0.5">Enter your admin credentials to continue.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -106,10 +118,11 @@ export default function LoginPage() {
               placeholder="admin@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              required
               autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               disabled={loading || countdown > 0}
-              className={loading ? 'opacity-75' : ''}
             />
           </div>
           <div className="space-y-1.5">
@@ -119,10 +132,8 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
               autoComplete="current-password"
               disabled={loading || countdown > 0}
-              className={loading ? 'opacity-75' : ''}
             />
           </div>
 
@@ -138,10 +149,15 @@ export default function LoginPage() {
             </Alert>
           ) : null}
 
-          <Button type="submit" className="w-full" disabled={loading || countdown > 0}>
+          <button
+            type="button"
+            onClick={handleSignIn}
+            disabled={loading || countdown > 0}
+            className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 disabled:pointer-events-none disabled:opacity-50"
+          >
             {countdown > 0 ? `Try again in ${mins}:${secs}` : loading ? 'Signing in…' : 'Sign in'}
-          </Button>
-        </form>
+          </button>
+        </div>
       </div>
     </div>
   )

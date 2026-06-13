@@ -38,5 +38,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|olag-logo.jpg).*)'],
+  // Exclude `/api` so route handlers (sign-in, sign-out, SSE streams) handle
+  // their own auth and return JSON/status codes instead of being redirected to
+  // the HTML login page. Without this, an unauthenticated POST /api/signin gets
+  // 307-redirected to /login before the handler can run.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|olag-logo.jpg).*)'],
 }
