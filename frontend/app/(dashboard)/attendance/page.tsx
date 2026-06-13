@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 import { AttendanceView } from './_components/attendance-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
@@ -11,7 +11,7 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  await verifySession()
+  await requireRole('super_admin', 'admin', 'teacher')
 
   const params = await searchParams
   const fromDate = typeof params.from === 'string' ? params.from : undefined

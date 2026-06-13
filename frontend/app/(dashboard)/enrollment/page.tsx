@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 import { EnrollmentView } from './_components/enrollment-view'
 import type { Device } from '@/lib/types'
 
@@ -18,7 +18,7 @@ export type EnrollmentJob = {
 }
 
 export default async function EnrollmentPage() {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
 
   const [jobsRes, devicesRes] = await Promise.all([

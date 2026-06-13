@@ -1,11 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 import { DevicesView } from './_components/devices-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function DevicesPage() {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
 
   const { data } = await supabase

@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import { PromotionView } from './_components/promotion-view'
 
@@ -21,7 +21,7 @@ export type PromotionGroup = {
 }
 
 export default async function PromotionPage() {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const [studentsRes, devicesRes] = await Promise.all([

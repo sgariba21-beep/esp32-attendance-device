@@ -1,11 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 import { StudentsView } from './_components/students-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function StudentsPage() {
-  await verifySession()
+  await requireRole('super_admin', 'admin', 'teacher')
   const supabase = createAdminClient()
 
   const [studentsRes, devicesRes] = await Promise.all([

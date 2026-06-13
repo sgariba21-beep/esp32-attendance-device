@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AcademicView } from './_components/academic-view'
@@ -8,7 +8,7 @@ import type { AcademicTerm } from '@/lib/types'
 import type { Holiday } from './_components/holidays-view'
 
 export default async function AcademicPage() {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const [termsRes, holidaysRes] = await Promise.all([

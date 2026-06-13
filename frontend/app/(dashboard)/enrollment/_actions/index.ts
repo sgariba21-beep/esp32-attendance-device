@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 
 export type StudentOption = {
   id: string
@@ -12,7 +12,7 @@ export type StudentOption = {
 }
 
 export async function getStudentsByDevice(deviceId: string): Promise<StudentOption[]> {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('students')
@@ -31,7 +31,7 @@ export type JobFormData =
   | { command: 'delete-master'; device_id: string; fid: number }
 
 export async function createEnrollmentJob(data: JobFormData) {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
 
   const row: Record<string, unknown> = {

@@ -2,12 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 
 // ── Holidays ─────────────────────────────────────────────────────────────────
 
 export async function createHoliday(data: { date: string; label: string }) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('holidays').insert({
@@ -25,7 +25,7 @@ export async function createHoliday(data: { date: string; label: string }) {
 }
 
 export async function deleteHoliday(id: string) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('holidays').delete().eq('id', id)
@@ -43,7 +43,7 @@ export type AcademicFormData = {
 }
 
 export async function createAcademicTerm(data: AcademicFormData) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('academic').insert({
@@ -64,7 +64,7 @@ export async function createAcademicTerm(data: AcademicFormData) {
 }
 
 export async function updateAcademicTerm(id: string, data: AcademicFormData) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase
@@ -87,7 +87,7 @@ export async function updateAcademicTerm(id: string, data: AcademicFormData) {
 }
 
 export async function setActiveTerm(id: string) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   // Deactivate all terms first, then activate the selected one
@@ -110,7 +110,7 @@ export async function setActiveTerm(id: string) {
 }
 
 export async function deleteAcademicTerm(id: string) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('academic').delete().eq('id', id)

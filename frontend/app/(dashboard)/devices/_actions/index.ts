@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 
 export type DeviceFormData = {
   form: string
@@ -10,7 +10,7 @@ export type DeviceFormData = {
 }
 
 export async function createDevice(data: DeviceFormData) {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('devices').insert({
@@ -28,7 +28,7 @@ export async function createDevice(data: DeviceFormData) {
 }
 
 export async function updateDevice(id: string, data: DeviceFormData) {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase
@@ -46,7 +46,7 @@ export async function updateDevice(id: string, data: DeviceFormData) {
 }
 
 export async function deleteDevice(id: string) {
-  await verifySession()
+  await requireRole('super_admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('devices').delete().eq('id', id)

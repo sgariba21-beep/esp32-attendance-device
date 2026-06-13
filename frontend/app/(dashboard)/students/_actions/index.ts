@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 
 export type StudentFormData = {
   sid: string
@@ -13,7 +13,7 @@ export type StudentFormData = {
 }
 
 export async function createStudent(data: StudentFormData) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const device = await supabase
@@ -48,7 +48,7 @@ export async function createStudent(data: StudentFormData) {
 }
 
 export async function updateStudent(id: string, data: StudentFormData) {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const device = await supabase
@@ -80,7 +80,7 @@ export async function updateStudent(id: string, data: StudentFormData) {
 }
 
 export async function setStudentStatus(id: string, status: 'active' | 'inactive') {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase

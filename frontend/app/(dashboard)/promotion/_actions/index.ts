@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { verifySession } from '@/lib/supabase/dal'
+import { requireRole } from '@/lib/supabase/dal'
 
 /**
  * Applies promotion to every active student:
@@ -13,7 +13,7 @@ import { verifySession } from '@/lib/supabase/dal'
  * Finger slots are reset to 0 because the student is moving to a new physical sensor.
  */
 export async function applyPromotion() {
-  await verifySession()
+  await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   // Fresh data — never trust client-passed lists for destructive operations
