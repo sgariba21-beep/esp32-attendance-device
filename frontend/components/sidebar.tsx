@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import type { UserRole } from '@/lib/supabase/dal'
 import {
   CalendarDays,
   Users,
@@ -14,16 +15,17 @@ import {
 } from 'lucide-react'
 
 const navItems = [
-  { href: '/attendance',  label: 'Attendance',  icon: CalendarDays  },
-  { href: '/students',    label: 'Students',    icon: Users         },
-  { href: '/devices',     label: 'Devices',     icon: Cpu           },
-  { href: '/academic',    label: 'Academic',    icon: BookOpen      },
-  { href: '/enrollment',  label: 'Enrollment',  icon: ClipboardList },
-  { href: '/promotion',   label: 'Promotion',   icon: ArrowUpCircle },
-]
+  { href: '/attendance',  label: 'Attendance',  icon: CalendarDays,  roles: ['super_admin', 'admin', 'teacher'] },
+  { href: '/students',    label: 'Students',    icon: Users,         roles: ['super_admin', 'admin', 'teacher'] },
+  { href: '/devices',     label: 'Devices',     icon: Cpu,           roles: ['super_admin']                    },
+  { href: '/academic',    label: 'Academic',    icon: BookOpen,      roles: ['super_admin', 'admin']            },
+  { href: '/enrollment',  label: 'Enrollment',  icon: ClipboardList, roles: ['super_admin']                    },
+  { href: '/promotion',   label: 'Promotion',   icon: ArrowUpCircle, roles: ['super_admin', 'admin']            },
+] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
 
-export function Sidebar() {
+export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const visible = navItems.filter((item) => item.roles.includes(role))
 
   async function handleSignOut() {
     sessionStorage.removeItem('app_session_active')
@@ -47,7 +49,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {navItems.map(({ href, label, icon: Icon }) => (
+        {visible.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}
             href={href}
