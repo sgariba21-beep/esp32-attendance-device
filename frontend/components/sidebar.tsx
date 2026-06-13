@@ -11,6 +11,7 @@ import {
   BookOpen,
   ClipboardList,
   ArrowUpCircle,
+  ShieldCheck,
   LogOut,
 } from 'lucide-react'
 
@@ -21,6 +22,7 @@ const navItems = [
   { href: '/academic',    label: 'Academic',    icon: BookOpen,      roles: ['super_admin', 'admin']            },
   { href: '/enrollment',  label: 'Enrollment',  icon: ClipboardList, roles: ['super_admin']                    },
   { href: '/promotion',   label: 'Promotion',   icon: ArrowUpCircle, roles: ['super_admin', 'admin']            },
+  { href: '/users',       label: 'Accounts',    icon: ShieldCheck,   roles: ['super_admin']                    },
 ] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
 
 export function Sidebar({ role }: { role: UserRole }) {
