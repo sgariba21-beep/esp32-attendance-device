@@ -37,9 +37,25 @@ export async function createUser(data: {
   return { error: null }
 }
 
+async function superAdminCount() {
+  const admin = createAdminClient()
+  const { count } = await admin
+    .from('profiles')
+    .select('*', { count: 'exact', head: true })
+    .eq('role', 'super_admin')
+  return count ?? 0
+}
+
 export async function updateUserRole(id: string, role: UserRole, assigned_class: string | null) {
   await requireRole('super_admin')
   const admin = createAdminClient()
+
+  if (role !== 'super_admin') {
+    const { data: current } = await admin.from('profiles').select('role').eq('id', id).single()
+    if (current?.role === 'super_admin' && (await superAdminCount()) <= 1) {
+      return { error: 'Cannot demote the last super admin account.' }
+    }
+  }
 
   const { error } = await admin
     .from('profiles')
@@ -58,6 +74,12 @@ export async function deleteUser(id: string) {
   if (id === user.id) return { error: 'You cannot delete your own account.' }
 
   const admin = createAdminClient()
+
+  const { data: profile } = await admin.from('profiles').select('role').eq('id', id).single()
+  if (profile?.role === 'super_admin' && (await superAdminCount()) <= 1) {
+    return { error: 'Cannot delete the last super admin account.' }
+  }
+
   const { error } = await admin.auth.admin.deleteUser(id)
 
   if (error) return { error: error.message }
