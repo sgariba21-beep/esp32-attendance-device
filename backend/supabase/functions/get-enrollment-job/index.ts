@@ -13,50 +13,59 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Authenticate the device — every ESP32 must send the shared secret as X-Device-Secret.
-  if (req.headers.get("x-device-secret") !== Deno.env.get("DEVICE_SHARED_SECRET")) {
+  // Device now identifies by its assigned device_id (from SPIFFS after
+  // assignment), not the old form+class string concatenation.
+  const { device_id } = await req.json();
+  if (!device_id) {
+    return new Response(JSON.stringify({ error: "Missing device_id" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const { data: device, error: deviceError } = await supabase
+    .from("devices")
+    .select("id, institution_id, display_name")
+    .eq("id", device_id)
+    .single();
+
+  if (deviceError || !device) {
+    return new Response(JSON.stringify({ error: "Device not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Validate per-institution secret.
+  const { data: institution, error: instError } = await supabase
+    .from("institutions")
+    .select("device_secret")
+    .eq("id", device.institution_id)
+    .single();
+
+  if (instError || !institution) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const { class_name } = await req.json();
-  if (!class_name) {
-    return new Response(JSON.stringify({ error: "Missing class_name" }), {
-      status: 400,
+  if (req.headers.get("x-device-secret") !== institution.device_secret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Resolve device UUID from class name (stored as "form class", e.g. "Form 1 A")
-  const { data: devices, error: deviceError } = await supabase
-    .from("devices")
-    .select("id, form, class");
-
-  if (deviceError) {
-    return new Response(JSON.stringify({ error: "Failed to look up device" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const device = devices?.find((d) => `${d.form} ${d["class"]}` === class_name);
-  if (!device) {
-    return new Response(JSON.stringify({ error: `Device not found: ${class_name}` }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Fetch oldest pending job for this device
+  // Fetch oldest pending job for this device, scoped to institution.
   const { data: job, error } = await supabase
     .from("enrollment_jobs")
     .select(`
       id, command, fid, finger_slot, note,
-      student:student_id(id, sid, fullname)
+      member:student_id(id, sid, fullname)
     `)
     .eq("device_id", device.id)
+    .eq("institution_id", device.institution_id)
     .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(1)
@@ -76,13 +85,12 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Mark as in_progress atomically before returning
   await supabase
     .from("enrollment_jobs")
     .update({ status: "in_progress" })
     .eq("id", job.id);
 
-  const student = job.student as { id: string; sid: string; fullname: string } | null;
+  const member = job.member as { id: string; sid: string; fullname: string } | null;
   const isMaster = job.command === "register-master";
 
   return new Response(
@@ -92,10 +100,12 @@ Deno.serve(async (req: Request) => {
         command: job.command,
         fid: job.fid ?? 0,
         finger_slot: job.finger_slot ?? "",
-        student_id: student?.id ?? "",
-        sid: student?.sid ?? "",
-        // For master jobs the name comes from the note field; for students it's the DB fullname
-        fullname: isMaster ? (job.note ?? "Master") : (student?.fullname ?? ""),
+        student_id: member?.id ?? "",
+        sid: member?.sid ?? "",
+        fullname: isMaster ? (job.note ?? "Master") : (member?.fullname ?? ""),
+        // class_name renamed to unit_name; populated from the stored generated
+        // display_name column (group_name — unit_name).
+        unit_name: device.display_name ?? "",
       },
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }

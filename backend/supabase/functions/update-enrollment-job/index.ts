@@ -13,28 +13,43 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Authenticate the device — every ESP32 must send the shared secret as X-Device-Secret.
-  if (req.headers.get("x-device-secret") !== Deno.env.get("DEVICE_SHARED_SECRET")) {
+  const { id, institution_id, status, fid, note, finger_slot, student_id } =
+    await req.json();
+
+  if (!id || !institution_id || !status) {
+    return new Response(JSON.stringify({ error: "Missing required fields" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Validate per-institution secret.
+  const { data: institution, error: instError } = await supabase
+    .from("institutions")
+    .select("device_secret")
+    .eq("id", institution_id)
+    .single();
+
+  if (instError || !institution) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const { id, status, fid, note, finger_slot, student_id } = await req.json();
-
-  if (!id || !status) {
-    return new Response(JSON.stringify({ error: "Missing id or status" }), {
-      status: 400,
+  if (req.headers.get("x-device-secret") !== institution.device_secret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Fetch the job to know its command before updating
+  // Fetch the job to know its command, scoped to institution.
   const { data: job } = await supabase
     .from("enrollment_jobs")
     .select("command")
     .eq("id", id)
+    .eq("institution_id", institution_id)
     .maybeSingle();
 
   const jobUpdate: Record<string, unknown> = { status };
@@ -44,7 +59,8 @@ Deno.serve(async (req: Request) => {
   const { error: jobError } = await supabase
     .from("enrollment_jobs")
     .update(jobUpdate)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("institution_id", institution_id);
 
   if (jobError) {
     return new Response(JSON.stringify({ error: jobError.message }), {
@@ -53,25 +69,23 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Sync student finger slot on completion
+  // Sync member finger slot on completion (fin1/fin2 column names unchanged).
   if (status === "completed" && student_id && finger_slot) {
     const command = job?.command;
 
     if (command === "register" && fid && fid > 0) {
-      // Registration succeeded — store the sensor slot
-      const studentUpdate: Record<string, number> = {};
-      if (finger_slot === "fin1") studentUpdate.fin1 = fid;
-      else if (finger_slot === "fin2") studentUpdate.fin2 = fid;
-      if (Object.keys(studentUpdate).length > 0) {
-        await supabase.from("students").update(studentUpdate).eq("id", student_id);
+      const memberUpdate: Record<string, number> = {};
+      if (finger_slot === "fin1") memberUpdate.fin1 = fid;
+      else if (finger_slot === "fin2") memberUpdate.fin2 = fid;
+      if (Object.keys(memberUpdate).length > 0) {
+        await supabase.from("members").update(memberUpdate).eq("id", student_id);
       }
     } else if (command === "delete") {
-      // Deletion succeeded — clear the sensor slot (column is NOT NULL, so use 0)
-      const studentUpdate: Record<string, number> = {};
-      if (finger_slot === "fin1") studentUpdate.fin1 = 0;
-      else if (finger_slot === "fin2") studentUpdate.fin2 = 0;
-      if (Object.keys(studentUpdate).length > 0) {
-        await supabase.from("students").update(studentUpdate).eq("id", student_id);
+      const memberUpdate: Record<string, number> = {};
+      if (finger_slot === "fin1") memberUpdate.fin1 = 0;
+      else if (finger_slot === "fin2") memberUpdate.fin2 = 0;
+      if (Object.keys(memberUpdate).length > 0) {
+        await supabase.from("members").update(memberUpdate).eq("id", student_id);
       }
     }
   }

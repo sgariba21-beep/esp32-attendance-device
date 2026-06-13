@@ -39,5 +39,5 @@ alter table public.attendance alter column period_id drop not null;
 --    or simply skip step 4 and leave a comment -- the enforcement is correct
 --    either way.
 alter table public.attendance
-    rename constraint attendance_sid_date_key
+    rename constraint attendance_sid_date_unique
         to attendance_member_id_date_key;
