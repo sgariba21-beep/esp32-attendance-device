@@ -1,5 +1,5 @@
 create table enrollment_jobs (
-  id           uuid primary key default uuid_generate_v4(),
+  id           uuid primary key default gen_random_uuid(),
   device_id    uuid not null references devices(id) on delete restrict,
   student_id   uuid references students(id) on delete restrict,
   finger_slot  text check (finger_slot in ('fin1', 'fin2')),

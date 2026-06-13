@@ -1,5 +1,5 @@
 create table holidays (
-  id         uuid primary key default uuid_generate_v4(),
+  id         uuid primary key default gen_random_uuid(),
   date       date not null unique,
   label      text not null,
   created_at timestamptz not null default now()
