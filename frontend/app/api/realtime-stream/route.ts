@@ -4,7 +4,7 @@ import { createAdminClient, createAuthClient } from '@/lib/supabase/server'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const WATCHED_TABLES = ['students', 'devices', 'academic', 'attendance'] as const
+const WATCHED_TABLES = ['members', 'devices', 'periods', 'attendance'] as const
 
 export async function GET(request: NextRequest) {
   const authClient = await createAuthClient()

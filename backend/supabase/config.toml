@@ -440,3 +440,15 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/update-enrollment-job/deno.json"
 entrypoint = "./functions/update-enrollment-job/index.ts"
+
+[functions.register]
+enabled = true
+verify_jwt = false
+import_map = "./functions/register/deno.json"
+entrypoint = "./functions/register/index.ts"
+
+[functions.assignment-poll]
+enabled = true
+verify_jwt = false
+import_map = "./functions/assignment-poll/deno.json"
+entrypoint = "./functions/assignment-poll/index.ts"

@@ -46,7 +46,7 @@ export async function createAcademicTerm(data: AcademicFormData) {
   await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
-  const { error } = await supabase.from('academic').insert({
+  const { error } = await supabase.from('periods').insert({
     term: data.term,
     year: data.year.trim(),
     status: 'inactive',
@@ -68,7 +68,7 @@ export async function updateAcademicTerm(id: string, data: AcademicFormData) {
   const supabase = createAdminClient()
 
   const { error } = await supabase
-    .from('academic')
+    .from('periods')
     .update({
       term: data.term,
       year: data.year.trim(),
@@ -92,14 +92,14 @@ export async function setActiveTerm(id: string) {
 
   // Deactivate all terms first, then activate the selected one
   const { error: deactivateError } = await supabase
-    .from('academic')
+    .from('periods')
     .update({ status: 'inactive' })
     .neq('id', id)
 
   if (deactivateError) return { error: deactivateError.message }
 
   const { error: activateError } = await supabase
-    .from('academic')
+    .from('periods')
     .update({ status: 'active' })
     .eq('id', id)
 
@@ -113,7 +113,7 @@ export async function deleteAcademicTerm(id: string) {
   await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
-  const { error } = await supabase.from('academic').delete().eq('id', id)
+  const { error } = await supabase.from('periods').delete().eq('id', id)
 
   if (error) {
     if (error.code === '23503') return { error: 'Cannot delete: attendance records are linked to this term.' }

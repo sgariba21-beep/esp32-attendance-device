@@ -39,8 +39,8 @@ export function DevicesView({ devices }: Props) {
 
   const grouped = Object.entries(
     devices.reduce((acc, d) => {
-      if (!acc[d.form]) acc[d.form] = []
-      acc[d.form].push(d)
+      if (!acc[d.group_name]) acc[d.group_name] = []
+      acc[d.group_name].push(d)
       return acc
     }, {} as Record<string, Device[]>)
   ).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
@@ -61,23 +61,23 @@ export function DevicesView({ devices }: Props) {
         />
       ) : (
         <div className="space-y-3">
-          {grouped.map(([form, group]) => (
-            <div key={form} className="rounded-xl border bg-muted/30 p-4 space-y-3">
+          {grouped.map(([group_name, group]) => (
+            <div key={group_name} className="rounded-xl border bg-muted/30 p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Form {form}</p>
+                <p className="text-sm font-semibold">{group_name}</p>
                 <span className="text-xs text-muted-foreground tabular-nums">
-                  {group.length} class{group.length !== 1 ? 'es' : ''}
+                  {group.length} unit{group.length !== 1 ? 's' : ''}
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
                 {group
-                  .sort((a, b) => a.class.localeCompare(b.class))
+                  .sort((a, b) => a.unit_name.localeCompare(b.unit_name))
                   .map((d) => (
                     <div
                       key={d.id}
                       className="flex items-center justify-between gap-2 rounded-lg bg-background border px-3 py-2.5"
                     >
-                      <span className="text-sm font-medium">{d.class}</span>
+                      <span className="text-sm font-medium">{d.unit_name}</span>
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           onClick={() => openEdit(d)}
@@ -114,7 +114,7 @@ export function DevicesView({ devices }: Props) {
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
         title="Delete device?"
-        description={confirmTarget ? `This will permanently delete the ${confirmTarget.form} ${confirmTarget.class} device. Students assigned to it will lose their class assignment.` : ''}
+        description={confirmTarget ? `This will permanently delete the ${confirmTarget.group_name} ${confirmTarget.unit_name} device. Members assigned to it will lose their unit assignment.` : ''}
         confirmLabel="Delete device"
         loading={deleting}
         onConfirm={handleDelete}

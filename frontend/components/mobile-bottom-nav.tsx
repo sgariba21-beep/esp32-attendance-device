@@ -35,7 +35,7 @@ export function MobileBottomNav({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
 
-  const visiblePrimary = primaryNav.filter((item) => item.roles.includes(role))
+  const visiblePrimary = primaryNav.filter((item) => (item.roles as UserRole[]).includes(role))
   const visibleMore = moreNav.filter((item) => (item.roles as UserRole[]).includes(role))
   const isMoreActive = visibleMore.some((item) => pathname.startsWith(item.href))
 

@@ -10,9 +10,9 @@ export default async function DevicesPage() {
 
   const { data } = await supabase
     .from('devices')
-    .select('id, form, class')
-    .order('form')
-    .order('class')
+    .select('id, group_name, unit_name')
+    .order('group_name')
+    .order('unit_name')
 
   return (
     <>

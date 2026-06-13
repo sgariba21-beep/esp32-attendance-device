@@ -5,8 +5,8 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 
 export type DeviceFormData = {
-  form: string
-  class: string
+  group_name: string
+  unit_name: string
 }
 
 export async function createDevice(data: DeviceFormData) {
@@ -14,12 +14,12 @@ export async function createDevice(data: DeviceFormData) {
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('devices').insert({
-    form: data.form.trim(),
-    class: data.class.trim(),
+    group_name: data.group_name.trim(),
+    unit_name: data.unit_name.trim(),
   })
 
   if (error) {
-    if (error.code === '23505') return { error: 'A device with that form and class already exists.' }
+    if (error.code === '23505') return { error: 'A device with that group and unit already exists.' }
     return { error: error.message }
   }
 
@@ -33,11 +33,11 @@ export async function updateDevice(id: string, data: DeviceFormData) {
 
   const { error } = await supabase
     .from('devices')
-    .update({ form: data.form.trim(), class: data.class.trim() })
+    .update({ group_name: data.group_name.trim(), unit_name: data.unit_name.trim() })
     .eq('id', id)
 
   if (error) {
-    if (error.code === '23505') return { error: 'A device with that form and class already exists.' }
+    if (error.code === '23505') return { error: 'A device with that group and unit already exists.' }
     return { error: error.message }
   }
 

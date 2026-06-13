@@ -9,8 +9,8 @@ export default async function UsersPage() {
 
   const [{ data: authData }, { data: profiles }, { data: devices }] = await Promise.all([
     admin.auth.admin.listUsers(),
-    admin.from('profiles').select('id, role, assigned_class'),
-    admin.from('devices').select('id, form, class').order('form').order('class'),
+    admin.from('profiles').select('id, role, assigned_unit'),
+    admin.from('devices').select('id, group_name, unit_name').order('group_name').order('unit_name'),
   ])
 
   const profileMap = new Map(
@@ -19,11 +19,11 @@ export default async function UsersPage() {
 
   const users = (authData?.users ?? [])
     .map((u) => ({
-      id:             u.id,
-      email:          u.email ?? '',
-      created_at:     u.created_at,
-      role:           (profileMap.get(u.id)?.role ?? 'teacher') as UserRole,
-      assigned_class: profileMap.get(u.id)?.assigned_class ?? null,
+      id:            u.id,
+      email:         u.email ?? '',
+      created_at:    u.created_at,
+      role:          (profileMap.get(u.id)?.role ?? 'super_admin') as UserRole,
+      assigned_unit: profileMap.get(u.id)?.assigned_unit ?? null,
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
 
@@ -31,7 +31,7 @@ export default async function UsersPage() {
     <UsersView
       users={users}
       currentUserId={currentUser.id}
-      devices={(devices ?? []) as { id: string; form: string; class: string }[]}
+      devices={(devices ?? []) as { id: string; group_name: string; unit_name: string }[]}
     />
   )
 }

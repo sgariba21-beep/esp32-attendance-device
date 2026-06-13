@@ -24,7 +24,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { MultiSelect } from './multi-select'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
-type StudentOption = { id: string; sid: string; fullname: string; form: string; device_id: string }
+type StudentOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
 
 type Filters = {
   fromDate?: string
@@ -44,11 +44,11 @@ type Props = {
   pageSize: number
   totalCount: number
   role: UserRole
-  assignedClass: string | null
+  assignedUnit: string | null
 }
 
-function formatClass(device: { form: string; class: string }) {
-  return `${device.form} ${device.class}`
+function formatClass(device: { group_name: string; unit_name: string }) {
+  return `${device.group_name} ${device.unit_name}`
 }
 
 function formatDate(iso: string) {
@@ -103,7 +103,7 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
-export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedClass }: Props) {
+export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit }: Props) {
   const isTeacher = role === 'teacher'
   const router = useRouter()
   const pathname = usePathname()
@@ -251,10 +251,10 @@ export function AttendanceView({ records, students, devices, academic, filters, 
         <div className="w-px self-stretch bg-border mx-1" />
 
         <div className="flex items-end gap-2">
-          {isTeacher && assignedClass && (
+          {isTeacher && assignedUnit && (
             <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground self-end h-8">
               <Lock className="h-3 w-3 shrink-0" />
-              {assignedClass}
+              {assignedUnit}
             </div>
           )}
 

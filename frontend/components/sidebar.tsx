@@ -27,7 +27,7 @@ const navItems = [
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
-  const visible = navItems.filter((item) => item.roles.includes(role))
+  const visible = navItems.filter((item) => (item.roles as UserRole[]).includes(role))
 
   async function handleSignOut() {
     sessionStorage.removeItem('app_session_active')

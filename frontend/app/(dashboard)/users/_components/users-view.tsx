@@ -20,22 +20,26 @@ export type UserRow = {
   email: string
   created_at: string
   role: UserRole
-  assigned_class: string | null
+  assigned_unit: string | null
 }
 
 const ROLE_LABELS: Record<UserRole, string> = {
-  super_admin: 'Super Admin',
-  admin:       'Admin',
-  teacher:     'Teacher',
+  super_admin:   'Super Admin',
+  admin:         'Admin',
+  teacher:       'Teacher',
+  staff:         'Staff',
+  platform_admin: 'Platform Admin',
 }
 
 const ROLE_BADGE: Record<UserRole, 'default' | 'secondary' | 'outline'> = {
-  super_admin: 'default',
-  admin:       'secondary',
-  teacher:     'outline',
+  super_admin:   'default',
+  admin:         'secondary',
+  teacher:       'outline',
+  staff:         'outline',
+  platform_admin: 'secondary',
 }
 
-type DeviceOption = { id: string; form: string; class: string }
+type DeviceOption = { id: string; group_name: string; unit_name: string }
 
 type Props = {
   users: UserRow[]
@@ -108,7 +112,7 @@ export function UsersView({ users, currentUserId, devices }: Props) {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
-                      {u.assigned_class || '—'}
+                      {u.assigned_unit || '—'}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">

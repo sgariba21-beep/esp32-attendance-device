@@ -19,12 +19,12 @@ export async function applyPromotion() {
   // Fresh data — never trust client-passed lists for destructive operations
   const [studentsRes, devicesRes] = await Promise.all([
     supabase
-      .from('students')
-      .select('id, form, device_id, device:device_id(form, class)')
+      .from('members')
+      .select('id, group_name, device_id, device:device_id(group_name, unit_name)')
       .eq('status', 'active'),
     supabase
       .from('devices')
-      .select('id, form, class'),
+      .select('id, group_name, unit_name'),
   ])
 
   if (studentsRes.error || devicesRes.error) {
@@ -33,33 +33,33 @@ export async function applyPromotion() {
 
   const devices = devicesRes.data ?? []
 
-  // Sorted form sequence (natural numeric order: Form 1, Form 2, Form 3 …)
-  const sortedForms = [...new Set(devices.map((d) => d.form))].sort((a, b) =>
+  // Sorted group sequence (natural numeric order: Form 1, Form 2, Form 3 …)
+  const sortedForms = [...new Set(devices.map((d) => d.group_name))].sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   )
 
   // Fast lookup: "Form 2|A" → device id
   const deviceByKey = new Map<string, string>()
   for (const d of devices) {
-    deviceByKey.set(`${d.form}|${d['class']}`, d.id)
+    deviceByKey.set(`${d.group_name}|${d.unit_name}`, d.id)
   }
 
   const toPromote: { id: string; nextForm: string; nextDeviceId: string }[] = []
   const toDeactivate: string[] = []
 
   for (const s of studentsRes.data ?? []) {
-    const device = s.device as unknown as { form: string; class: string } | null
+    const device = s.device as unknown as { group_name: string; unit_name: string } | null
     if (!device) continue
 
-    const idx = sortedForms.indexOf(s.form)
-    if (idx === -1) continue // unrecognised form — skip
+    const idx = sortedForms.indexOf(s.group_name)
+    if (idx === -1) continue // unrecognised group — skip
 
     if (idx === sortedForms.length - 1) {
-      // Final form → deactivate
+      // Final group → deactivate
       toDeactivate.push(s.id)
     } else {
       const nextForm = sortedForms[idx + 1]
-      const nextDeviceId = deviceByKey.get(`${nextForm}|${device['class']}`)
+      const nextDeviceId = deviceByKey.get(`${nextForm}|${device.unit_name}`)
       if (nextDeviceId) {
         toPromote.push({ id: s.id, nextForm, nextDeviceId })
       }
@@ -72,15 +72,15 @@ export async function applyPromotion() {
 
   for (const p of toPromote) {
     const { error } = await supabase
-      .from('students')
-      .update({ form: p.nextForm, device_id: p.nextDeviceId, fin1: 0, fin2: 0 })
+      .from('members')
+      .update({ group_name: p.nextForm, device_id: p.nextDeviceId, fin1: 0, fin2: 0 })
       .eq('id', p.id)
     if (error) errors.push(error.message)
   }
 
   if (toDeactivate.length > 0) {
     const { error } = await supabase
-      .from('students')
+      .from('members')
       .update({ status: 'inactive' })
       .in('id', toDeactivate)
     if (error) errors.push(error.message)

@@ -16,8 +16,8 @@ export type AttendanceRecord = {
   } | null
   device: {
     id: string
-    form: string
-    class: string
+    group_name: string
+    unit_name: string
   } | null
 }
 
@@ -25,7 +25,7 @@ export type Student = {
   id: string
   sid: string
   fullname: string
-  form: string
+  group_name: string
   fin1: number
   fin2: number
   status: 'active' | 'inactive'
@@ -35,8 +35,8 @@ export type Student = {
 
 export type Device = {
   id: string
-  form: string
-  class: string
+  group_name: string
+  unit_name: string
 }
 
 export type AcademicTerm = {

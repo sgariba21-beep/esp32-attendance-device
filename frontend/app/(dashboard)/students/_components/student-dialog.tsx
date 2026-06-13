@@ -247,7 +247,7 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
         studentId: result.id!,
         deviceId: form.device_id,
         fullname: form.fullname,
-        deviceName: device ? `${device.form} ${device.class}` : '',
+        deviceName: device ? `${device.group_name} ${device.unit_name}` : '',
       })
     }
   }
@@ -337,7 +337,7 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
               <option value="">Select a class…</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.form} {d.class}
+                  {d.group_name} {d.unit_name}
                 </option>
               ))}
             </NativeSelect>

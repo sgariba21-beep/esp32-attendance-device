@@ -13,7 +13,7 @@ export default async function AcademicPage() {
 
   const [termsRes, holidaysRes] = await Promise.all([
     supabase
-      .from('academic')
+      .from('periods')
       .select('id, term, year, status, start_date, end_date')
       .order('year', { ascending: false })
       .order('term', { ascending: false }),

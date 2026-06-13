@@ -11,7 +11,7 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const { role, assignedClass } = await requireRole('super_admin', 'admin', 'teacher')
+  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher')
 
   const params = await searchParams
   const fromDate = typeof params.from === 'string' ? params.from : undefined
@@ -30,17 +30,17 @@ export default async function AttendancePage({
 
   const [studentsRes, devicesRes, academicRes] = await Promise.all([
     supabase
-      .from('students')
-      .select('id, sid, fullname, form, device_id')
+      .from('members')
+      .select('id, sid, fullname, group_name, device_id')
       .eq('status', 'active')
       .order('fullname'),
     supabase
       .from('devices')
-      .select('id, form, class')
-      .order('form')
-      .order('class'),
+      .select('id, group_name, unit_name')
+      .order('group_name')
+      .order('unit_name'),
     supabase
-      .from('academic')
+      .from('periods')
       .select('id, term, year, status')
       .order('year', { ascending: false })
       .order('term', { ascending: false }),
@@ -50,8 +50,8 @@ export default async function AttendancePage({
   const allDevices = (devicesRes.data ?? []) as Device[]
   let effectiveDeviceIds = deviceIds
   if (role === 'teacher') {
-    const teacherDevice = assignedClass
-      ? allDevices.find((d) => `Form ${d.form} ${d.class}` === assignedClass)
+    const teacherDevice = assignedUnit
+      ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
       : null
     effectiveDeviceIds = teacherDevice ? [teacherDevice.id] : ['__no_match__']
   }
@@ -60,9 +60,9 @@ export default async function AttendancePage({
     .from('attendance')
     .select(`
       id, date, time, status, scan_id,
-      student:sid(id, fullname, sid),
-      academic:academic_id(id, term, year),
-      device:device_id(id, form, class)
+      student:member_id(id, fullname, sid),
+      academic:period_id(id, term, year),
+      device:device_id(id, group_name, unit_name)
     `, { count: 'exact' })
     .order('date', { ascending: false })
     .order('time', { ascending: false })
@@ -70,8 +70,8 @@ export default async function AttendancePage({
 
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
-  if (termId) query = query.eq('academic_id', termId)
-  if (studentIds.length > 0) query = query.in('sid', studentIds)
+  if (termId) query = query.eq('period_id', termId)
+  if (studentIds.length > 0) query = query.in('member_id', studentIds)
   if (effectiveDeviceIds.length > 0) query = query.in('device_id', effectiveDeviceIds)
 
   const { data: records, count } = await query
@@ -95,7 +95,7 @@ export default async function AttendancePage({
         pageSize={PAGE_SIZE}
         totalCount={count ?? 0}
         role={role}
-        assignedClass={assignedClass}
+        assignedUnit={assignedUnit}
       />
     </>
   )

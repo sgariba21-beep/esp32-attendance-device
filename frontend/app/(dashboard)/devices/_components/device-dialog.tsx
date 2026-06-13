@@ -16,7 +16,7 @@ type Props = {
   device: Device | null
 }
 
-const empty = { form: '', class: '' }
+const empty = { group_name: '', unit_name: '' }
 
 export function DeviceDialog({ open, onOpenChange, device }: Props) {
   const [form, setForm] = useState(empty)
@@ -26,7 +26,7 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
   useEffect(() => {
     if (open) {
       setError(null)
-      setForm(device ? { form: device.form, class: device.class } : empty)
+      setForm(device ? { group_name: device.group_name, unit_name: device.unit_name } : empty)
     }
   }, [open, device])
 
@@ -57,22 +57,22 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="form">Form (year level)</Label>
+            <Label htmlFor="group_name">Group (year level)</Label>
             <Input
-              id="form"
-              value={form.form}
-              onChange={(e) => set('form', e.target.value)}
-              placeholder="e.g. 1, 2, 3"
+              id="group_name"
+              value={form.group_name}
+              onChange={(e) => set('group_name', e.target.value)}
+              placeholder="e.g. Form 1, Year 2"
               required
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="class">Class name</Label>
+            <Label htmlFor="unit_name">Unit name</Label>
             <Input
-              id="class"
-              value={form.class}
-              onChange={(e) => set('class', e.target.value)}
+              id="unit_name"
+              value={form.unit_name}
+              onChange={(e) => set('unit_name', e.target.value)}
               placeholder="e.g. Science 1"
               required
             />
@@ -80,7 +80,7 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
 
           <p className="text-xs text-muted-foreground">
             Displays as: <span className="font-medium text-foreground">
-              {form.form || '?'} {form.class || '?'}
+              {form.group_name || '?'} {form.unit_name || '?'}
             </span>
           </p>
 
