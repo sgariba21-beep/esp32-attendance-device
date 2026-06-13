@@ -3,20 +3,32 @@
   WITH enrollment polling + master-triggered enrollment mode + fid mapping in SPIFFS
   (LED: fingerprint-only feedback — green/red briefly; treat HTTP 400 as success)
   
-  IMPORTANT: Edit WIFI_SSID, WIFI_PASS, SCRIPT_URL, CLASS_ID, SCRIPT_AUTH before use.
+  IMPORTANT: Edit WIFI_SSID, WIFI_PASS, SUPABASE_URL, CLASS_ID, SCRIPT_AUTH before use.
 */
 
 /* ========= CONFIG - EDIT THESE ========== */
 
 // Central Apps Script endpoint (single router web app)
-const char* SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxg_Dj_i-JrmNfHblrzBaxaxzwWArAsgzKSz0QNhfjhltZmwSYiZqXgY8FqCJYatfVM4g/exec";
+const char* SUPABASE_URL = "https://graduates-enter-ones-fingers.trycloudflare.com/functions/v1/log-attendance";
 
-// If you set SCRIPT_AUTH_KEY in Apps Script, put the same string here; otherwise leave empty
-const char* SCRIPT_AUTH = ""; // e.g. "supersecret"
+// Shared secret sent on every request to Supabase edge functions as X-Device-Secret.
+// Must match DEVICE_SHARED_SECRET in supabase/functions/.env (local) or supabase secrets (prod).
+const char* DEVICE_SECRET = "olag-dev-secret-2026";
+
+// Supabase enrollment edge functions
+const char* ENROLL_GET_URL = "https://graduates-enter-ones-fingers.trycloudflare.com/functions/v1/get-enrollment-job";
+const char* ENROLL_UPD_URL = "https://graduates-enter-ones-fingers.trycloudflare.com/functions/v1/update-enrollment-job";
 
 // Device identity / class
-const char* CLASS_ID   = "2-SCI-2";
-const char* CLASS_NAME = "2 Science 2";
+#define SYSTEM_TYPE        "OLAG"   
+#define DEVICE_CONFIG_FILE "/device_config.json"
+String CLASS_ID   = "";
+String CLASS_NAME = "";
+
+/* ========= OTA CONFIG ========= */
+#define FIRMWARE_VERSION     "1.1.5"           // increment this on each flash
+#define OTA_REPO_API         "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
+/* ============================== */
 
 /* Fingerprint UART pins (change to your wiring) */
 #define R503_RX_PIN 16  // to sensor TX
@@ -33,8 +45,8 @@ const char* CLASS_NAME = "2 Science 2";
 #define FINGERPRINT_LED_BLUE      0x02
 #define FINGERPRINT_LED_PURPLE    0x03
 #define FINGERPRINT_LED_GREEN     0x04
-#define FINGERPRINT_LED_WHITE     0x05
-#define FINGERPRINT_LED_YELLOW    0x06
+#define FINGERPRINT_LED_WHITE     0x06
+#define FINGERPRINT_LED_YELLOW    0x05
 
 /* Constants */
 #define MAX_FID 127
@@ -47,6 +59,15 @@ const char* CLASS_NAME = "2 Science 2";
 #define AP_SSID         "Attendance-Setup"
 #define AP_PASS         "setup1234"
 #define DNS_PORT        53
+#define QUEUE_MAX_ENTRIES   200          // in-memory queue: drop oldest if exceeds this
+#define QUEUE_MAX_AGE_MS    (7UL * 24 * 3600 * 1000)  // discard entries older than 7 days (both queues)
+#define QUEUE_MAX_SPIFFS_ENTRIES       1000                    // SPIFFS queue: hard cap on entry count
+#define QUEUE_MAX_SPIFFS_BYTES         (256UL * 1024UL)       // SPIFFS queue: hard cap on total bytes (256 KB)
+#define QUEUE_SPIFFS_TRIM_INTERVAL_MS  (5UL * 60UL * 1000UL)  // run SPIFFS trim at most this often while offline (5 minutes)
+
+// Scan log file
+#define SCAN_LOG_FILE "/scan_log.txt"
+#define SCAN_LOG_MAX_BYTES (200UL * 1024UL)  // trim when file exceeds 200 KB
 
 /* ============ END CONFIG ================ */
 
@@ -66,6 +87,7 @@ const char* CLASS_NAME = "2 Science 2";
 #include <WebServer.h>
 #include <DNSServer.h>
 #include "esp_task_wdt.h"
+#include <Update.h>
 
 /* FreeRTOS primitives */
 #include "freertos/FreeRTOS.h"
@@ -100,15 +122,18 @@ std::vector<String> fidMapName; // name per fid
 
 // Enrollment job struct
 struct EnrollJob {
-  int row; // sheet row number
-  int requestedFid;
-  String uniqueId;
-  String name;
-  String role; // student|teacher|master
-  String command; // register|delete|clearall
+  String id;           // UUID of the enrollment_jobs row
+  String studentId;    // UUID of the student (for fin1/fin2 update)
+  String uniqueId;     // student's sid text (stored in fid_map, sent with attendance)
+  String name;         // student's fullname
+  String fingerSlot;   // 'fin1' or 'fin2'
+  String command;      // 'register', 'delete', 'clearall'
+  int    requestedFid; // fid from the job (sensor slot to use)
 };
 volatile bool enrollmentJobPending = false;
 EnrollJob currentEnrollJob;
+
+volatile bool otaInProgress = false;
 
 static unsigned long lastScanMillis[MAX_FID + 1];
 static bool fidEverScanned[MAX_FID + 1];
@@ -126,13 +151,17 @@ int findFidByUnique(const String &uniqueId);
 void clearAllFidMap();
 void applyFidMapToSerialPrint();
 int enrollID_toFid(int requestedFid);
-void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, int rowToReport);
-void enrollment_doDeleteByFid(int fid, int rowToReport);
-void enrollment_doDeleteByUnique(const String &uniqueId, int rowToReport);
-void reportEnrollUpdate(int row, const String &status, int fingerId, const String &note);
+void enrollment_doRegister(const EnrollJob &job, const String &role = "student");
+void enrollment_doDeleteByFid(const EnrollJob &job, int fid);
+void enrollment_doDeleteByUnique(const EnrollJob &job);
+void reportEnrollUpdate(const String &jobId, const String &status, int fingerId, const String &note, const String &fingerSlot, const String &studentId);
 bool initRTC();
 void syncRTCFromNTP();
 String getRTCTimestamp();
+bool parsePayloadAgeSec(const String &payload, long nowEpoch, long &outAgeSec);
+void trimSPIFFSQueue_locked();
+bool appendToSPIFFSQueue_locked(const String &line);
+void trimQueue();
 
 /* Networking helpers (copied/kept similar to your original) */
 #define POST_MAX_RETRIES 3
@@ -201,6 +230,30 @@ void saveWiFiCreds(const String &ssid, const String &pass) {
   Serial.println("WiFi credentials saved.");
 }
 
+/* ================== Device Identity (SPIFFS) ================== */
+bool loadDeviceConfig() {
+  if (!SPIFFS.exists(DEVICE_CONFIG_FILE)) return false;
+  File f = SPIFFS.open(DEVICE_CONFIG_FILE, FILE_READ);
+  if (!f) return false;
+  while (f.available()) {
+    String ln = f.readStringUntil('\n');
+    ln.trim();
+    if (ln.startsWith("classId="))   CLASS_ID   = ln.substring(8);
+    if (ln.startsWith("className=")) CLASS_NAME = ln.substring(10);
+  }
+  f.close();
+  return (CLASS_ID.length() > 0);
+}
+
+void saveDeviceConfig(const String &id, const String &name) {
+  File f = SPIFFS.open(DEVICE_CONFIG_FILE, FILE_WRITE);
+  if (!f) { Serial.println("Failed to write device config"); return; }
+  f.println("classId=" + id);
+  f.println("className=" + name);
+  f.close();
+  Serial.println("Device config saved: " + id + " / " + name);
+}
+
 /* ================== Captive Portal ================== */
 WebServer portalServer(80);
 DNSServer dnsServer;
@@ -228,7 +281,22 @@ const char PORTAL_HTML[] PROGMEM = R"rawliteral(
 <input type="text" id="ssid" placeholder="e.g. GHS-Staff" autocomplete="off"/>
 <div class="lbl">Password</div>
 <input type="password" id="pass" placeholder="WiFi password"/>
+<div class="lbl">Class ID <span id="cidnote" style="color:#888;font-weight:normal;">(optional if already set)</span></div>
+<input type="text" id="cid" placeholder="e.g. 2-SCI-2"/>
+<div class="lbl">Class Name <span style="color:#888;font-weight:normal;">(optional if already set)</span></div>
+<input type="text" id="cname" placeholder="e.g. 2 Science 2"/>
+<script>
+fetch('/identity').then(r=>r.json()).then(function(d){
+  if(d.id){
+    document.getElementById('cid').value=d.id;
+    document.getElementById('cname').value=d.name;
+    document.getElementById('cidnote').innerText='(currently: '+d.id+')';
+  }
+});
+</script>
 <button onclick="save()">Save &amp; Connect</button>
+<br/><br/>
+<a href="/log" target="_blank"><button type="button" style="background:#2E7D32;">&#128203; View Scan Log</button></a>
 <div id="msg"></div>
 </div>
 <script>
@@ -237,7 +305,9 @@ function save(){
   var p=document.getElementById('pass').value;
   if(!s){document.getElementById('msg').innerText='Please enter a WiFi name.';return;}
   document.getElementById('msg').innerText='Saving...';
-  fetch('/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p))
+  var b=document.getElementById('cid').value.trim();
+  var bn=document.getElementById('cname').value.trim();
+  fetch('/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)+'&cid='+encodeURIComponent(b)+'&cname='+encodeURIComponent(bn))
     .then(function(r){return r.text();})
     .then(function(t){document.getElementById('msg').innerText=t;});
 }
@@ -271,9 +341,39 @@ void startCaptivePortal() {
       return;
     }
     saveWiFiCreds(ssid, pass);
+    String cid   = portalServer.arg("cid");
+    String cname = portalServer.arg("cname");
+    if (cid.length()) saveDeviceConfig(cid, cname);
     portalServer.send(200, "text/plain", "Saved! Device will restart now...");
     delay(1500);
     ESP.restart();
+  });
+  portalServer.on("/identity", []() {
+    String json = "{\"id\":\"" + CLASS_ID + "\",\"name\":\"" + CLASS_NAME + "\"}";
+    portalServer.send(200, "application/json", json);
+  });
+  portalServer.on("/log", []() {
+    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+    if (!SPIFFS.exists(SCAN_LOG_FILE)) {
+      xSemaphoreGive(spiffsMutex);
+      portalServer.send(200, "text/plain", "No scan log yet.");
+      return;
+    }
+    File f = SPIFFS.open(SCAN_LOG_FILE, FILE_READ);
+    if (!f) {
+      xSemaphoreGive(spiffsMutex);
+      portalServer.send(500, "text/plain", "Could not open log.");
+      return;
+    }
+    // Stream line by line to avoid loading full file into RAM
+    portalServer.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    portalServer.send(200, "text/plain", "");
+    while (f.available()) {
+      String line = f.readStringUntil('\n');
+      portalServer.sendContent(line + "\n");
+    }
+    f.close();
+    xSemaphoreGive(spiffsMutex);
   });
   portalServer.onNotFound([]() {
     portalServer.sendHeader("Location", "http://192.168.4.1/", true);
@@ -311,8 +411,12 @@ void setupFingerprint() {
 
 /* Helper: generate a unique scanId using millis + id */
 String makeScanId(const String &id) {
-  unsigned long m = millis();
-  return String("scan-") + String(m) + "-" + id;
+  DateTime now = rtc.now();
+  char buf[32];
+  sprintf(buf, "scan-%04d%02d%02d%02d%02d%02d-",
+          now.year(), now.month(), now.day(),
+          now.hour(), now.minute(), now.second());
+  return String(buf) + id;
 }
 
 /*RTC Initialization and Sync*/
@@ -358,6 +462,28 @@ String getRTCTimestamp() {
   return String(buf);
 }
 
+void appendScanLog(const String &entry) {
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+
+  // Trim if too large: delete and recreate (simple strategy)
+  if (SPIFFS.exists(SCAN_LOG_FILE)) {
+    File check = SPIFFS.open(SCAN_LOG_FILE, FILE_READ);
+    if (check && check.size() > SCAN_LOG_MAX_BYTES) {
+      check.close();
+      SPIFFS.remove(SCAN_LOG_FILE);
+      Serial.println("Scan log trimmed (size limit reached)");
+    } else if (check) {
+      check.close();
+    }
+  }
+
+  File f = SPIFFS.open(SCAN_LOG_FILE, FILE_APPEND);
+  if (f) {
+    f.println(entry);
+    f.close();
+  }
+  xSemaphoreGive(spiffsMutex);
+}
 /* ================== SPIFFS Fid Map ================== */
 
 bool initFS() {
@@ -450,7 +576,8 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
 
   for (int attempt = 1; attempt <= POST_MAX_RETRIES; ++attempt) {
-    WiFiClientSecure client; client.setInsecure();
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(20000);
@@ -460,6 +587,8 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
       break;
     }
     http.addHeader("Content-Type", "application/json");
+    // Authenticate with the edge functions — all three device-facing functions check this header.
+    http.addHeader("x-device-secret", DEVICE_SECRET);
     int code = http.POST(jsonPayload);
     outHttpCode = code;
     if (code > 0) {
@@ -507,7 +636,7 @@ String urlEncode(const String &str) {
 /* GET fallback for client errors (400/404) - same as before */
 bool sendGETFallback(const String &studentId, const String &date, const String &ts, int &outHttpCode, String &outBody) {
   if (WiFi.status() != WL_CONNECTED) { outHttpCode = -1; outBody = "WiFi not connected"; return false; }
-  String url = String(SCRIPT_URL) + "?";
+  String url = String(SUPABASE_URL) + "?";
   url += "classId=" + urlEncode(String(CLASS_ID));
   url += "&className=" + urlEncode(String(CLASS_NAME));
   if (studentId.length()) url += "&studentId=" + urlEncode(studentId);
@@ -534,27 +663,21 @@ bool sendGETFallback(const String &studentId, const String &date, const String &
   }
 }
 
-/* ================== Enrollment support: report update to sheet ================== */
-void reportEnrollUpdate(int row, const String &status, int fingerId, const String &note) {
-  if (row <= 1) return;
-  String url = String(SCRIPT_URL) + "?api=enroll_update&classId=" + urlEncode(String(CLASS_ID));
-  url += "&row=" + String(row);
-  url += "&status=" + urlEncode(status);
-  if (fingerId > 0) url += "&fingerId=" + String(fingerId);
-  if (note.length()) url += "&note=" + urlEncode(note);
-  if (strlen(SCRIPT_AUTH) > 0) url += "&auth=" + String(SCRIPT_AUTH);
+/* ================== Enrollment support: report update to Supabase ================== */
+void reportEnrollUpdate(const String &jobId, const String &status, int fingerId, const String &note, const String &fingerSlot, const String &studentId) {
+  if (jobId.length() == 0) return;
 
-  Serial.printf("Reporting enroll_update row=%d status=%s fid=%d\n", row, status.c_str(), fingerId);
-  WiFiClientSecure client; client.setInsecure();
-  HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setTimeout(20000);
-  if (http.begin(client, url)) {
-    int code = http.GET();
-    String body = (code > 0) ? http.getString() : http.errorToString(code);
-    Serial.printf("enroll_update -> code=%d body=%s\n", code, body.c_str());
-    http.end();
-  }
+  String payload = "{\"id\":\"" + jobId + "\",\"status\":\"" + status + "\"";
+  if (fingerId > 0)       payload += ",\"fid\":"          + String(fingerId);
+  if (note.length())      payload += ",\"note\":\""        + note         + "\"";
+  if (fingerSlot.length()) payload += ",\"finger_slot\":\"" + fingerSlot   + "\"";
+  if (studentId.length()) payload += ",\"student_id\":\""  + studentId    + "\"";
+  payload += "}";
+
+  Serial.printf("reportEnrollUpdate: jobId=%s status=%s fid=%d\n", jobId.c_str(), status.c_str(), fingerId);
+  int httpCode = 0; String body;
+  postJSONToUrl(payload, ENROLL_UPD_URL, httpCode, body);
+  Serial.printf("update-enrollment-job -> code=%d body=%s\n", httpCode, body.c_str());
 }
 
 /* ================== Enrollment execution helpers ================== */
@@ -629,21 +752,19 @@ int enrollID_toFid(int requestedFid) {
   }
 }
 
-/* enrollment_doRegister: handles a register command: uses requestedFid (or finds free slot) */
-void enrollment_doRegister(int requestedFid, const String &uniqueId, const String &name, const String &role, int rowToReport) {
-  int fidToUse = requestedFid;
+/* enrollment_doRegister: handles a register command */
+void enrollment_doRegister(const EnrollJob &job, const String &role) {
+  int fidToUse = job.requestedFid;
   if (fidToUse < 1 || fidToUse > MAX_FID) {
-    // find a free fid
     for (int f = 1; f <= MAX_FID; ++f) {
       if (fidMap[f].length() == 0) { fidToUse = f; break; }
     }
     if (fidToUse < 1 || fidToUse > MAX_FID) {
       Serial.println("No free fid available on device");
-      reportEnrollUpdate(rowToReport, "error", -1, "no-free-fid");
+      reportEnrollUpdate(job.id, "failed", -1, "no-free-fid", job.fingerSlot, job.studentId);
       return;
     }
   } else {
-    // if requested fid is occupied, warn and will overwrite
     if (fidMap[fidToUse].length()) {
       Serial.printf("Warning: requested fid %d already occupied by %s; will overwrite.\n", fidToUse, fidMap[fidToUse].c_str());
     }
@@ -652,58 +773,50 @@ void enrollment_doRegister(int requestedFid, const String &uniqueId, const Strin
   setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
   int resFid = enrollID_toFid(fidToUse);
   if (resFid > 0) {
-    // success: update local mapping + persist, and update sheet
-    fidMap[resFid] = uniqueId.length() ? uniqueId : String("AUTO_") + String(resFid);
-    // Set role according to provided role string; default to "student" if missing/unknown
-    String r = role;
-    r.toLowerCase();
-    if (r == "teacher" || r == "master" || r == "student") {
-      fidMapRole[resFid] = r;
-    } else {
-      fidMapRole[resFid] = "student";
-    }
-    fidMapName[resFid] = name;
+    fidMap[resFid]     = job.uniqueId.length() ? job.uniqueId : String("AUTO_") + String(resFid);
+    fidMapRole[resFid] = role;
+    fidMapName[resFid] = job.name;
     saveFidMapToFS();
-    Serial.printf("Saved fid %d -> %s (%s) name=%s\n", resFid, fidMap[resFid].c_str(), fidMapRole[resFid].c_str(), fidMapName[resFid].c_str());
+    Serial.printf("Saved fid %d -> %s name=%s\n", resFid, fidMap[resFid].c_str(), fidMapName[resFid].c_str());
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
-    reportEnrollUpdate(rowToReport, "registered", resFid, "");
+    reportEnrollUpdate(job.id, "completed", resFid, "", job.fingerSlot, job.studentId);
   } else {
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
-    reportEnrollUpdate(rowToReport, "error", -1, "enroll-failed");
+    reportEnrollUpdate(job.id, "failed", -1, "enroll-failed", job.fingerSlot, job.studentId);
   }
 }
 
 /* enrollment_doDeleteByFid: deletes fingerprint template at fid and mapping */
-void enrollment_doDeleteByFid(int fid, int rowToReport) {
+void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
   if (fid < 1 || fid > MAX_FID) {
-    reportEnrollUpdate(rowToReport, "error", -1, "invalid-fid");
+    reportEnrollUpdate(job.id, "failed", -1, "invalid-fid", job.fingerSlot, job.studentId);
     return;
   }
   int p = finger.deleteModel(fid);
   if (p == FINGERPRINT_OK) {
-    fidMap[fid] = "";
+    fidMap[fid]     = "";
     fidMapRole[fid] = "";
     fidMapName[fid] = "";
     saveFidMapToFS();
-    reportEnrollUpdate(rowToReport, "deleted", fid, "");
+    reportEnrollUpdate(job.id, "completed", fid, "", job.fingerSlot, job.studentId);
   } else {
     Serial.printf("deleteModel failed: %d\n", p);
-    reportEnrollUpdate(rowToReport, "error", fid, String(p));
+    reportEnrollUpdate(job.id, "failed", fid, String(p), job.fingerSlot, job.studentId);
   }
 }
 
-/* enrollment_doDeleteByUnique: find fid by uniqueId and delete */
-void enrollment_doDeleteByUnique(const String &uniqueId, int rowToReport) {
-  int fid = findFidByUnique(uniqueId);
+/* enrollment_doDeleteByUnique: find fid by student sid and delete */
+void enrollment_doDeleteByUnique(const EnrollJob &job) {
+  int fid = findFidByUnique(job.uniqueId);
   if (fid <= 0) {
-    reportEnrollUpdate(rowToReport, "error", -1, "not-found");
+    reportEnrollUpdate(job.id, "failed", -1, "not-found", job.fingerSlot, job.studentId);
     return;
   }
-  enrollment_doDeleteByFid(fid, rowToReport);
+  enrollment_doDeleteByFid(job, fid);
 }
 
 /* =============== Finger search wrapper =============== */
@@ -743,64 +856,238 @@ int fingerSearch() {
   }
 }
 
+/* Parses embedded "timestamp":"YYYY-MM-DD HH:MM:SS" from a payload.
+   On success, writes age in seconds (relative to nowEpoch) to outAgeSec and returns true.
+   A negative age means the timestamp is in the future (e.g., pre-NTP boot).
+   Returns false if the timestamp is missing or malformed. */
+bool parsePayloadAgeSec(const String &payload, long nowEpoch, long &outAgeSec) {
+  int tsIdx = payload.indexOf("\"timestamp\":\"");
+  if (tsIdx < 0) return false;
+  int tsStart = tsIdx + 13;
+  int tsEnd   = payload.indexOf("\"", tsStart);
+  if (tsEnd < 0) return false;
+  String tsStr = payload.substring(tsStart, tsEnd);
+  if (tsStr.length() < 19) return false;
+  int yr = tsStr.substring(0,4).toInt();
+  int mo = tsStr.substring(5,7).toInt();
+  int dy = tsStr.substring(8,10).toInt();
+  int hr = tsStr.substring(11,13).toInt();
+  int mn = tsStr.substring(14,16).toInt();
+  int sc = tsStr.substring(17,19).toInt();
+  if (yr < 2020) return false;
+  DateTime entryTime(yr, mo, dy, hr, mn, sc);
+  outAgeSec = nowEpoch - (long)entryTime.unixtime();
+  return true;
+}
+
+/* Is an entry stale per QUEUE_MAX_AGE_MS?
+   Unparseable or future-dated entries are NOT considered stale (keep them). */
+static inline bool entryIsStale(long ageSec, bool parsed) {
+  if (!parsed) return false;
+  if (ageSec <= 0) return false;
+  return (unsigned long)ageSec * 1000UL > QUEUE_MAX_AGE_MS;
+}
+
+/* Trim the SPIFFS queue file in-place:
+     1. Drop entries older than QUEUE_MAX_AGE_MS
+     2. If over QUEUE_MAX_SPIFFS_ENTRIES, drop oldest (from front) to fit
+     3. If over QUEUE_MAX_SPIFFS_BYTES, drop oldest (from front) to fit
+   CALLER MUST HOLD spiffsMutex. */
+void trimSPIFFSQueue_locked() {
+  if (!SPIFFS.exists(QUEUE_FILE)) return;
+  File f = SPIFFS.open(QUEUE_FILE, FILE_READ);
+  if (!f) return;
+
+  long nowEpoch = rtc.now().unixtime();
+  std::vector<String> kept;
+  kept.reserve(64);
+  size_t droppedAge = 0;
+
+  while (f.available()) {
+    String ln = f.readStringUntil('\n');
+    ln.trim();
+    if (!ln.length()) continue;
+    long ageSec = 0;
+    bool parsed = parsePayloadAgeSec(ln, nowEpoch, ageSec);
+    if (entryIsStale(ageSec, parsed)) { droppedAge++; continue; }
+    kept.push_back(ln);
+  }
+  f.close();
+
+  // Count cap: drop oldest (front)
+  size_t droppedCount = 0;
+  if (kept.size() > QUEUE_MAX_SPIFFS_ENTRIES) {
+    droppedCount = kept.size() - QUEUE_MAX_SPIFFS_ENTRIES;
+    kept.erase(kept.begin(), kept.begin() + droppedCount);
+  }
+
+  // Byte cap: measure from newest backward, keep as many as fit
+  size_t droppedBytes = 0;
+  {
+    size_t totalBytes = 0;
+    size_t firstKeep = 0;
+    bool byteCapHit = false;
+    for (size_t i = kept.size(); i > 0; --i) {
+      size_t idx = i - 1;
+      totalBytes += kept[idx].length() + 1; // +1 for newline
+      if (totalBytes > QUEUE_MAX_SPIFFS_BYTES) {
+        firstKeep = idx + 1;
+        byteCapHit = true;
+        break;
+      }
+    }
+    if (byteCapHit && firstKeep > 0) {
+      droppedBytes = firstKeep;
+      kept.erase(kept.begin(), kept.begin() + firstKeep);
+    }
+  }
+
+  // Rewrite (or delete if empty)
+  if (kept.empty()) {
+    SPIFFS.remove(QUEUE_FILE);
+  } else {
+    File wf = SPIFFS.open(QUEUE_FILE, FILE_WRITE);
+    if (wf) {
+      for (auto &ln : kept) wf.println(ln);
+      wf.close();
+    } else {
+      Serial.println("trimSPIFFSQueue: rewrite failed to open");
+    }
+  }
+
+  size_t totalDropped = droppedAge + droppedCount + droppedBytes;
+  if (totalDropped) {
+    Serial.printf("SPIFFS queue trimmed: dropped %u (age=%u count=%u bytes=%u), kept %u\n",
+                  (unsigned)totalDropped, (unsigned)droppedAge,
+                  (unsigned)droppedCount, (unsigned)droppedBytes,
+                  (unsigned)kept.size());
+  }
+}
+
+/* Append one line to the SPIFFS queue. If adding the line would push the file
+   past QUEUE_MAX_SPIFFS_BYTES, runs a trim pass first so the cap is enforced
+   even when flushQueue hasn't had a chance to run (prolonged offline).
+   CALLER MUST HOLD spiffsMutex. */
+bool appendToSPIFFSQueue_locked(const String &line) {
+  size_t currentSize = 0;
+  if (SPIFFS.exists(QUEUE_FILE)) {
+    File fr = SPIFFS.open(QUEUE_FILE, FILE_READ);
+    if (fr) {
+      currentSize = fr.size();
+      fr.close();
+    }
+  }
+  if (currentSize + line.length() + 1 > QUEUE_MAX_SPIFFS_BYTES) {
+    Serial.printf("SPIFFS queue near cap (%u bytes); trimming before append\n", (unsigned)currentSize);
+    trimSPIFFSQueue_locked();
+  }
+
+  File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
+  if (!f) {
+    Serial.println("SPIFFS queue append failed to open");
+    return false;
+  }
+  f.println(line);
+  f.close();
+  return true;
+}
+
+/* Trims in-memory queue: removes entries older than QUEUE_MAX_AGE_MS,
+   then caps at QUEUE_MAX_ENTRIES. CALLER MUST HOLD memQueueMutex. */
+void trimQueue() {
+  long nowEpoch = rtc.now().unixtime();
+  std::deque<String> kept;
+  for (auto &entry : memQueue) {
+    long ageSec = 0;
+    bool parsed = parsePayloadAgeSec(entry, nowEpoch, ageSec);
+    if (entryIsStale(ageSec, parsed)) {
+      Serial.printf("memQueue: dropping stale entry (age=%lds)\n", ageSec);
+      continue;
+    }
+    kept.push_back(entry);
+  }
+  memQueue = kept;
+
+  while (memQueue.size() > QUEUE_MAX_ENTRIES) {
+    Serial.printf("memQueue full (%u); dropping oldest.\n", (unsigned)memQueue.size());
+    memQueue.pop_front();
+  }
+}
+
 /* =============== sendOrQueuePayload (unchanged but kept) =============== */
 void sendOrQueuePayload(const String &payloadJson) {
   if (WiFi.status() != WL_CONNECTED) {
     xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-    File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-    if (f) {
-      f.println(payloadJson);
-      f.close();
+    if (appendToSPIFFSQueue_locked(payloadJson)) {
       Serial.println("Queued locally (SPIFFS): " + payloadJson);
-    } else {
-      Serial.println("Queue append failed");
     }
     xSemaphoreGive(spiffsMutex);
     return;
   }
 
-  bool pushed = false;
-  if (xSemaphoreTake(memQueueMutex, (TickType_t) (50 / portTICK_PERIOD_MS)) == pdTRUE) {
+  // Always persist to SPIFFS first so a power cut can never lose a scan.
+  // NetworkTask will delete from SPIFFS once the POST succeeds.
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+  appendToSPIFFSQueue_locked(payloadJson);
+  xSemaphoreGive(spiffsMutex);
+  Serial.println("[sendOrQueue] Persisted to SPIFFS: " + payloadJson);
+
+  // Also push to memQueue for immediate fast-send attempt.
+  if (xSemaphoreTake(memQueueMutex, (TickType_t)(50 / portTICK_PERIOD_MS)) == pdTRUE) {
+    trimQueue();
     memQueue.push_back(payloadJson);
     xSemaphoreGive(memQueueMutex);
-    pushed = true;
     xSemaphoreGive(memQueueSem);
+    Serial.println("[sendOrQueue] Also pushed to memQueue for immediate send.");
   }
-  if (!pushed) {
-    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-    File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-    if (f) {
-      f.println(payloadJson);
-      f.close();
-      Serial.println("Queued (fallback) locally: " + payloadJson);
-    }
-    xSemaphoreGive(spiffsMutex);
+  else {
+    Serial.println("[sendOrQueue] memQueue mutex timeout; SPIFFS-only path active.");
   }
 }
 
-/* flushQueue: attempt to send queued entries (used by NetworkTask) */
+/* flushQueue: attempt to send queued entries (used by NetworkTask).
+   Also opportunistically drops stale entries (age > QUEUE_MAX_AGE_MS) during read,
+   and enforces count/byte caps on the rewritten tail. */
 void flushQueue() {
   if (WiFi.status() != WL_CONNECTED) return;
   std::vector<String> pending;
+  size_t droppedStale = 0;
+  long nowEpoch = rtc.now().unixtime();
+
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
   File f = SPIFFS.open(QUEUE_FILE, FILE_READ);
   if (!f) { xSemaphoreGive(spiffsMutex); return; }
   while (f.available()) {
     String ln = f.readStringUntil('\n');
     ln.trim();
-    if (ln.length()) pending.push_back(ln);
+    if (!ln.length()) continue;
+    long ageSec = 0;
+    bool parsed = parsePayloadAgeSec(ln, nowEpoch, ageSec);
+    if (entryIsStale(ageSec, parsed)) { droppedStale++; continue; }
+    pending.push_back(ln);
   }
   f.close();
   xSemaphoreGive(spiffsMutex);
 
-  if (pending.empty()) return;
+  if (droppedStale) {
+    Serial.printf("flushQueue: dropped %u stale entries on read\n", (unsigned)droppedStale);
+  }
+  if (pending.empty()) {
+    // If stale entries were all we had, remove the now-empty file
+    if (droppedStale) {
+      xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+      SPIFFS.remove(QUEUE_FILE);
+      xSemaphoreGive(spiffsMutex);
+    }
+    return;
+  }
   Serial.printf("Flushing %u queued records\n", (unsigned)pending.size());
   std::vector<String> keep;
   for (auto &entry : pending) {
     int httpCode = 0; String body;
-    bool ok = postJSONToUrl(entry, SCRIPT_URL, httpCode, body);
+    bool ok = postJSONToUrl(entry, SUPABASE_URL, httpCode, body);
     if (ok) {
-      Serial.println("Queued record sent OK via POST");
+      Serial.printf("flushQueue: sent OK and removed from SPIFFS: %s\n", entry.c_str());
       continue;
     }
     if (httpCode == 400 || httpCode == 404) {
@@ -851,23 +1138,216 @@ void flushQueue() {
     vTaskDelay(200 / portTICK_PERIOD_MS);
   }
 
+  // Enforce count cap on the tail we're about to rewrite
+  size_t capDroppedCount = 0;
+  if (keep.size() > QUEUE_MAX_SPIFFS_ENTRIES) {
+    capDroppedCount = keep.size() - QUEUE_MAX_SPIFFS_ENTRIES;
+    keep.erase(keep.begin(), keep.begin() + capDroppedCount);
+  }
+  // Enforce byte cap (keep newest that fit)
+  size_t capDroppedBytes = 0;
+  {
+    size_t totalBytes = 0;
+    size_t firstKeep = 0;
+    bool byteCapHit = false;
+    for (size_t i = keep.size(); i > 0; --i) {
+      size_t idx = i - 1;
+      totalBytes += keep[idx].length() + 1;
+      if (totalBytes > QUEUE_MAX_SPIFFS_BYTES) {
+        firstKeep = idx + 1;
+        byteCapHit = true;
+        break;
+      }
+    }
+    if (byteCapHit && firstKeep > 0) {
+      capDroppedBytes = firstKeep;
+      keep.erase(keep.begin(), keep.begin() + firstKeep);
+    }
+  }
+  if (capDroppedCount || capDroppedBytes) {
+    Serial.printf("flushQueue: cap enforced (count-dropped=%u bytes-dropped=%u)\n",
+                  (unsigned)capDroppedCount, (unsigned)capDroppedBytes);
+  }
+
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
   if (keep.empty()) {
     SPIFFS.remove(QUEUE_FILE);
     Serial.println("Queue cleared.");
   } else {
     File wf = SPIFFS.open(QUEUE_FILE, FILE_WRITE);
-    for (auto &ln : keep) wf.println(ln);
-    wf.close();
-    Serial.printf("Queue retained %u records\n", (unsigned)keep.size());
+    if (wf) {
+      for (auto &ln : keep) wf.println(ln);
+      wf.close();
+      Serial.printf("Queue retained %u records\n", (unsigned)keep.size());
+    } else {
+      Serial.println("flushQueue: rewrite failed to open");
+    }
   }
   xSemaphoreGive(spiffsMutex);
 }
 
+/* =================== OTA Update =================== */
+void checkAndApplyOTA() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  Serial.println("OTA: Checking for update...");
+  String binUrl = "";
+
+  // === Scope 1: API call — freed completely before download begins ===
+  {
+    WiFiClientSecure apiClient;
+    apiClient.setInsecure();
+    HTTPClient http;
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(15000);
+    http.setUserAgent("ESP32-Attendance/1.0");
+
+    if (!http.begin(apiClient, OTA_REPO_API)) {
+      Serial.println("OTA: Failed to begin API request");
+      return;
+    }
+    int code = http.GET();
+    if (code != 200) {
+      Serial.printf("OTA: API returned %d\n", code);
+      http.end();
+      return;
+    }
+    String body = http.getString();
+    http.end();
+
+    // Extract tag_name
+    int tagIdx = body.indexOf("\"tag_name\"");
+    if (tagIdx < 0) { Serial.println("OTA: No tag_name in response"); return; }
+    int q1 = body.indexOf('"', body.indexOf(':', tagIdx) + 1);
+    int q2 = body.indexOf('"', q1 + 1);
+    if (q1 < 0 || q2 < 0) { Serial.println("OTA: Could not parse tag_name"); return; }
+    String latestTag = body.substring(q1 + 1, q2);
+
+    // Check this release belongs to this variant
+    String expectedPrefix = String(SYSTEM_TYPE) + "-v";
+    if (!latestTag.startsWith(expectedPrefix)) {
+      Serial.printf("OTA: Release tag '%s' is not for this variant (%s). Skipping.\n",
+                    latestTag.c_str(), CLASS_ID);
+      return;
+    }
+
+    // Strip prefix to get bare version e.g. "1.1.6"
+    String latestVersion = latestTag.substring(expectedPrefix.length());
+
+    Serial.printf("OTA: Current=%s  Latest=%s\n", FIRMWARE_VERSION, latestVersion.c_str());
+    if (latestVersion == FIRMWARE_VERSION) {
+      Serial.println("OTA: Firmware is up to date.");
+      return;
+    }
+
+    // Extract browser_download_url for .bin
+    int searchFrom = 0;
+    while (true) {
+      int keyIdx = body.indexOf("\"browser_download_url\"", searchFrom);
+      if (keyIdx < 0) break;
+      int u1 = body.indexOf('"', body.indexOf(':', keyIdx) + 1);
+      int u2 = body.indexOf('"', u1 + 1);
+      if (u1 < 0 || u2 < 0) break;
+      String candidate = body.substring(u1 + 1, u2);
+      if (candidate.endsWith(".bin")) { binUrl = candidate; break; }
+      searchFrom = u2 + 1;
+    }
+    // body and apiClient destroyed here as scope exits
+  }
+
+  if (binUrl.length() == 0) { Serial.println("OTA: No .bin asset found in release"); return; }
+  Serial.printf("OTA: Downloading from %s\n", binUrl.c_str());
+  Serial.printf("OTA: Free heap before download: %u bytes\n", esp_get_free_heap_size());
+
+  otaInProgress = true;
+  delay(600); // give FingerprintTask time to set the LED before download blocks
+
+  // === Scope 2: Redirect resolution ===
+  {
+    WiFiClientSecure redirectClient;
+    redirectClient.setInsecure();
+    HTTPClient redirectHttp;
+    redirectHttp.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+    redirectHttp.setTimeout(15000);
+    redirectHttp.setUserAgent("ESP32-Attendance/1.0");
+    if (redirectHttp.begin(redirectClient, binUrl)) {
+      int rCode = redirectHttp.GET();
+      if (rCode == 301 || rCode == 302) {
+        String location = redirectHttp.getLocation();
+        if (location.length()) {
+          Serial.printf("OTA: Redirect -> %s\n", location.c_str());
+          binUrl = location;
+        }
+      }
+      redirectHttp.end();
+    }
+    // redirectClient destroyed here
+  }
+
+  // === Scope 3: Binary download and flash ===
+  {
+    WiFiClientSecure binClient;
+    binClient.setInsecure();
+    HTTPClient binHttp;
+    binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    binHttp.setTimeout(60000);
+    binHttp.setUserAgent("ESP32-Attendance/1.0");
+
+    if (!binHttp.begin(binClient, binUrl)) {
+      Serial.printf("OTA: Failed to begin binary download. Free heap: %u\n", esp_get_free_heap_size());
+      otaInProgress = false;
+      return;
+    }
+    int binCode = binHttp.GET();
+    if (binCode != HTTP_CODE_OK) {
+      Serial.printf("OTA: Binary download returned %d\n", binCode);
+      binHttp.end();
+      otaInProgress = false;
+      return;
+    }
+
+    int contentLen = binHttp.getSize();
+    Serial.printf("OTA: Binary size = %d bytes\n", contentLen);
+
+    if (!Update.begin(contentLen > 0 ? contentLen : UPDATE_SIZE_UNKNOWN)) {
+      Serial.printf("OTA: Update.begin failed, error: %s\n", Update.errorString());
+      binHttp.end();
+      otaInProgress = false;
+      return;
+    }
+
+    WiFiClient *stream = binHttp.getStreamPtr();
+    size_t written = Update.writeStream(*stream);
+    Serial.printf("OTA: Written %u / %d bytes\n", written, contentLen);
+    binHttp.end();
+
+    if (Update.end()) {
+      if (Update.isFinished()) {
+        Serial.println("OTA: Update complete! Rebooting...");
+        setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+        delay(1500);
+        ESP.restart();
+      } else {
+        Serial.println("OTA: Update did not finish correctly.");
+      }
+    } else {
+      Serial.printf("OTA: Update.end error: %s\n", Update.errorString());
+    }
+  }
+
+  otaInProgress = false;
+}
+/* =================== End OTA =================== */
+
 /* =================== NetworkTask (Core 0) =================== */
 void NetworkTask(void *pvParameters) {
-  const TickType_t flushIntervalTicks = pdMS_TO_TICKS(60000); // 60s
+  const TickType_t flushIntervalTicks = pdMS_TO_TICKS(15000); // 15s
   esp_task_wdt_delete(NULL); // this task does long HTTP calls; remove from watchdog
+  // On boot, flush any SPIFFS-queued records immediately without waiting for the interval.
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("NetworkTask: boot flush — sending any queued records.");
+    flushQueue();
+  }
   for (;;) {
     // Process any in-memory queued payloads
     String payload = "";
@@ -884,9 +1364,9 @@ void NetworkTask(void *pvParameters) {
     if (hadPayload) {
       Serial.println("NetworkTask: sending payload from memQueue");
       int httpCode = 0; String body;
-      bool ok = postJSONToUrl(payload, SCRIPT_URL, httpCode, body);
+      bool ok = postJSONToUrl(payload, SUPABASE_URL, httpCode, body);
       if (ok) {
-        Serial.println("NetworkTask: POST OK");
+        Serial.println("NetworkTask: POST OK — SPIFFS flush will clear persisted copy.");
       } else {
         if (httpCode == 400 || httpCode == 404) {
           // GET fallback
@@ -925,18 +1405,14 @@ void NetworkTask(void *pvParameters) {
           } else {
             Serial.printf("NetworkTask: GET fallback failed (code=%d). Queuing for retry.\n", gCode);
             xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-            File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-            if (f) { f.println(payload); f.close(); }
+            appendToSPIFFSQueue_locked(payload);
             xSemaphoreGive(spiffsMutex);
-            Serial.printf("Queue retained: %d records\n", (int)0);
           }
         } else {
           Serial.printf("NetworkTask: POST failed (code=%d). Queuing for retry.\n", httpCode);
           xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-          File f = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-          if (f) { f.println(payload); f.close(); }
+          appendToSPIFFSQueue_locked(payload);
           xSemaphoreGive(spiffsMutex);
-          Serial.printf("Queue retained: %d records\n", (int)0);
         }
       }
       continue;
@@ -963,110 +1439,93 @@ void NetworkTask(void *pvParameters) {
         WiFi.disconnect(true);
         vTaskDelay(pdMS_TO_TICKS(1000));
         WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
-      } 
+      
+        // While offline, flushQueue isn't running so age-based trimming
+        // wouldn't otherwise happen. Run a periodic SPIFFS trim to keep
+        // flash healthy across long WiFi outages.
+        static unsigned long lastSPIFFSTrimMs = 0;
+        unsigned long nowMs = millis();
+        if (lastSPIFFSTrimMs == 0 ||
+            (nowMs - lastSPIFFSTrimMs) > QUEUE_SPIFFS_TRIM_INTERVAL_MS) {
+          lastSPIFFSTrimMs = nowMs;
+          xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+          trimSPIFFSQueue_locked();
+          xSemaphoreGive(spiffsMutex);
+        }
+      }
     }
   }
   vTaskDelete(NULL);
 }
 
-/* =================== EnrollmentTask (polls Apps Script) =================== */
+/* =================== EnrollmentTask (polls Supabase) =================== */
 void EnrollmentTask(void *pvParameters) {
   (void) pvParameters;
-  esp_task_wdt_delete(NULL); // this task does long HTTP calls; remove from watchdog
+  esp_task_wdt_delete(NULL);
   for (;;) {
-    // Poll only when WiFi is connected
-    if (WiFi.status() == WL_CONNECTED) {
-      String url = String(SCRIPT_URL) + "?api=enroll_fetch&classId=" + urlEncode(String(CLASS_ID));
-      if (strlen(SCRIPT_AUTH) > 0) url += "&auth=" + String(SCRIPT_AUTH);
-      Serial.println("EnrollmentTask: polling for enroll job...");
-      WiFiClientSecure client; client.setInsecure();
-      HTTPClient http;
-      http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-      http.setTimeout(20000);
-      int code = -1;
-      String body = "";
-      if (http.begin(client, url)) {
-        code = http.GET();
-        if (code > 0) body = http.getString();
-        http.end();
-      }
+    if (WiFi.status() == WL_CONNECTED && CLASS_NAME.length() > 0) {
+      Serial.println("EnrollmentTask: polling for enrollment job...");
+      String payload = "{\"class_name\":\"" + CLASS_NAME + "\"}";
+      int code = 0; String body = "";
+      postJSONToUrl(payload, ENROLL_GET_URL, code, body);
       Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
-      {
-        if (code >= 200 && code < 300 && body.length()) {
-          // We expect JSON with "result":"ok" and a record object OR "result":"none"
-          if (body.indexOf("\"result\":\"ok\"") >= 0 && body.indexOf("\"record\"") >= 0) {
-            // parse naive JSON for required fields:
-            int posRec = body.indexOf("\"record\"");
-            int posRow = body.indexOf("\"row\"", posRec);
-            int parsedRow = -1;
-            if (posRow >= 0) {
-              int colon = body.indexOf(':', posRow);
-              int comma = body.indexOf(',', colon);
-              if (colon >= 0 && comma >= 0) {
-                String sRow = body.substring(colon+1, comma);
-                sRow.trim();
-                parsedRow = sRow.toInt();
-              }
-            }
-            int posFid = body.indexOf("\"fingerId\"", posRec);
-            int parsedFid = 0;
-            if (posFid >= 0) {
-              int colon = body.indexOf(':', posFid);
-              int comma = body.indexOf(',', colon);
-              if (comma < 0) comma = body.indexOf('}', colon);
-              if (colon >= 0 && comma >= 0) {
-                String sFid = body.substring(colon+1, comma);
-                sFid.trim();
-                parsedFid = sFid.toInt();
-              }
-            }
-            // strings: uniqueId, name, role, command
-            auto extractStringField = [&](const String &key)->String{
-              int p = body.indexOf(String("\"") + key + "\"", posRec);
-              if (p < 0) return "";
-              int q = body.indexOf(':', p);
-              if (q < 0) return "";
-              int q1 = body.indexOf('"', q+1);
-              if (q1 < 0) return "";
-              int q2 = body.indexOf('"', q1+1);
-              if (q2 < 0) return "";
-              return body.substring(q1+1, q2);
-            };
-            String uniqueId = extractStringField("uniqueId");
-            String name = extractStringField("name");
-            String role = extractStringField("role");
-            String command = extractStringField("command");
 
-            // Create job and notify FingerprintTask
-            if (parsedRow >= 2) {
-              xSemaphoreTake(enrollMutex, portMAX_DELAY);
-              currentEnrollJob.row = parsedRow;
-              currentEnrollJob.requestedFid = parsedFid;
-              currentEnrollJob.uniqueId = uniqueId;
-              currentEnrollJob.name = name;
-              currentEnrollJob.role = role;
-              currentEnrollJob.command = command;
-              enrollmentJobPending = true;
-              xSemaphoreGive(enrollMutex);
-              Serial.printf("EnrollmentTask: job queued row=%d cmd=%s fid=%d id=%s role=%s\n", parsedRow, command.c_str(), parsedFid, uniqueId.c_str(), role.c_str());
-              xSemaphoreGive(enrollSem);
-              // Fast-poll after finding a job so we notice completion quickly
-              vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
-              continue;
-            }
-          } else {
-            // none pending
-            // Serial.println("EnrollmentTask: none pending");
-          }
-        } else {
-          Serial.printf("EnrollmentTask: HTTP poll failed code=%d\n", code);
+      if (code >= 200 && code < 300 && body.length() && body.indexOf("\"job\":null") < 0) {
+        // Helper: extract a quoted string field from JSON
+        auto extractStr = [&](const String &key) -> String {
+          int p = body.indexOf("\"" + key + "\"");
+          if (p < 0) return "";
+          int colon = body.indexOf(':', p);
+          if (colon < 0) return "";
+          int valStart = colon + 1;
+          while (valStart < (int)body.length() && body[valStart] == ' ') valStart++;
+          if (body.substring(valStart, valStart + 4) == "null") return "";
+          int q1 = body.indexOf('"', colon);
+          if (q1 < 0) return "";
+          int q2 = body.indexOf('"', q1 + 1);
+          if (q2 < 0) return "";
+          return body.substring(q1 + 1, q2);
+        };
+        // Helper: extract an integer field from JSON
+        auto extractInt = [&](const String &key) -> int {
+          int p = body.indexOf("\"" + key + "\"");
+          if (p < 0) return 0;
+          int colon = body.indexOf(':', p);
+          if (colon < 0) return 0;
+          int numStart = colon + 1;
+          while (numStart < (int)body.length() && body[numStart] == ' ') numStart++;
+          if (body.substring(numStart, numStart + 4) == "null") return 0;
+          int numEnd = numStart;
+          while (numEnd < (int)body.length() && (isdigit(body[numEnd]) || body[numEnd] == '-')) numEnd++;
+          return body.substring(numStart, numEnd).toInt();
+        };
+
+        EnrollJob job;
+        job.id           = extractStr("id");
+        job.command      = extractStr("command");
+        job.fingerSlot   = extractStr("finger_slot");
+        job.studentId    = extractStr("student_id");
+        job.uniqueId     = extractStr("sid");
+        job.name         = extractStr("fullname");
+        job.requestedFid = extractInt("fid");
+
+        if (job.id.length() > 0 && job.command.length() > 0) {
+          xSemaphoreTake(enrollMutex, portMAX_DELAY);
+          currentEnrollJob = job;
+          enrollmentJobPending = true;
+          xSemaphoreGive(enrollMutex);
+          Serial.printf("EnrollmentTask: job queued id=%s cmd=%s fid=%d slot=%s uid=%s\n",
+                        job.id.c_str(), job.command.c_str(), job.requestedFid,
+                        job.fingerSlot.c_str(), job.uniqueId.c_str());
+          xSemaphoreGive(enrollSem);
+          vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
+          continue;
         }
-      } 
+      }
     } else {
-      Serial.println("EnrollmentTask: WiFi not connected; skipping poll");
+      Serial.println("EnrollmentTask: WiFi not connected or no CLASS_NAME; skipping poll");
     }
 
-    // sleep until next poll
     vTaskDelay(pdMS_TO_TICKS(enrollmentJobPending ? ENROLL_POLL_FAST_MS : ENROLL_POLL_MS));
   }
   vTaskDelete(NULL);
@@ -1078,6 +1537,13 @@ void FingerprintTask(void *pvParameters) {
   const unsigned long feedbackDuration = 600; // ms (green or red hold)
 
   for (;;) {
+    // If OTA is running, hold red breathing and wait
+    if (otaInProgress) {
+      setSensorLED(FINGERPRINT_LED_BREATHING, 15, FINGERPRINT_LED_RED);
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+
     // show ready (blue or purple depending on WiFi state)
     showReadyState();
 
@@ -1089,28 +1555,27 @@ void FingerprintTask(void *pvParameters) {
         enrollmentJobPending = false;
         xSemaphoreGive(enrollMutex);
 
-        Serial.printf("Processing enroll job row=%d cmd=%s role=%s\n", job.row, job.command.c_str(), job.role.c_str());
+        Serial.printf("Processing enroll job id=%s cmd=%s slot=%s\n", job.id.c_str(), job.command.c_str(), job.fingerSlot.c_str());
         if (job.command == "register") {
-          // Pass job.role so device stores the correct role (student/teacher/master)
-          enrollment_doRegister(job.requestedFid, job.uniqueId, job.name, job.role, job.row);
-        } else if (job.command == "delete") {
-          if (job.requestedFid > 0) enrollment_doDeleteByFid(job.requestedFid, job.row);
-          else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job.uniqueId, job.row);
-          else reportEnrollUpdate(job.row, "error", -1, "no-id-specified");
+          enrollment_doRegister(job, "student");
+        } else if (job.command == "register-master") {
+          enrollment_doRegister(job, "master");
+        } else if (job.command == "delete" || job.command == "delete-master") {
+          if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
+          else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);
+          else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.studentId);
         } else if (job.command == "clearall") {
-          // For safety: only perform clearall if row role is master or uniqueId=='admin'
-          // (This keeps accidental clears less likely — you may change this policy)
           Serial.println("Performing clearAll on sensor and local map");
           int rc = finger.emptyDatabase();
           if (rc == FINGERPRINT_OK) {
             clearAllFidMap();
-            reportEnrollUpdate(job.row, "cleared", 0, "");
+            reportEnrollUpdate(job.id, "completed", 0, "", "", "");
           } else {
             Serial.printf("emptyDatabase returned %d\n", rc);
-            reportEnrollUpdate(job.row, "error", 0, String(rc));
+            reportEnrollUpdate(job.id, "failed", 0, String(rc), "", "");
           }
         } else {
-          reportEnrollUpdate(job.row, "error", -1, "unknown-cmd");
+          reportEnrollUpdate(job.id, "failed", -1, "unknown-cmd", "", "");
         }
       }
     }
@@ -1129,6 +1594,8 @@ void FingerprintTask(void *pvParameters) {
           vTaskDelay(600 / portTICK_PERIOD_MS);
           showReadyState();
           vTaskDelay(10 / portTICK_PERIOD_MS);
+          String logEntry = getRTCTimestamp() + " | fid=" + String(fid) + " | COOLDOWN | id=" + fidMap[fid];
+          appendScanLog(logEntry);
           continue;
       }
       lastScanMillis[fid] = nowMs;
@@ -1152,7 +1619,7 @@ void FingerprintTask(void *pvParameters) {
         }
         startCaptivePortal(); // blocks until credentials saved, then restarts
       } else {
-        // Decide branch using the stored role. If there is a stored mapping:
+        // Decide class using the stored role. If there is a stored mapping:
         if (mapped.length()) {
           if (role == "teacher") {
             // Teacher path: send teacher payload using the mapped uniqueId
@@ -1164,6 +1631,7 @@ void FingerprintTask(void *pvParameters) {
             vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
             showReadyState();
             sendOrQueuePayload(payload);
+            appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | SENT_TEACHER | id=" + teacherId);
             vTaskDelay(200 / portTICK_PERIOD_MS);
           } else {
             // Default to student path (role == "student" or unknown)
@@ -1172,10 +1640,11 @@ void FingerprintTask(void *pvParameters) {
             String scanId = makeScanId(studentId);
             String studentName = fidMapName[fid];
             String ts = getRTCTimestamp();
-            String payload ="{\"type\":\"student\",""\"classId\":\"" + String(CLASS_ID) + "\",""\"studentId\":\"" + studentId + "\",""\"studentName\":\"" + studentName + "\",""\"timestamp\":\"" + ts + "\",""\"scanId\":\"" + scanId + "\"}";
+            String payload = "{\"type\":\"student\",\"sid\":\"" + studentId + "\",\"scan_id\":\"" + scanId + "\",\"timestamp\":\"" + ts + "\"}";
             vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
             showReadyState();
             sendOrQueuePayload(payload);
+            appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | SENT_STUDENT | id=" + studentId + " | name=" + studentName);
             vTaskDelay(200 / portTICK_PERIOD_MS);
           }
         } else {
@@ -1183,6 +1652,7 @@ void FingerprintTask(void *pvParameters) {
           setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
           vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
           showReadyState();
+          appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | NO_MAPPING");
           vTaskDelay(100 / portTICK_PERIOD_MS);
         }
       }
@@ -1195,7 +1665,9 @@ void FingerprintTask(void *pvParameters) {
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
       vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
       showReadyState();
+      appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | NO_MAPPING");
       vTaskDelay(100 / portTICK_PERIOD_MS); // brief debounce
+ 
     } else {
       // other error: show red briefly then ready color (but keep short)
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
@@ -1225,6 +1697,12 @@ void setup() {
   }
 
   if (!initFS()) Serial.println("SPIFFS failed");
+
+  if (!loadDeviceConfig()) {
+    Serial.println("No device config found — identity will be set via captive portal.");
+  } else {
+    Serial.printf("Device identity: %s / %s\n", CLASS_ID.c_str(), CLASS_NAME.c_str());
+  }
 
   // Load fid map
   loadFidMapFromFS();
@@ -1282,6 +1760,11 @@ void setup() {
   }
 
   Serial.println("Tasks created; main loop will idle");
+
+  // OTA check: runs after sensor and tasks are ready so LED feedback works
+  if (WiFi.status() == WL_CONNECTED) {
+    checkAndApplyOTA();
+  }
 }
 
 void loop() {

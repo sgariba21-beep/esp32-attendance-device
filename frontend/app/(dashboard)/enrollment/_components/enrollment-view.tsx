@@ -1,0 +1,213 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { ClipboardList } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
+import { PageHeader } from '@/components/ui/page-header'
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table'
+import { JobDialog } from './job-dialog'
+import type { EnrollmentJob } from '../page'
+import type { Device } from '@/lib/types'
+
+type Props = {
+  initialJobs: EnrollmentJob[]
+  devices: Device[]
+}
+
+const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
+  pending:     { label: 'Pending',     variant: 'secondary'   },
+  in_progress: { label: 'In progress', variant: 'outline'     },
+  completed:   { label: 'Completed',   variant: 'success'     },
+  failed:      { label: 'Failed',      variant: 'destructive' },
+}
+
+function formatClass(device: { form: string; class: string }) {
+  return `${device.form} ${device.class}`
+}
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  })
+}
+
+function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'error' }) {
+  if (status === 'connected') {
+    return (
+      <Badge variant="success" className="gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
+        Live
+      </Badge>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <Badge variant="destructive" className="gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-destructive" />
+        Disconnected
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="secondary" className="gap-1.5">
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+      Connecting…
+    </Badge>
+  )
+}
+
+export function EnrollmentView({ initialJobs, devices }: Props) {
+  const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
+
+  useEffect(() => {
+    const source = new EventSource('/api/enrollment-stream')
+
+    source.onopen = () => setSseStatus('connected')
+    source.onerror = () => setSseStatus('error')
+
+    source.onmessage = (event) => {
+      let payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }
+      try {
+        payload = JSON.parse(event.data)
+      } catch {
+        return
+      }
+
+      if (payload.eventType === 'INSERT') {
+        setJobs((prev) => {
+          const exists = prev.find((j) => j.id === (payload.new.id as string))
+          if (exists) return prev
+          // Joins (student name, device) resolve on next page load.
+          const newJob: EnrollmentJob = {
+            id: payload.new.id as string,
+            command: payload.new.command as EnrollmentJob['command'],
+            status: payload.new.status as EnrollmentJob['status'],
+            finger_slot: (payload.new.finger_slot as EnrollmentJob['finger_slot']) ?? null,
+            fid: (payload.new.fid as number) ?? null,
+            note: (payload.new.note as string) ?? null,
+            created_at: payload.new.created_at as string,
+            device: devices.find((d) => d.id === payload.new.device_id) ?? null,
+            student: null,
+          }
+          return [newJob, ...prev]
+        })
+      } else if (payload.eventType === 'UPDATE') {
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === (payload.new.id as string)
+              ? {
+                  ...j,
+                  status: payload.new.status as EnrollmentJob['status'],
+                  note: (payload.new.note as string) ?? null,
+                  fid: (payload.new.fid as number) ?? j.fid,
+                }
+              : j
+          )
+        )
+      }
+    }
+
+    return () => source.close()
+  }, [devices])
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Enrollment"
+        subtitle={<SseStatusBadge status={sseStatus} />}
+        actions={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
+      />
+
+      {jobs.length === 0 ? (
+        <EmptyState
+          icon={ClipboardList}
+          message="No enrollment jobs yet."
+          action={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
+        />
+      ) : (
+        <div className="rounded-xl border overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Created</TableHead>
+                <TableHead>Command</TableHead>
+                <TableHead>Device</TableHead>
+                <TableHead>Student</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Note</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobs.map((job) => {
+                const badge = STATUS_BADGE[job.status]
+                const noteText = job.command === 'register-master' ? '—' : (job.note ?? '—')
+                const noteTruncated = noteText.length > 40 ? noteText.slice(0, 40) + '…' : noteText
+                return (
+                  <TableRow key={job.id}>
+                    <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                      {formatTime(job.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={
+                        job.command === 'register' ? 'success'
+                          : job.command === 'delete' ? 'destructive'
+                          : job.command === 'clearall' ? 'secondary'
+                          : 'outline'
+                      }>
+                        {job.command === 'register' ? 'Register'
+                          : job.command === 'delete' ? 'Delete'
+                          : job.command === 'register-master' ? 'Reg. master'
+                          : job.command === 'delete-master' ? 'Del. master'
+                          : 'Clear all'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{job.device ? formatClass(job.device) : '—'}</TableCell>
+                    <TableCell>
+                      {job.command === 'register-master'
+                        ? <span className="text-xs text-muted-foreground italic">{job.note ?? 'master'}</span>
+                        : (job.command === 'delete-master' || job.command === 'clearall')
+                          ? <span className="text-xs text-muted-foreground">—</span>
+                          : job.student?.fullname ?? '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-48">
+                      <span
+                        className="block truncate"
+                        title={noteText.length > 40 ? noteText : undefined}
+                      >
+                        {noteTruncated}
+                      </span>
+                      {(job.finger_slot || job.fid) && (
+                        <span className="tabular-nums text-xs text-muted-foreground">
+                          {[
+                            job.finger_slot === 'fin1' ? 'Finger 1' : job.finger_slot === 'fin2' ? 'Finger 2' : job.finger_slot,
+                            job.fid,
+                          ].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      <JobDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        devices={devices}
+      />
+    </div>
+  )
+}
