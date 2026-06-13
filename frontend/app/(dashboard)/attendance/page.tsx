@@ -11,7 +11,7 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  await requireRole('super_admin', 'admin', 'teacher')
+  const { role, assignedClass } = await requireRole('super_admin', 'admin', 'teacher')
 
   const params = await searchParams
   const fromDate = typeof params.from === 'string' ? params.from : undefined
@@ -46,6 +46,16 @@ export default async function AttendancePage({
       .order('term', { ascending: false }),
   ])
 
+  // Teachers are locked to their assigned class; URL params are ignored for device filtering
+  const allDevices = (devicesRes.data ?? []) as Device[]
+  let effectiveDeviceIds = deviceIds
+  if (role === 'teacher') {
+    const teacherDevice = assignedClass
+      ? allDevices.find((d) => `Form ${d.form} ${d.class}` === assignedClass)
+      : null
+    effectiveDeviceIds = teacherDevice ? [teacherDevice.id] : ['__no_match__']
+  }
+
   let query = supabase
     .from('attendance')
     .select(`
@@ -62,22 +72,30 @@ export default async function AttendancePage({
   if (toDate) query = query.lte('date', toDate)
   if (termId) query = query.eq('academic_id', termId)
   if (studentIds.length > 0) query = query.in('sid', studentIds)
-  if (deviceIds.length > 0) query = query.in('device_id', deviceIds)
+  if (effectiveDeviceIds.length > 0) query = query.in('device_id', effectiveDeviceIds)
 
   const { data: records, count } = await query
+
+  // Teachers only see students from their class
+  const allStudents = studentsRes.data ?? []
+  const visibleStudents = role === 'teacher' && effectiveDeviceIds[0] !== '__no_match__'
+    ? allStudents.filter((s) => s.device_id === effectiveDeviceIds[0])
+    : allStudents
 
   return (
     <>
       <RealtimeRefresh />
       <AttendanceView
         records={(records ?? []) as unknown as AttendanceRecord[]}
-        students={studentsRes.data ?? []}
-        devices={(devicesRes.data ?? []) as Device[]}
+        students={visibleStudents}
+        devices={allDevices}
         academic={(academicRes.data ?? []) as AcademicTerm[]}
         filters={{ fromDate, toDate, termId, studentIds, deviceIds }}
         page={page}
         pageSize={PAGE_SIZE}
         totalCount={count ?? 0}
+        role={role}
+        assignedClass={assignedClass}
       />
     </>
   )

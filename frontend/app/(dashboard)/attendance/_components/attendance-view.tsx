@@ -15,7 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { CalendarDays } from 'lucide-react'
+import { CalendarDays, Lock } from 'lucide-react'
+import type { UserRole } from '@/lib/supabase/dal'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
@@ -42,6 +43,8 @@ type Props = {
   page: number
   pageSize: number
   totalCount: number
+  role: UserRole
+  assignedClass: string | null
 }
 
 function formatClass(device: { form: string; class: string }) {
@@ -100,7 +103,8 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
-export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount }: Props) {
+export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedClass }: Props) {
+  const isTeacher = role === 'teacher'
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
@@ -247,6 +251,13 @@ export function AttendanceView({ records, students, devices, academic, filters, 
         <div className="w-px self-stretch bg-border mx-1" />
 
         <div className="flex items-end gap-2">
+          {isTeacher && assignedClass && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground self-end h-8">
+              <Lock className="h-3 w-3 shrink-0" />
+              {assignedClass}
+            </div>
+          )}
+
           <div className="flex flex-col gap-1">
             <Label className="text-xs">Students</Label>
             <MultiSelect
@@ -260,25 +271,27 @@ export function AttendanceView({ records, students, devices, academic, filters, 
             />
           </div>
 
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">Classes</Label>
-            <MultiSelect
-              options={classOptions}
-              selected={deviceIds}
-              onChange={(val) => {
-                setDeviceIds(val)
-                const validIds = val.length > 0
-                  ? new Set(students.filter((s) => val.includes(s.device_id)).map((s) => s.id))
-                  : null
-                const nextStudentIds = validIds
-                  ? studentIds.filter((id) => validIds.has(id))
-                  : studentIds
-                if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
-                applyFilters({ classes: val, students: nextStudentIds })
-              }}
-              placeholder="All classes"
-            />
-          </div>
+          {!isTeacher && (
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">Classes</Label>
+              <MultiSelect
+                options={classOptions}
+                selected={deviceIds}
+                onChange={(val) => {
+                  setDeviceIds(val)
+                  const validIds = val.length > 0
+                    ? new Set(students.filter((s) => val.includes(s.device_id)).map((s) => s.id))
+                    : null
+                  const nextStudentIds = validIds
+                    ? studentIds.filter((id) => validIds.has(id))
+                    : studentIds
+                  if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
+                  applyFilters({ classes: val, students: nextStudentIds })
+                }}
+                placeholder="All classes"
+              />
+            </div>
+          )}
         </div>
       </div>
 

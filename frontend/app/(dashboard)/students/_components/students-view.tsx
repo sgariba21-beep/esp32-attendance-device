@@ -14,6 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+import type { UserRole } from '@/lib/supabase/dal'
 import { StudentDialog } from './student-dialog'
 import { setStudentStatus } from '../_actions'
 import type { StudentWithDevice } from '../page'
@@ -22,11 +23,13 @@ import type { Device } from '@/lib/types'
 type Props = {
   students: StudentWithDevice[]
   devices: Device[]
+  role: UserRole
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 
-export function StudentsView({ students, devices }: Props) {
+export function StudentsView({ students, devices, role }: Props) {
+  const isTeacher = role === 'teacher'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<StudentWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
@@ -83,7 +86,7 @@ export function StudentsView({ students, devices }: Props) {
       <PageHeader
         title="Students"
         subtitle={`${filtered.length} of ${students.length} student${students.length !== 1 ? 's' : ''}`}
-        actions={<Button onClick={openAdd}>Add student</Button>}
+        actions={!isTeacher ? <Button onClick={openAdd}>Add student</Button> : undefined}
       />
 
       {/* Filter bar */}
@@ -130,8 +133,8 @@ export function StudentsView({ students, devices }: Props) {
       {students.length === 0 ? (
         <EmptyState
           icon={Users}
-          message="No students yet. Add one to get started."
-          action={<Button onClick={openAdd}>Add student</Button>}
+          message={isTeacher ? 'No students in your class.' : 'No students yet. Add one to get started.'}
+          action={!isTeacher ? <Button onClick={openAdd}>Add student</Button> : undefined}
         />
       ) : filtered.length === 0 ? (
         <EmptyState
@@ -149,7 +152,7 @@ export function StudentsView({ students, devices }: Props) {
                   <TableHead>Class</TableHead>
                   <TableHead>Fingerprints</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  {!isTeacher && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -177,26 +180,28 @@ export function StudentsView({ students, devices }: Props) {
                           {s.status === 'active' ? 'Active' : 'Inactive'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-3">
-                          <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
-                            Edit
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={togglingId === s.id}
-                            onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
-                            className={s.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
-                          >
-                            {togglingId === s.id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : s.status === 'active'
-                                ? 'Deactivate'
-                                : 'Activate'}
-                          </Button>
-                        </div>
-                      </TableCell>
+                      {!isTeacher && (
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={togglingId === s.id}
+                              onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
+                              className={s.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
+                            >
+                              {togglingId === s.id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : s.status === 'active'
+                                  ? 'Deactivate'
+                                  : 'Activate'}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   )
                 })}
