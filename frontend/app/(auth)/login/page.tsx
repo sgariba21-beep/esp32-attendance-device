@@ -109,7 +109,10 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground mt-0.5">Enter your admin credentials to continue.</p>
         </div>
 
-        <div className="space-y-4">
+        <form
+          className="space-y-4"
+          onSubmit={(e) => { e.preventDefault(); handleSignIn() }}
+        >
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -118,6 +121,12 @@ export default function LoginPage() {
               placeholder="admin@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  document.getElementById('password')?.focus()
+                }
+              }}
               autoComplete="email"
               autoCapitalize="none"
               autoCorrect="off"
@@ -150,14 +159,13 @@ export default function LoginPage() {
           ) : null}
 
           <button
-            type="button"
-            onClick={handleSignIn}
+            type="submit"
             disabled={loading || countdown > 0}
             className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 disabled:pointer-events-none disabled:opacity-50"
           >
             {countdown > 0 ? `Try again in ${mins}:${secs}` : loading ? 'Signing in…' : 'Sign in'}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   )
