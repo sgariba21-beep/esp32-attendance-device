@@ -9,15 +9,15 @@
 /* ========= CONFIG - EDIT THESE ========== */
 
 // Central Apps Script endpoint (single router web app)
-const char* SUPABASE_URL = "https://canvas-frequencies-mysql-legitimate.trycloudflare.com/functions/v1/log-attendance";
+const char* SUPABASE_URL = "https://graduates-enter-ones-fingers.trycloudflare.com/functions/v1/log-attendance";
 
 // Shared secret sent on every request to Supabase edge functions as X-Device-Secret.
 // Must match DEVICE_SHARED_SECRET in supabase/functions/.env (local) or supabase secrets (prod).
 const char* DEVICE_SECRET = "olag-dev-secret-2026";
 
 // Supabase enrollment edge functions
-const char* ENROLL_GET_URL = "https://canvas-frequencies-mysql-legitimate.trycloudflare.com/functions/v1/get-enrollment-job";
-const char* ENROLL_UPD_URL = "https://canvas-frequencies-mysql-legitimate.trycloudflare.com/functions/v1/update-enrollment-job";
+const char* ENROLL_GET_URL = "https://graduates-enter-ones-fingers.trycloudflare.com/functions/v1/get-enrollment-job";
+const char* ENROLL_UPD_URL = "https://graduates-enter-ones-fingers.trycloudflare.com/functions/v1/update-enrollment-job";
 
 // Device identity / class
 #define SYSTEM_TYPE        "OLAG"   
