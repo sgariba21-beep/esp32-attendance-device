@@ -35,12 +35,15 @@ const ROLE_BADGE: Record<UserRole, 'default' | 'secondary' | 'outline'> = {
   teacher:     'outline',
 }
 
+type DeviceOption = { id: string; form: string; class: string }
+
 type Props = {
   users: UserRow[]
   currentUserId: string
+  devices: DeviceOption[]
 }
 
-export function UsersView({ users, currentUserId }: Props) {
+export function UsersView({ users, currentUserId, devices }: Props) {
   const [dialogOpen, setDialogOpen]     = useState(false)
   const [editing, setEditing]           = useState<UserRow | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<UserRow | null>(null)
@@ -140,7 +143,7 @@ export function UsersView({ users, currentUserId }: Props) {
         </div>
       )}
 
-      <UserDialog open={dialogOpen} onOpenChange={setDialogOpen} user={editing} />
+      <UserDialog open={dialogOpen} onOpenChange={setDialogOpen} user={editing} devices={devices} />
 
       <ConfirmDialog
         open={confirmTarget !== null}

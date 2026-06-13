@@ -7,9 +7,10 @@ export default async function UsersPage() {
   const { user: currentUser } = await requireRole('super_admin')
   const admin = createAdminClient()
 
-  const [{ data: authData }, { data: profiles }] = await Promise.all([
+  const [{ data: authData }, { data: profiles }, { data: devices }] = await Promise.all([
     admin.auth.admin.listUsers(),
     admin.from('profiles').select('id, role, assigned_class'),
+    admin.from('devices').select('id, form, class').order('form').order('class'),
   ])
 
   const profileMap = new Map(
@@ -26,5 +27,11 @@ export default async function UsersPage() {
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
 
-  return <UsersView users={users} currentUserId={currentUser.id} />
+  return (
+    <UsersView
+      users={users}
+      currentUserId={currentUser.id}
+      devices={(devices ?? []) as { id: string; form: string; class: string }[]}
+    />
+  )
 }

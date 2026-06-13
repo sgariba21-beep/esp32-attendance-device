@@ -8,14 +8,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { SingleSelect } from './single-select'
 import { createUser, updateUserRole } from '../_actions'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { UserRow } from './users-view'
+
+type DeviceOption = { id: string; form: string; class: string }
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   user: UserRow | null
+  devices: DeviceOption[]
 }
 
 const ROLES: { value: UserRole; label: string }[] = [
@@ -24,7 +28,7 @@ const ROLES: { value: UserRole; label: string }[] = [
   { value: 'teacher',     label: 'Teacher'     },
 ]
 
-export function UserDialog({ open, onOpenChange, user }: Props) {
+export function UserDialog({ open, onOpenChange, user, devices }: Props) {
   const [email, setEmail]               = useState('')
   const [password, setPassword]         = useState('')
   const [role, setRole]                 = useState<UserRole>('teacher')
@@ -114,12 +118,15 @@ export function UserDialog({ open, onOpenChange, user }: Props) {
 
           {role === 'teacher' && (
             <div className="space-y-2">
-              <Label htmlFor="assigned_class">Assigned class</Label>
-              <Input
-                id="assigned_class"
+              <Label>Assigned class</Label>
+              <SingleSelect
+                options={devices
+                  .slice()
+                  .sort((a, b) => a.form.localeCompare(b.form, undefined, { numeric: true }) || a.class.localeCompare(b.class))
+                  .map((d) => ({ value: `Form ${d.form} ${d.class}`, label: `Form ${d.form} ${d.class}` }))}
                 value={assignedClass}
-                onChange={(e) => setAssignedClass(e.target.value)}
-                placeholder="e.g. Form 3 Science 1"
+                onChange={setAssignedClass}
+                placeholder="Select a class…"
               />
               <p className="text-xs text-muted-foreground">
                 Teachers only see attendance records for this class.
