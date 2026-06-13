@@ -147,7 +147,7 @@ export function PromotionView({ groups, totalActive }: Props) {
       {/* Summary cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => (
-          <div key={g.fromForm} className="rounded-xl border p-4 space-y-2">
+          <div key={g.fromForm} className="rounded-xl border bg-muted/30 p-4 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">{g.fromForm}</span>
               <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -219,7 +219,7 @@ export function PromotionView({ groups, totalActive }: Props) {
           const hidden = all.length - visible.length
 
           return (
-            <div key={g.fromForm} className="rounded-xl border">
+            <div key={g.fromForm} className="rounded-xl border bg-muted/30 overflow-hidden">
               <button
                 type="button"
                 onClick={() => toggleGroup(g.fromForm)}
@@ -235,7 +235,7 @@ export function PromotionView({ groups, totalActive }: Props) {
               </button>
 
               {isOpen && (
-                <div className="border-t px-4 py-3 space-y-1">
+                <div className="border-t bg-background rounded-b-xl px-4 py-3 space-y-1">
                   {visible.map((s) => {
                     const isUnmatched = g.unmatched.includes(s)
                     return (
