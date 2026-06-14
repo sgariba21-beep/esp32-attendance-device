@@ -46,15 +46,18 @@ export default async function EnrollmentPage() {
 
   const [jobsRes, devicesRes] = await Promise.all([jobsQ, devicesQ])
 
-  // The enrollable people on a device span every member type the institution tracks.
-  // Base label is the primary member term; staff are added only when tracked as a
-  // distinct group alongside students (so an office that only tracks staff still
-  // reads with its own member term rather than duplicating it).
-  const singular = [institution.label_member]
-  const plural = [institution.label_members]
+  // Build label from whichever member types the institution actually tracks.
+  let labelMemberSingular: string
+  let labelMemberPlural: string
   if (institution.track_students && institution.track_staff) {
-    singular.push(institution.label_staff)
-    plural.push(institution.label_staff_plural)
+    labelMemberSingular = `${institution.label_member} / ${institution.label_staff}`
+    labelMemberPlural = `${institution.label_members} / ${institution.label_staff_plural}`
+  } else if (institution.track_staff) {
+    labelMemberSingular = institution.label_staff
+    labelMemberPlural = institution.label_staff_plural
+  } else {
+    labelMemberSingular = institution.label_member
+    labelMemberPlural = institution.label_members
   }
 
   return (
@@ -62,8 +65,8 @@ export default async function EnrollmentPage() {
       initialJobs={(jobsRes.data ?? []) as unknown as EnrollmentJob[]}
       devices={(devicesRes.data ?? []) as Device[]}
       labelUnit={institution.label_unit}
-      labelMember={singular.join(' / ')}
-      labelMembers={plural.join(' / ')}
+      labelMember={labelMemberSingular}
+      labelMembers={labelMemberPlural}
     />
   )
 }
