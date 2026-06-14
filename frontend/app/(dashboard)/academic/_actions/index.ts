@@ -6,17 +6,19 @@ import { requireRole } from '@/lib/supabase/dal'
 
 // ── Holidays ─────────────────────────────────────────────────────────────────
 
-export async function createHoliday(data: { date: string; label: string }) {
-  await requireRole('super_admin', 'admin')
+export async function createHoliday(data: { start_date: string; end_date: string; label: string }) {
+  const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('holidays').insert({
-    date: data.date,
+    start_date: data.start_date,
+    end_date: data.end_date,
     label: data.label.trim(),
+    institution_id: institutionId,
   })
 
   if (error) {
-    if (error.code === '23505') return { error: 'A holiday is already set for that date.' }
+    if (error.code === '23505') return { error: 'A holiday already exists for that date range.' }
     return { error: error.message }
   }
 
@@ -43,7 +45,7 @@ export type AcademicFormData = {
 }
 
 export async function createAcademicTerm(data: AcademicFormData) {
-  await requireRole('super_admin', 'admin')
+  const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const { error } = await supabase.from('periods').insert({
@@ -52,6 +54,7 @@ export async function createAcademicTerm(data: AcademicFormData) {
     status: 'inactive',
     start_date: data.start_date || null,
     end_date: data.end_date || null,
+    institution_id: institutionId,
   })
 
   if (error) {
@@ -87,14 +90,12 @@ export async function updateAcademicTerm(id: string, data: AcademicFormData) {
 }
 
 export async function setActiveTerm(id: string) {
-  await requireRole('super_admin', 'admin')
+  const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
-  // Deactivate all terms first, then activate the selected one
-  const { error: deactivateError } = await supabase
-    .from('periods')
-    .update({ status: 'inactive' })
-    .neq('id', id)
+  let deactivateQ = supabase.from('periods').update({ status: 'inactive' }).neq('id', id)
+  if (institutionId) deactivateQ = deactivateQ.eq('institution_id', institutionId)
+  const { error: deactivateError } = await deactivateQ
 
   if (deactivateError) return { error: deactivateError.message }
 

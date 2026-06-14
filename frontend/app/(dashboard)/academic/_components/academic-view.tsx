@@ -14,7 +14,7 @@ import { AcademicDialog } from './academic-dialog'
 import { setActiveTerm, deleteAcademicTerm } from '../_actions'
 import type { AcademicTerm } from '@/lib/types'
 
-type Props = { terms: AcademicTerm[] }
+type Props = { terms: AcademicTerm[]; labelPeriod: string }
 
 function formatDateRange(start: string, end: string) {
   const s = new Date(start + 'T00:00:00')
@@ -33,7 +33,7 @@ function formatDateRange(start: string, end: string) {
   return `${startStr} – ${endStr}`
 }
 
-export function AcademicView({ terms }: Props) {
+export function AcademicView({ terms, labelPeriod }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<AcademicTerm | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
@@ -73,19 +73,19 @@ export function AcademicView({ terms }: Props) {
       <div className="flex items-center justify-between">
         {activeTerm ? (
           <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1 text-sm">
-            Active term: <span className="font-medium">{activeTerm.term} {activeTerm.year}</span>
+            Active {labelPeriod.toLowerCase()}: <span className="font-medium">{activeTerm.term} {activeTerm.year}</span>
           </span>
         ) : (
-          <p className="text-sm text-muted-foreground">No active term set</p>
+          <p className="text-sm text-muted-foreground">No active {labelPeriod.toLowerCase()} set</p>
         )}
-        <Button onClick={openAdd}>Add term</Button>
+        <Button onClick={openAdd}>Add {labelPeriod.toLowerCase()}</Button>
       </div>
 
       {terms.length === 0 ? (
         <EmptyState
           icon={BookOpen}
-          message="No academic terms yet. Add one to get started."
-          action={<Button onClick={openAdd}>Add term</Button>}
+          message={`No ${labelPeriod.toLowerCase()}s yet. Add one to get started.`}
+          action={<Button onClick={openAdd}>Add {labelPeriod.toLowerCase()}</Button>}
         />
       ) : (
         <div className="rounded-xl border overflow-x-auto">

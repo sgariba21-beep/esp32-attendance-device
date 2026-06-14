@@ -16,7 +16,7 @@ type Props = {
   device: Device | null
 }
 
-const empty = { group_name: '', unit_name: '' }
+const empty = { group_name: '', unit_name: '', display_name: '', mode: 'present_absent' as 'present_absent' | 'time_in_out' }
 
 export function DeviceDialog({ open, onOpenChange, device }: Props) {
   const [form, setForm] = useState(empty)
@@ -26,7 +26,11 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
   useEffect(() => {
     if (open) {
       setError(null)
-      setForm(device ? { group_name: device.group_name, unit_name: device.unit_name } : empty)
+      setForm(
+        device
+          ? { group_name: device.group_name, unit_name: device.unit_name, display_name: device.display_name ?? '', mode: device.mode ?? 'present_absent' }
+          : empty
+      )
     }
   }, [open, device])
 
@@ -78,18 +82,42 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="display_name">Display name</Label>
+            <Input
+              id="display_name"
+              value={form.display_name}
+              onChange={(e) => set('display_name', e.target.value)}
+              placeholder="e.g. Form 1 Blue (shown on device)"
+            />
+          </div>
+
           <p className="text-xs text-muted-foreground">
             Displays as: <span className="font-medium text-foreground">
               {form.group_name || '?'} {form.unit_name || '?'}
             </span>
           </p>
 
+          <div className="space-y-2">
+            <Label htmlFor="mode">Scan mode</Label>
+            <select
+              id="mode"
+              value={form.mode}
+              onChange={(e) => set('mode', e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="present_absent">Present / Absent</option>
+              <option value="time_in_out">Time In / Time Out</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Present/Absent: one scan per day marks attendance. Time In/Out: first scan = time in, second = time out.
+            </p>
+          </div>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={loading}>
               {loading ? 'Saving…' : device ? 'Save changes' : 'Add device'}
             </Button>

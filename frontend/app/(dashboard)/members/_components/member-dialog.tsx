@@ -10,22 +10,29 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
-import { createStudent, updateStudent } from '../_actions'
+import { createMember, updateMember } from '../_actions'
 import { createEnrollmentJob } from '../../enrollment/_actions'
-import type { StudentWithDevice } from '../page'
+import type { MemberWithDevice } from '../page'
 import type { Device } from '@/lib/types'
+
+type Labels = {
+  label_member: string
+  label_members: string
+  label_unit: string
+  label_group: string
+}
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  student: StudentWithDevice | null
+  member: MemberWithDevice | null
   devices: Device[]
-  /** Map of device_id → list of FIDs already in use (for slot suggestion). */
   usedFids: Record<string, number[]>
+  labels: Labels
 }
 
 type EnrollStep = {
-  studentId: string
+  memberId: string
   deviceId: string
   fullname: string
   deviceName: string
@@ -39,16 +46,15 @@ function nextAvailableFid(deviceId: string, usedFids: Record<string, number[]>):
   return 1
 }
 
-// ─── inline finger enroll row used in step 2 ────────────────────────────────
 type FingerRowProps = {
   label: string
   slot: 'fin1' | 'fin2'
-  studentId: string
+  memberId: string
   deviceId: string
   defaultFid: number
 }
 
-function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: FingerRowProps) {
+function FingerEnrollRow({ label, slot, memberId, deviceId, defaultFid }: FingerRowProps) {
   const [open, setOpen] = useState(false)
   const [fid, setFid] = useState(String(defaultFid))
   const [loading, setLoading] = useState(false)
@@ -66,7 +72,7 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
     const result = await createEnrollmentJob({
       command: 'register',
       device_id: deviceId,
-      student_id: studentId,
+      student_id: memberId,
       finger_slot: slot,
       fid: fidNum,
     })
@@ -80,7 +86,7 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
       <Alert variant="success">
         <Check className="mt-0.5 size-4 shrink-0" />
         <AlertDescription>
-          {label} — job queued (sensor slot {fid}). Tell the student to scan when prompted.
+          {label} — job queued (sensor slot {fid}). Tell the member to scan when prompted.
         </AlertDescription>
       </Alert>
     )
@@ -107,31 +113,24 @@ function FingerEnrollRow({ label, slot, studentId, deviceId, defaultFid }: Finge
           <Button size="sm" onClick={handleEnroll} disabled={loading}>
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Queue job'}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
         </div>
       )}
-      {error && (
-        <Alert variant="error">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {error && <Alert variant="error"><AlertDescription>{error}</AlertDescription></Alert>}
     </div>
   )
 }
 
-// ─── finger edit row used in edit dialog ─────────────────────────────────────
 type FingerEditRowProps = {
   label: string
   slot: 'fin1' | 'fin2'
   fid: number
-  studentId: string
+  memberId: string
   deviceId: string
   defaultFid: number
 }
 
-function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: FingerEditRowProps) {
+function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: FingerEditRowProps) {
   const [deleting, setDeleting] = useState(false)
   const [deleted, setDeleted] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -142,7 +141,7 @@ function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: Fi
     const result = await createEnrollmentJob({
       command: 'delete',
       device_id: deviceId,
-      student_id: studentId,
+      student_id: memberId,
       finger_slot: slot,
     })
     setDeleting(false)
@@ -167,11 +166,7 @@ function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: Fi
             {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
           </Button>
         </div>
-        {deleteError && (
-          <Alert variant="error">
-            <AlertDescription>{deleteError}</AlertDescription>
-          </Alert>
-        )}
+        {deleteError && <Alert variant="error"><AlertDescription>{deleteError}</AlertDescription></Alert>}
       </div>
     )
   }
@@ -180,17 +175,16 @@ function FingerEditRow({ label, slot, fid, studentId, deviceId, defaultFid }: Fi
     <FingerEnrollRow
       label={label}
       slot={slot}
-      studentId={studentId}
+      memberId={memberId}
       deviceId={deviceId}
       defaultFid={defaultFid}
     />
   )
 }
 
-// ─── main dialog ─────────────────────────────────────────────────────────────
-const emptyForm = { sid: '', fullname: '', device_id: '' }
+const emptyForm = { sid: '', fullname: '', device_id: '', member_type: 'member' as 'student' | 'staff' | 'member' }
 
-export function StudentDialog({ open, onOpenChange, student, devices, usedFids }: Props) {
+export function MemberDialog({ open, onOpenChange, member, devices, usedFids, labels }: Props) {
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -201,17 +195,13 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
       setError(null)
       setEnrollStep(null)
       setForm(
-        student
-          ? { sid: student.sid, fullname: student.fullname, device_id: student.device_id }
+        member
+          ? { sid: member.sid, fullname: member.fullname, device_id: member.device_id, member_type: member.member_type }
           : { ...emptyForm, device_id: devices[0]?.id ?? '' }
       )
     }
-    // Intentionally omitting `devices` and the full `student` object — we only
-    // want to reset when the dialog opens or when a different student is loaded.
-    // Including them would cause router.refresh() (triggered by RealtimeRefresh)
-    // to re-run this effect mid-flow and wipe the enrollment step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, student?.id])
+  }, [open, member?.id])
 
   function set(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }))
@@ -219,32 +209,31 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.device_id) { setError('Please select a class.'); return }
+    if (!form.device_id) { setError(`Please select a ${labels.label_unit.toLowerCase()}.`); return }
 
     setLoading(true)
     setError(null)
 
-    if (student) {
-      // Edit — pass fin1/fin2 through unchanged (enrollment manages them)
-      const result = await updateStudent(student.id, {
+    if (member) {
+      const result = await updateMember(member.id, {
         sid: form.sid,
         fullname: form.fullname,
         device_id: form.device_id,
-        fin1: student.fin1,
-        fin2: student.fin2,
+        member_type: form.member_type,
+        fin1: member.fin1,
+        fin2: member.fin2,
       })
       setLoading(false)
       if (result.error) { setError(result.error); return }
       onOpenChange(false)
     } else {
-      // Create — then offer to enroll fingerprints
-      const result = await createStudent({ sid: form.sid, fullname: form.fullname, device_id: form.device_id, fin1: 0, fin2: 0 })
+      const result = await createMember({ sid: form.sid, fullname: form.fullname, device_id: form.device_id, member_type: form.member_type, fin1: 0, fin2: 0 })
       setLoading(false)
       if (result.error) { setError(result.error); return }
 
       const device = devices.find((d) => d.id === form.device_id)
       setEnrollStep({
-        studentId: result.id!,
+        memberId: result.id!,
         deviceId: form.device_id,
         fullname: form.fullname,
         deviceName: device ? `${device.group_name} ${device.unit_name}` : '',
@@ -252,14 +241,13 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
     }
   }
 
-  // ── step 2: enrollment offer ───────────────────────────────────────────────
   if (enrollStep) {
     const baseFid = nextAvailableFid(enrollStep.deviceId, usedFids)
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Student added</DialogTitle>
+            <DialogTitle>{labels.label_member} added</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
@@ -268,24 +256,10 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
             </p>
             <p className="text-sm font-medium">Enroll fingerprints now?</p>
             <div className="space-y-3">
-              <FingerEnrollRow
-                label="Finger 1"
-                slot="fin1"
-                studentId={enrollStep.studentId}
-                deviceId={enrollStep.deviceId}
-                defaultFid={baseFid}
-              />
-              <FingerEnrollRow
-                label="Finger 2"
-                slot="fin2"
-                studentId={enrollStep.studentId}
-                deviceId={enrollStep.deviceId}
-                defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid}
-              />
+              <FingerEnrollRow label="Finger 1" slot="fin1" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={baseFid} />
+              <FingerEnrollRow label="Finger 2" slot="fin2" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
             </div>
-            <p className="text-xs text-muted-foreground">
-              You can also enroll later using the Enroll buttons on the student row.
-            </p>
+            <p className="text-xs text-muted-foreground">You can also enroll later from the member row.</p>
           </div>
           <DialogFooter>
             <Button onClick={() => onOpenChange(false)}>Done</Button>
@@ -295,12 +269,11 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
     )
   }
 
-  // ── step 1: student info form ──────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{student ? 'Edit student' : 'Add student'}</DialogTitle>
+          <DialogTitle>{member ? `Edit ${labels.label_member.toLowerCase()}` : `Add ${labels.label_member.toLowerCase()}`}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
@@ -316,7 +289,7 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="sid">School ID</Label>
+            <Label htmlFor="sid">ID</Label>
             <Input
               id="sid"
               value={form.sid}
@@ -327,14 +300,27 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="device_id">Class</Label>
+            <Label htmlFor="member_type">Type</Label>
+            <NativeSelect
+              id="member_type"
+              value={form.member_type}
+              onChange={(e) => set('member_type', e.target.value)}
+            >
+              <option value="student">Student</option>
+              <option value="staff">Staff</option>
+              <option value="member">Member</option>
+            </NativeSelect>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="device_id">{labels.label_unit}</Label>
             <NativeSelect
               id="device_id"
               value={form.device_id}
               onChange={(e) => set('device_id', e.target.value)}
               required
             >
-              <option value="">Select a class…</option>
+              <option value="">Select a {labels.label_unit.toLowerCase()}…</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.group_name} {d.unit_name}
@@ -343,45 +329,25 @@ export function StudentDialog({ open, onOpenChange, student, devices, usedFids }
             </NativeSelect>
           </div>
 
-          {student && (() => {
-            const baseFid = nextAvailableFid(student.device_id, usedFids)
+          {member && (() => {
+            const baseFid = nextAvailableFid(member.device_id, usedFids)
             return (
               <div className="space-y-2">
                 <Label>Fingerprints</Label>
                 <div className="space-y-2 rounded-lg border p-3">
-                  <FingerEditRow
-                    label="Finger 1"
-                    slot="fin1"
-                    fid={student.fin1 ?? 0}
-                    studentId={student.id}
-                    deviceId={student.device_id}
-                    defaultFid={baseFid}
-                  />
-                  <FingerEditRow
-                    label="Finger 2"
-                    slot="fin2"
-                    fid={student.fin2 ?? 0}
-                    studentId={student.id}
-                    deviceId={student.device_id}
-                    defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid}
-                  />
+                  <FingerEditRow label="Finger 1" slot="fin1" fid={member.fin1 ?? 0} memberId={member.id} deviceId={member.device_id} defaultFid={baseFid} />
+                  <FingerEditRow label="Finger 2" slot="fin2" fid={member.fin2 ?? 0} memberId={member.id} deviceId={member.device_id} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
                 </div>
               </div>
             )
           })()}
 
-          {error && (
-            <Alert variant="error">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          {error && <Alert variant="error"><AlertDescription>{error}</AlertDescription></Alert>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={loading}>
-              {loading ? 'Saving…' : student ? 'Save changes' : 'Add student'}
+              {loading ? 'Saving…' : member ? 'Save changes' : `Add ${labels.label_member.toLowerCase()}`}
             </Button>
           </DialogFooter>
         </form>

@@ -12,7 +12,7 @@ export type StudentOption = {
 }
 
 export async function getStudentsByDevice(deviceId: string): Promise<StudentOption[]> {
-  await requireRole('super_admin')
+  await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('members')
@@ -31,13 +31,21 @@ export type JobFormData =
   | { command: 'delete-master'; device_id: string; fid: number }
 
 export async function createEnrollmentJob(data: JobFormData) {
-  await requireRole('super_admin')
+  await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
+
+  // Derive institution_id from the device so the job is correctly scoped
+  const { data: device } = await supabase
+    .from('devices')
+    .select('institution_id')
+    .eq('id', data.device_id)
+    .single()
 
   const row: Record<string, unknown> = {
     device_id: data.device_id,
     command: data.command,
     status: 'pending',
+    institution_id: device?.institution_id ?? null,
   }
 
   if (data.command === 'register') {
@@ -49,7 +57,6 @@ export async function createEnrollmentJob(data: JobFormData) {
     row.finger_slot = data.finger_slot
   } else if (data.command === 'register-master') {
     row.fid = data.fid
-    // Store the master name in note so the firmware can write it into the local fid_map
     row.note = data.name.trim()
   } else if (data.command === 'delete-master') {
     row.fid = data.fid

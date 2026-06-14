@@ -2,6 +2,8 @@ import 'server-only'
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { createAuthClient, createAdminClient } from './server'
+import type { InstitutionConfig } from '@/lib/types'
+import { DEFAULT_INSTITUTION } from '@/lib/types'
 
 export type UserRole = 'super_admin' | 'admin' | 'teacher' | 'staff' | 'platform_admin'
 
@@ -16,14 +18,15 @@ export const verifySession = cache(async () => {
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('role, assigned_unit')
+    .select('role, assigned_unit, institution_id')
     .eq('id', user!.id)
     .single()
 
   const role = (profile?.role ?? 'super_admin') as UserRole
   const assignedUnit = profile?.assigned_unit as string | null ?? null
+  const institutionId = profile?.institution_id as string | null ?? null
 
-  return { user: user!, role, assignedUnit }
+  return { user: user!, role, assignedUnit, institutionId }
 })
 
 export async function requireRole(...roles: UserRole[]) {
@@ -34,3 +37,14 @@ export async function requireRole(...roles: UserRole[]) {
   }
   return session
 }
+
+export const getInstitution = cache(async (institutionId: string | null): Promise<InstitutionConfig> => {
+  if (!institutionId) return DEFAULT_INSTITUTION
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('institutions')
+    .select('id, name, type, logo_url, label_member, label_members, label_group, label_unit, label_period, skip_weekends, timezone')
+    .eq('id', institutionId)
+    .single()
+  return (data ?? DEFAULT_INSTITUTION) as InstitutionConfig
+})

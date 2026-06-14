@@ -11,12 +11,7 @@ import {
 } from '@/components/ui/table'
 import { HolidayDialog } from './holiday-dialog'
 import { deleteHoliday } from '../_actions'
-
-export type Holiday = {
-  id: string
-  date: string
-  label: string
-}
+import type { Holiday } from '@/lib/types'
 
 type Props = { holidays: Holiday[] }
 
@@ -27,6 +22,11 @@ function formatDate(iso: string) {
     month: 'short',
     day: 'numeric',
   })
+}
+
+function formatRange(h: Holiday) {
+  if (h.start_date === h.end_date) return formatDate(h.start_date)
+  return `${formatDate(h.start_date)} – ${formatDate(h.end_date)}`
 }
 
 export function HolidaysView({ holidays }: Props) {
@@ -44,7 +44,7 @@ export function HolidaysView({ holidays }: Props) {
   }
 
   const today = new Date().toISOString().slice(0, 10)
-  const sorted = [...holidays].sort((a, b) => a.date.localeCompare(b.date))
+  const sorted = [...holidays].sort((a, b) => a.start_date.localeCompare(b.start_date))
 
   return (
     <div className="space-y-4">
@@ -66,19 +66,19 @@ export function HolidaysView({ holidays }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Date</TableHead>
+                <TableHead>Date range</TableHead>
                 <TableHead>Label</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sorted.map((h) => {
-                const isPast = h.date < today
+                const isPast = h.end_date < today
                 return (
                   <Fragment key={h.id}>
                     <TableRow>
                       <TableCell className={`whitespace-nowrap font-medium${isPast ? ' text-muted-foreground' : ''}`}>
-                        {formatDate(h.date)}
+                        {formatRange(h)}
                       </TableCell>
                       <TableCell className={isPast ? 'text-muted-foreground' : undefined}>{h.label}</TableCell>
                       <TableCell className="text-right">
@@ -114,7 +114,7 @@ export function HolidaysView({ holidays }: Props) {
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
         title="Delete holiday?"
-        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatDate(confirmTarget.date)}) from the holiday list.` : ''}
+        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatRange(confirmTarget)}) from the holiday list.` : ''}
         confirmLabel="Delete holiday"
         loading={loadingId === confirmTarget?.id}
         onConfirm={async () => {

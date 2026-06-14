@@ -15,81 +15,85 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
-import { StudentDialog } from './student-dialog'
-import { setStudentStatus } from '../_actions'
-import type { StudentWithDevice } from '../page'
+import { MemberDialog } from './member-dialog'
+import { setMemberStatus } from '../_actions'
+import type { MemberWithDevice } from '../page'
 import type { Device } from '@/lib/types'
 
+type Labels = {
+  label_member: string
+  label_members: string
+  label_unit: string
+  label_group: string
+}
+
 type Props = {
-  students: StudentWithDevice[]
+  members: MemberWithDevice[]
   devices: Device[]
   role: UserRole
+  labels: Labels
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
+type TypeFilter = 'all' | 'student' | 'staff' | 'member'
 
-export function StudentsView({ students, devices, role }: Props) {
+export function MembersView({ members, devices, role, labels }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<StudentWithDevice | null>(null)
+  const [editing, setEditing] = useState<MemberWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
-  const [confirmTarget, setConfirmTarget] = useState<StudentWithDevice | null>(null)
+  const [confirmTarget, setConfirmTarget] = useState<MemberWithDevice | null>(null)
 
   const [search, setSearch] = useState('')
-  const [classFilter, setClassFilter] = useState('')
+  const [unitFilter, setUnitFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [page, setPage] = useState(1)
 
   const PAGE_SIZE = 50
 
-  // ── computed ──────────────────────────────────────────────────────────────
-
   const usedFids = useMemo(() => {
     const map: Record<string, number[]> = {}
-    for (const s of students) {
-      if (!map[s.device_id]) map[s.device_id] = []
-      if (s.fin1) map[s.device_id].push(s.fin1)
-      if (s.fin2) map[s.device_id].push(s.fin2)
+    for (const m of members) {
+      if (!map[m.device_id]) map[m.device_id] = []
+      if (m.fin1) map[m.device_id].push(m.fin1)
+      if (m.fin2) map[m.device_id].push(m.fin2)
     }
     return map
-  }, [students])
+  }, [members])
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
-    return students.filter((s) => {
-      if (q && !s.fullname.toLowerCase().includes(q) && !s.sid.toLowerCase().includes(q)) return false
-      if (classFilter && s.device_id !== classFilter) return false
-      if (statusFilter !== 'all' && s.status !== statusFilter) return false
+    return members.filter((m) => {
+      if (q && !m.fullname.toLowerCase().includes(q) && !m.sid.toLowerCase().includes(q)) return false
+      if (unitFilter && m.device_id !== unitFilter) return false
+      if (statusFilter !== 'all' && m.status !== statusFilter) return false
+      if (typeFilter !== 'all' && m.member_type !== typeFilter) return false
       return true
     })
-  }, [students, search, classFilter, statusFilter])
+  }, [members, search, unitFilter, statusFilter, typeFilter])
 
-  const hasFilters = search || classFilter || statusFilter !== 'all'
+  const hasFilters = search || unitFilter || statusFilter !== 'all' || typeFilter !== 'all'
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // ── handlers ─────────────────────────────────────────────────────────────
-
   function openAdd() { setEditing(null); setDialogOpen(true) }
-  function openEdit(student: StudentWithDevice) { setEditing(student); setDialogOpen(true) }
+  function openEdit(member: MemberWithDevice) { setEditing(member); setDialogOpen(true) }
 
-  async function handleToggleStatus(student: StudentWithDevice) {
-    setTogglingId(student.id)
-    await setStudentStatus(student.id, student.status === 'active' ? 'inactive' : 'active')
+  async function handleToggleStatus(member: MemberWithDevice) {
+    setTogglingId(member.id)
+    await setMemberStatus(member.id, member.status === 'active' ? 'inactive' : 'active')
     setTogglingId(null)
   }
-
-  // ── render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Students"
-        subtitle={`${filtered.length} of ${students.length} student${students.length !== 1 ? 's' : ''}`}
-        actions={!isTeacher ? <Button onClick={openAdd}>Add student</Button> : undefined}
+        title={labels.label_members}
+        subtitle={`${filtered.length} of ${members.length} ${members.length !== 1 ? labels.label_members.toLowerCase() : labels.label_member.toLowerCase()}`}
+        actions={!isTeacher ? <Button onClick={openAdd}>Add {labels.label_member.toLowerCase()}</Button> : undefined}
       />
 
-      {/* Filter bar */}
       <div className="flex flex-wrap gap-3 items-center">
         <Input
           placeholder="Search by name or ID…"
@@ -99,10 +103,10 @@ export function StudentsView({ students, devices, role }: Props) {
         />
 
         <NativeSelect
-          value={classFilter}
-          onChange={(e) => { setClassFilter(e.target.value); setPage(1) }}
+          value={unitFilter}
+          onChange={(e) => { setUnitFilter(e.target.value); setPage(1) }}
         >
-          <option value="">All classes</option>
+          <option value="">All {labels.label_unit.toLowerCase()}s</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>
               {d.group_name} {d.unit_name}
@@ -119,28 +123,35 @@ export function StudentsView({ students, devices, role }: Props) {
           <option value="inactive">Inactive</option>
         </NativeSelect>
 
+        <NativeSelect
+          value={typeFilter}
+          onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1) }}
+        >
+          <option value="all">All types</option>
+          <option value="student">Student</option>
+          <option value="staff">Staff</option>
+          <option value="member">Member</option>
+        </NativeSelect>
+
         {hasFilters && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setSearch(''); setClassFilter(''); setStatusFilter('all'); setPage(1) }}
+            onClick={() => { setSearch(''); setUnitFilter(''); setStatusFilter('all'); setTypeFilter('all'); setPage(1) }}
           >
             Clear
           </Button>
         )}
       </div>
 
-      {students.length === 0 ? (
+      {members.length === 0 ? (
         <EmptyState
           icon={Users}
-          message={isTeacher ? 'No students in your class.' : 'No students yet. Add one to get started.'}
-          action={!isTeacher ? <Button onClick={openAdd}>Add student</Button> : undefined}
+          message={isTeacher ? `No ${labels.label_members.toLowerCase()} in your ${labels.label_unit.toLowerCase()}.` : `No ${labels.label_members.toLowerCase()} yet. Add one to get started.`}
+          action={!isTeacher ? <Button onClick={openAdd}>Add {labels.label_member.toLowerCase()}</Button> : undefined}
         />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          message="No students match your filters."
-        />
+        <EmptyState icon={Users} message={`No ${labels.label_members.toLowerCase()} match your filters.`} />
       ) : (
         <div className="space-y-3">
           <div className="rounded-xl border overflow-x-auto">
@@ -148,56 +159,58 @@ export function StudentsView({ students, devices, role }: Props) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>School ID</TableHead>
-                  <TableHead>Class</TableHead>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>{labels.label_unit}</TableHead>
                   <TableHead>Fingerprints</TableHead>
                   <TableHead>Status</TableHead>
                   {!isTeacher && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginated.map((s) => {
-                  const inactive = s.status === 'inactive'
+                {paginated.map((m) => {
+                  const inactive = m.status === 'inactive'
                   return (
-                    <TableRow key={s.id}>
+                    <TableRow key={m.id}>
                       <TableCell className={cn('font-medium', inactive && 'opacity-60')}>
-                        {s.fullname}
+                        {m.fullname}
                       </TableCell>
                       <TableCell className={cn('font-mono tabular-nums text-muted-foreground text-xs', inactive && 'opacity-60')}>
-                        {s.sid}
+                        {m.sid}
+                      </TableCell>
+                      <TableCell className={cn('capitalize text-muted-foreground text-xs', inactive && 'opacity-60')}>
+                        {m.member_type}
                       </TableCell>
                       <TableCell className={cn(inactive && 'opacity-60')}>
-                        {s.device ? `${s.device.group_name} ${s.device.unit_name}` : '—'}
+                        {m.device ? `${m.device.group_name} ${m.device.unit_name}` : '—'}
                       </TableCell>
                       <TableCell className={cn(inactive && 'opacity-60')}>
-                        <span className="flex items-center gap-1.5" title={`Finger 1: ${s.fin1 ? `slot ${s.fin1}` : 'not enrolled'} · Finger 2: ${s.fin2 ? `slot ${s.fin2}` : 'not enrolled'}`}>
-                          <Fingerprint className={cn('size-3.5', s.fin1 ? 'text-success-foreground' : 'text-muted-foreground/40')} />
-                          <Fingerprint className={cn('size-3.5', s.fin2 ? 'text-success-foreground' : 'text-muted-foreground/40')} />
+                        <span className="flex items-center gap-1.5" title={`Finger 1: ${m.fin1 ? `slot ${m.fin1}` : 'not enrolled'} · Finger 2: ${m.fin2 ? `slot ${m.fin2}` : 'not enrolled'}`}>
+                          <Fingerprint className={cn('size-3.5', m.fin1 ? 'text-success-foreground' : 'text-muted-foreground/40')} />
+                          <Fingerprint className={cn('size-3.5', m.fin2 ? 'text-success-foreground' : 'text-muted-foreground/40')} />
                         </span>
                       </TableCell>
                       <TableCell className={cn(inactive && 'opacity-60')}>
-                        <Badge variant={s.status === 'active' ? 'success' : 'secondary'}>
-                          {s.status === 'active' ? 'Active' : 'Inactive'}
+                        <Badge variant={m.status === 'active' ? 'success' : 'secondary'}>
+                          {m.status === 'active' ? 'Active' : 'Inactive'}
                         </Badge>
                       </TableCell>
                       {!isTeacher && (
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-3">
-                            <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>
+                            <Button variant="ghost" size="sm" onClick={() => openEdit(m)}>
                               Edit
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
-                              disabled={togglingId === s.id}
-                              onClick={() => s.status === 'active' ? setConfirmTarget(s) : handleToggleStatus(s)}
-                              className={s.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
+                              disabled={togglingId === m.id}
+                              onClick={() => m.status === 'active' ? setConfirmTarget(m) : handleToggleStatus(m)}
+                              className={m.status === 'active' ? 'text-destructive hover:text-destructive ml-1' : ''}
                             >
-                              {togglingId === s.id
+                              {togglingId === m.id
                                 ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                : s.status === 'active'
-                                  ? 'Deactivate'
-                                  : 'Activate'}
+                                : m.status === 'active' ? 'Deactivate' : 'Activate'}
                             </Button>
                           </div>
                         </TableCell>
@@ -221,18 +234,19 @@ export function StudentsView({ students, devices, role }: Props) {
         </div>
       )}
 
-      <StudentDialog
+      <MemberDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        student={editing}
+        member={editing}
         devices={devices}
         usedFids={usedFids}
+        labels={labels}
       />
 
       <ConfirmDialog
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
-        title="Deactivate student?"
+        title={`Deactivate ${labels.label_member.toLowerCase()}?`}
         description={confirmTarget ? `${confirmTarget.fullname} will be marked inactive and won't be able to scan in. You can reactivate them at any time.` : ''}
         confirmLabel="Deactivate"
         loading={togglingId === confirmTarget?.id}
@@ -242,7 +256,6 @@ export function StudentsView({ students, devices, role }: Props) {
           setConfirmTarget(null)
         }}
       />
-
     </div>
   )
 }

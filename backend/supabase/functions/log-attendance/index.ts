@@ -22,9 +22,7 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Look up institution to validate per-institution secret and read config.
-  // Auth failure returns the same 401 whether the institution doesn't exist
-  // or the secret is wrong — no enumeration of valid institution IDs.
+  // Validate per-institution secret. Same 401 for missing institution or wrong secret.
   const { data: institution, error: instError } = await supabase
     .from("institutions")
     .select("device_secret, skip_weekends")
@@ -49,7 +47,6 @@ Deno.serve(async (req: Request) => {
   const date = dt.toISOString().split("T")[0];
   const time = dt.toISOString().split("T")[1].slice(0, 8);
 
-  // Read skip_weekends from institution config, not hardcoded.
   if (institution.skip_weekends) {
     const dayOfWeek = dt.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) {
@@ -60,8 +57,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Holiday check: range overlap (today BETWEEN start_date AND end_date).
-  // Replaces the old exact .eq("date", date) match.
+  // Holiday check: range overlap.
   const { data: holiday } = await supabase
     .from("holidays")
     .select("label")
@@ -77,10 +73,10 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // Look up member by sid, scoped to institution.
+  // Look up member — also fetch their device's mode so we know scan semantics.
   const { data: member, error: memberError } = await supabase
     .from("members")
-    .select("id, device_id")
+    .select("id, device_id, device:device_id(mode)")
     .eq("sid", sid)
     .eq("institution_id", institution_id)
     .eq("status", "active")
@@ -93,9 +89,11 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Find active period — nullable result, no error if none exists (Decision 3).
-  // Office-type institutions have no period concept and attendance inserts
-  // with period_id = null.
+  const deviceMode =
+    (member.device as unknown as { mode: string } | null)?.mode ??
+    "present_absent";
+
+  // Find active period (nullable — office-type institutions have none).
   const { data: period } = await supabase
     .from("periods")
     .select("id, start_date, end_date")
@@ -118,6 +116,34 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  let scan_type: "present" | "time_in" | "time_out";
+
+  if (deviceMode === "time_in_out") {
+    // Determine whether this is time_in or time_out based on today's records.
+    const { data: todayScans } = await supabase
+      .from("attendance")
+      .select("scan_type")
+      .eq("member_id", member.id)
+      .eq("date", date)
+      .in("scan_type", ["time_in", "time_out"]);
+
+    const existing = new Set((todayScans ?? []).map((r) => r.scan_type));
+
+    if (!existing.has("time_in")) {
+      scan_type = "time_in";
+    } else if (!existing.has("time_out")) {
+      scan_type = "time_out";
+    } else {
+      // Both already recorded today — ignore.
+      return new Response(
+        JSON.stringify({ message: "Already fully logged today" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  } else {
+    scan_type = "present";
+  }
+
   const { error: insertError } = await supabase
     .from("attendance")
     .insert({
@@ -129,6 +155,7 @@ Deno.serve(async (req: Request) => {
       time,
       status: "present",
       scan_id,
+      scan_type,
     });
 
   if (insertError) {
@@ -144,8 +171,8 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  return new Response(JSON.stringify({ message: "Attendance logged" }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return new Response(
+    JSON.stringify({ message: "Attendance logged", scan_type }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 });

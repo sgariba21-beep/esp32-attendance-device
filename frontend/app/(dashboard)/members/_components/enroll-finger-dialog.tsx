@@ -8,18 +8,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createEnrollmentJob } from '../../enrollment/_actions'
-import type { StudentWithDevice } from '../page'
+import type { MemberWithDevice } from '../page'
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  student: StudentWithDevice | null
+  member: MemberWithDevice | null
   slot: 'fin1' | 'fin2' | null
-  /** Next available sensor slot for the device. */
   defaultFid: number
 }
 
-export function EnrollFingerDialog({ open, onOpenChange, student, slot, defaultFid }: Props) {
+export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFid }: Props) {
   const [fid, setFid] = useState(String(defaultFid))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,12 +30,12 @@ export function EnrollFingerDialog({ open, onOpenChange, student, slot, defaultF
     }
   }, [open, defaultFid])
 
-  if (!student || !slot) return null
+  if (!member || !slot) return null
 
   const fingerLabel = slot === 'fin1' ? 'Finger 1' : 'Finger 2'
-  const deviceName = student.device
-    ? `${student.device.group_name} ${student.device.unit_name}`
-    : 'Unknown class'
+  const deviceName = member.device
+    ? `${member.device.group_name} ${member.device.unit_name}`
+    : 'Unknown unit'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -51,8 +50,8 @@ export function EnrollFingerDialog({ open, onOpenChange, student, slot, defaultF
 
     const result = await createEnrollmentJob({
       command: 'register',
-      device_id: student!.device_id,
-      student_id: student!.id,
+      device_id: member!.device_id,
+      student_id: member!.id,
       finger_slot: slot!,
       fid: fidNum,
     })
@@ -71,8 +70,8 @@ export function EnrollFingerDialog({ open, onOpenChange, student, slot, defaultF
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="rounded-md bg-muted px-3 py-2 text-sm space-y-0.5">
-            <p><span className="text-muted-foreground">Student: </span>{student.fullname}</p>
-            <p><span className="text-muted-foreground">Class: </span>{deviceName}</p>
+            <p><span className="text-muted-foreground">Member: </span>{member.fullname}</p>
+            <p><span className="text-muted-foreground">Unit: </span>{deviceName}</p>
             <p><span className="text-muted-foreground">Finger: </span>{fingerLabel}</p>
           </div>
 
@@ -95,9 +94,7 @@ export function EnrollFingerDialog({ open, onOpenChange, student, slot, defaultF
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={loading}>
               {loading ? 'Queuing…' : 'Queue enrollment job'}
             </Button>

@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole } from '@/lib/supabase/dal'
+import { requireRole, getInstitution } from '@/lib/supabase/dal'
+import { redirect } from 'next/navigation'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import { PromotionView } from './_components/promotion-view'
 
@@ -9,8 +10,8 @@ export type PromotionStudent = {
   fullname: string
   fromForm: string
   fromClass: string
-  toForm: string | null   // null = will be deactivated
-  targetDeviceId: string | null  // null = no matching device (unmatched)
+  toForm: string | null
+  targetDeviceId: string | null
 }
 
 export type PromotionGroup = {
@@ -21,37 +22,48 @@ export type PromotionGroup = {
 }
 
 export default async function PromotionPage() {
-  await requireRole('super_admin', 'admin')
+  const { institutionId } = await requireRole('super_admin', 'admin')
+  const institution = await getInstitution(institutionId)
+
+  // Promotion doesn't apply to office-type institutions
+  if (institution.type === 'office') {
+    redirect('/unauthorized')
+  }
+
   const supabase = createAdminClient()
 
-  const [studentsRes, devicesRes] = await Promise.all([
-    supabase
-      .from('members')
-      .select('id, sid, fullname, group_name, device_id, device:device_id(group_name, unit_name)')
-      .eq('status', 'active')
-      .order('fullname'),
-    supabase
-      .from('devices')
-      .select('id, group_name, unit_name')
-      .order('group_name')
-      .order('unit_name'),
-  ])
+  let membersQ = supabase
+    .from('members')
+    .select('id, sid, fullname, group_name, device_id, device:device_id(group_name, unit_name)')
+    .eq('status', 'active')
+    .neq('member_type', 'staff')
+    .order('fullname')
+
+  let devicesQ = supabase
+    .from('devices')
+    .select('id, group_name, unit_name')
+    .order('group_name')
+    .order('unit_name')
+
+  if (institutionId) {
+    membersQ = membersQ.eq('institution_id', institutionId)
+    devicesQ = devicesQ.eq('institution_id', institutionId)
+  }
+
+  const [studentsRes, devicesRes] = await Promise.all([membersQ, devicesQ])
 
   const students = studentsRes.data ?? []
   const devices = devicesRes.data ?? []
 
-  // Sorted group sequence (natural numeric: Form 1 → Form 2 → Form 3)
   const sortedForms = [...new Set(devices.map((d) => d.group_name))].sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   )
 
-  // Fast lookup: "Form 2|A" → device id
   const deviceByKey = new Map<string, string>()
   for (const d of devices) {
     deviceByKey.set(`${d.group_name}|${d.unit_name}`, d.id)
   }
 
-  // Group students by current group_name
   const groupMap = new Map<string, PromotionGroup>()
 
   for (const s of students) {
@@ -59,12 +71,12 @@ export default async function PromotionPage() {
     if (!device) continue
 
     const idx = sortedForms.indexOf(s.group_name)
-    if (idx === -1) continue // unknown group — skip
+    if (idx === -1) continue
 
     const toForm = idx === sortedForms.length - 1 ? null : sortedForms[idx + 1]
     const targetDeviceId = toForm
       ? (deviceByKey.get(`${toForm}|${device.unit_name}`) ?? null)
-      : null  // deactivating — no device needed
+      : null
 
     const ps: PromotionStudent = {
       id: s.id,
@@ -81,7 +93,6 @@ export default async function PromotionPage() {
     }
 
     const group = groupMap.get(s.group_name)!
-    // Deactivations (toForm === null) always go in matched — no device needed
     if (toForm === null || targetDeviceId !== null) {
       group.matched.push(ps)
     } else {
@@ -89,7 +100,6 @@ export default async function PromotionPage() {
     }
   }
 
-  // Return groups in sorted group order
   const groups: PromotionGroup[] = sortedForms
     .map((f) => groupMap.get(f))
     .filter((g): g is PromotionGroup => g !== undefined)

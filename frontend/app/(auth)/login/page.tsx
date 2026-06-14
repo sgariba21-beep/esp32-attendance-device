@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { Building2 } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -94,13 +95,11 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
       <div className="flex flex-col items-center mb-8 text-center">
-        <img
-          src="/olag-logo.jpg"
-          alt="OLAG SHS logo"
-          className="h-24 w-24 rounded-full object-cover ring-4 ring-border shadow-md mb-4"
-        />
-        <h1 className="text-xl font-bold text-foreground leading-tight">Our Lady Of Grace SHS</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Attendance System</p>
+        <div className="h-24 w-24 rounded-full bg-muted flex items-center justify-center ring-4 ring-border shadow-md mb-4">
+          <Building2 className="h-12 w-12 text-muted-foreground" />
+        </div>
+        <h1 className="text-xl font-bold text-foreground leading-tight">Attendance System</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Sign in to continue</p>
       </div>
 
       <div className="w-full max-w-sm bg-card ring-1 ring-foreground/10 rounded-xl p-6 space-y-5">

@@ -4,33 +4,36 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 
-export type StudentFormData = {
+export type MemberFormData = {
   sid: string
   fullname: string
   device_id: string
+  member_type: 'student' | 'staff' | 'member'
   fin1: number
   fin2: number
 }
 
-export async function createStudent(data: StudentFormData) {
-  await requireRole('super_admin', 'admin')
+export async function createMember(data: MemberFormData) {
+  const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
   const device = await supabase
     .from('devices')
-    .select('group_name')
+    .select('group_name, institution_id')
     .eq('id', data.device_id)
     .single()
 
   if (!device.data) return { error: 'Device not found.', id: null }
 
-  const { data: newStudent, error } = await supabase
+  const { data: newMember, error } = await supabase
     .from('members')
     .insert({
       sid: data.sid.trim(),
       fullname: data.fullname.trim(),
       device_id: data.device_id,
       group_name: device.data.group_name,
+      institution_id: institutionId ?? device.data.institution_id,
+      member_type: data.member_type,
       fin1: 0,
       fin2: 0,
       status: 'active',
@@ -39,15 +42,15 @@ export async function createStudent(data: StudentFormData) {
     .single()
 
   if (error) {
-    if (error.code === '23505') return { error: 'A student with that school ID already exists.', id: null }
+    if (error.code === '23505') return { error: 'A member with that ID already exists.', id: null }
     return { error: error.message, id: null }
   }
 
-  revalidatePath('/students')
-  return { error: null, id: newStudent.id as string }
+  revalidatePath('/members')
+  return { error: null, id: newMember.id as string }
 }
 
-export async function updateStudent(id: string, data: StudentFormData) {
+export async function updateMember(id: string, data: MemberFormData) {
   await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
@@ -66,20 +69,20 @@ export async function updateStudent(id: string, data: StudentFormData) {
       fullname: data.fullname.trim(),
       device_id: data.device_id,
       group_name: device.data.group_name,
-      // fin1/fin2 are managed exclusively by the enrollment workflow — never touched here
+      member_type: data.member_type,
     })
     .eq('id', id)
 
   if (error) {
-    if (error.code === '23505') return { error: 'A student with that school ID already exists.' }
+    if (error.code === '23505') return { error: 'A member with that ID already exists.' }
     return { error: error.message }
   }
 
-  revalidatePath('/students')
+  revalidatePath('/members')
   return { error: null }
 }
 
-export async function setStudentStatus(id: string, status: 'active' | 'inactive') {
+export async function setMemberStatus(id: string, status: 'active' | 'inactive') {
   await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
@@ -90,6 +93,6 @@ export async function setStudentStatus(id: string, status: 'active' | 'inactive'
 
   if (error) return { error: error.message }
 
-  revalidatePath('/students')
+  revalidatePath('/members')
   return { error: null }
 }

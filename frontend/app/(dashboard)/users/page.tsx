@@ -4,12 +4,15 @@ import { UsersView } from './_components/users-view'
 import type { UserRole } from '@/lib/supabase/dal'
 
 export default async function UsersPage() {
-  const { user: currentUser } = await requireRole('super_admin')
+  const { user: currentUser, institutionId } = await requireRole('super_admin', 'platform_admin')
   const admin = createAdminClient()
+
+  let profilesQ = admin.from('profiles').select('id, role, assigned_unit, institution_id')
+  if (institutionId) profilesQ = profilesQ.eq('institution_id', institutionId)
 
   const [{ data: authData }, { data: profiles }, { data: devices }] = await Promise.all([
     admin.auth.admin.listUsers(),
-    admin.from('profiles').select('id, role, assigned_unit'),
+    profilesQ,
     admin.from('devices').select('id, group_name, unit_name').order('group_name').order('unit_name'),
   ])
 
@@ -17,7 +20,10 @@ export default async function UsersPage() {
     (profiles ?? []).map((p) => [p.id, p])
   )
 
+  const institutionUserIds = new Set(profileMap.keys())
+
   const users = (authData?.users ?? [])
+    .filter((u) => !institutionId || institutionUserIds.has(u.id))
     .map((u) => ({
       id:            u.id,
       email:         u.email ?? '',

@@ -2,8 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
+import type { InstitutionConfig } from '@/lib/types'
 import {
   CalendarDays,
   Users,
@@ -12,21 +14,38 @@ import {
   ClipboardList,
   ArrowUpCircle,
   ShieldCheck,
+  Settings2,
+  Plus,
   LogOut,
 } from 'lucide-react'
 
-const navItems = [
-  { href: '/attendance',  label: 'Attendance',  icon: CalendarDays,  roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-  { href: '/students',    label: 'Students',    icon: Users,         roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-  { href: '/devices',     label: 'Devices',     icon: Cpu,           roles: ['super_admin', 'platform_admin']                    },
-  { href: '/academic',    label: 'Academic',    icon: BookOpen,      roles: ['super_admin', 'admin', 'platform_admin']            },
-  { href: '/enrollment',  label: 'Enrollment',  icon: ClipboardList, roles: ['super_admin', 'platform_admin']                    },
-  { href: '/promotion',   label: 'Promotion',   icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin']            },
-  { href: '/users',       label: 'Accounts',    icon: ShieldCheck,   roles: ['super_admin', 'platform_admin']                    },
-] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
+type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
-export function Sidebar({ role }: { role: UserRole }) {
+function buildNavItems(institution: InstitutionConfig): NavItem[] {
+  const items: NavItem[] = [
+    { href: '/attendance',  label: 'Attendance',                    icon: CalendarDays,  roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/members',     label: institution.label_members,        icon: Users,         roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/devices',     label: 'Devices',                       icon: Cpu,           roles: ['super_admin', 'platform_admin']                    },
+    { href: '/academic',    label: 'Academic',                      icon: BookOpen,      roles: ['super_admin', 'admin', 'platform_admin']            },
+    { href: '/enrollment',  label: 'Enrollment',                    icon: ClipboardList, roles: ['super_admin', 'platform_admin']                    },
+  ]
+
+  if (institution.type !== 'office') {
+    items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
+  }
+
+  items.push(
+    { href: '/users',     label: 'Accounts', icon: ShieldCheck, roles: ['super_admin', 'platform_admin'] },
+    { href: '/settings',  label: 'Settings', icon: Settings2,   roles: ['super_admin', 'platform_admin'] },
+    { href: '/onboarding', label: 'Create institution', icon: Plus, roles: ['platform_admin'] },
+  )
+
+  return items
+}
+
+export function Sidebar({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
   const pathname = usePathname()
+  const navItems = buildNavItems(institution)
   const visible = navItems.filter((item) => (item.roles as UserRole[]).includes(role))
 
   async function handleSignOut() {
@@ -39,12 +58,16 @@ export function Sidebar({ role }: { role: UserRole }) {
     <aside className="hidden md:flex w-60 flex-col bg-sidebar shrink-0">
       {/* Logo / brand */}
       <div className="flex items-center gap-3 px-5 py-5 border-b border-sidebar-border">
-        <div className="h-10 w-10 shrink-0 rounded-full overflow-hidden ring-2 ring-sidebar-border">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/olag-logo.jpg" alt="OLAG SHS" className="h-full w-full object-cover" />
+        <div className="h-10 w-10 shrink-0 rounded-full overflow-hidden ring-2 ring-sidebar-border bg-muted flex items-center justify-center">
+          {institution.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={institution.logo_url} alt={institution.name} className="h-full w-full object-cover" />
+          ) : (
+            <Building2 className="h-5 w-5 text-muted-foreground" />
+          )}
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-bold text-sidebar-foreground leading-tight">OLAG SHS</p>
+          <p className="text-sm font-bold text-sidebar-foreground leading-tight truncate">{institution.name}</p>
           <p className="text-xs text-sidebar-foreground/55 leading-tight">Attendance System</p>
         </div>
       </div>

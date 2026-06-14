@@ -15,14 +15,16 @@ type Props = {
 }
 
 export function HolidayDialog({ open, onOpenChange }: Props) {
-  const [date, setDate] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setDate('')
+      setStartDate('')
+      setEndDate('')
       setLabel('')
       setError(null)
     }
@@ -30,12 +32,12 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!date) { setError('Please select a date.'); return }
+    if (!startDate) { setError('Please select a start date.'); return }
     if (!label.trim()) { setError('Please enter a label.'); return }
 
     setLoading(true)
     setError(null)
-    const result = await createHoliday({ date, label })
+    const result = await createHoliday({ start_date: startDate, end_date: endDate || startDate, label })
     setLoading(false)
 
     if (result.error) { setError(result.error); return }
@@ -50,13 +52,23 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="date">Date</Label>
+            <Label htmlFor="start_date">Start date</Label>
             <Input
-              id="date"
+              id="start_date"
               type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
               required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="end_date">End date <span className="text-muted-foreground">(leave blank for single day)</span></Label>
+            <Input
+              id="end_date"
+              type="date"
+              value={endDate}
+              min={startDate}
+              onChange={(e) => setEndDate(e.target.value)}
             />
           </div>
           <div className="space-y-2">
@@ -71,9 +83,7 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={loading}>
               {loading ? 'Adding…' : 'Add holiday'}
             </Button>

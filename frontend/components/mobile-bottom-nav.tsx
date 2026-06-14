@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
+import type { InstitutionConfig } from '@/lib/types'
 import {
   CalendarDays,
   Users,
@@ -13,27 +14,45 @@ import {
   ClipboardList,
   ArrowUpCircle,
   ShieldCheck,
+  Settings2,
+  Plus,
   LogOut,
   MoreHorizontal,
   X,
 } from 'lucide-react'
 
-const primaryNav = [
-  { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-  { href: '/students',   label: 'Students',   icon: Users,        roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-  { href: '/devices',    label: 'Devices',    icon: Cpu,          roles: ['super_admin', 'platform_admin']                    },
-  { href: '/academic',   label: 'Academic',   icon: BookOpen,     roles: ['super_admin', 'admin', 'platform_admin']            },
-] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
+type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
-const moreNav = [
-  { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin']           },
-  { href: '/promotion',  label: 'Promotion',  icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin']  },
-  { href: '/users',      label: 'Accounts',   icon: ShieldCheck,   roles: ['super_admin', 'platform_admin']           },
-] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
+function buildPrimaryNav(institution: InstitutionConfig): NavItem[] {
+  return [
+    { href: '/attendance', label: 'Attendance',              icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/members',    label: institution.label_members,  icon: Users,        roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/devices',    label: 'Devices',                 icon: Cpu,          roles: ['super_admin', 'platform_admin']                    },
+    { href: '/academic',   label: 'Academic',                icon: BookOpen,     roles: ['super_admin', 'admin', 'platform_admin']            },
+  ]
+}
 
-export function MobileBottomNav({ role }: { role: UserRole }) {
+function buildMoreNav(institution: InstitutionConfig): NavItem[] {
+  const items: NavItem[] = [
+    { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin'] },
+  ]
+  if (institution.type !== 'office') {
+    items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
+  }
+  items.push(
+    { href: '/users',      label: 'Accounts',            icon: ShieldCheck, roles: ['super_admin', 'platform_admin'] },
+    { href: '/settings',   label: 'Settings',            icon: Settings2,   roles: ['super_admin', 'platform_admin'] },
+    { href: '/onboarding', label: 'Create institution',  icon: Plus,        roles: ['platform_admin'] },
+  )
+  return items
+}
+
+export function MobileBottomNav({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
+
+  const primaryNav = buildPrimaryNav(institution)
+  const moreNav = buildMoreNav(institution)
 
   const visiblePrimary = primaryNav.filter((item) => (item.roles as UserRole[]).includes(role))
   const visibleMore = moreNav.filter((item) => (item.roles as UserRole[]).includes(role))

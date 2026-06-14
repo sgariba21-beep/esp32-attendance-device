@@ -26,6 +26,13 @@ import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
 type StudentOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
 
+type Labels = {
+  label_member: string
+  label_members: string
+  label_unit: string
+  label_period: string
+}
+
 type Filters = {
   fromDate?: string
   toDate?: string
@@ -45,6 +52,7 @@ type Props = {
   totalCount: number
   role: UserRole
   assignedUnit: string | null
+  labels: Labels
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -103,7 +111,7 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
-export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit }: Props) {
+export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit, labels }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
   const router = useRouter()
   const pathname = usePathname()
@@ -230,7 +238,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label htmlFor="term-filter" className="text-xs">Term</Label>
+          <Label htmlFor="term-filter" className="text-xs">{labels.label_period}</Label>
           <NativeSelect
             id="term-filter"
             value={termId}
@@ -239,7 +247,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
               applyFilters({ term: e.target.value })
             }}
           >
-            <option value="">All terms</option>
+            <option value="">All {labels.label_period.toLowerCase()}s</option>
             {academic.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.term} {a.year}
@@ -259,7 +267,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
           )}
 
           <div className="flex flex-col gap-1">
-            <Label className="text-xs">Students</Label>
+            <Label className="text-xs">{labels.label_members}</Label>
             <MultiSelect
               options={studentOptions}
               selected={studentIds}
@@ -267,13 +275,13 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 setStudentIds(val)
                 applyFilters({ students: val })
               }}
-              placeholder="All students"
+              placeholder={`All ${labels.label_members.toLowerCase()}`}
             />
           </div>
 
           {!isTeacher && (
             <div className="flex flex-col gap-1">
-              <Label className="text-xs">Classes</Label>
+              <Label className="text-xs">{labels.label_unit}s</Label>
               <MultiSelect
                 options={classOptions}
                 selected={deviceIds}
@@ -288,7 +296,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                   if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
                   applyFilters({ classes: val, students: nextStudentIds })
                 }}
-                placeholder="All classes"
+                placeholder={`All ${labels.label_unit.toLowerCase()}s`}
               />
             </div>
           )}
@@ -314,10 +322,10 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 <TableHeader>
                   <TableRow>
                     <TableHead>Date</TableHead>
-                    <TableHead>Student</TableHead>
+                    <TableHead>{labels.label_member}</TableHead>
                     <TableHead>ID</TableHead>
-                    <TableHead>Class</TableHead>
-                    <TableHead>Term</TableHead>
+                    <TableHead>{labels.label_unit}</TableHead>
+                    <TableHead>{labels.label_period}</TableHead>
                     <TableHead>Time</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -338,9 +346,15 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
                       <TableCell>
-                        <Badge variant={r.status === 'present' ? 'success' : 'destructive'}>
-                          {r.status === 'present' ? 'Present' : 'Absent'}
-                        </Badge>
+                        {r.status === 'absent' ? (
+                          <Badge variant="destructive">Absent</Badge>
+                        ) : r.scan_type === 'time_in' ? (
+                          <Badge variant="secondary">Time In</Badge>
+                        ) : r.scan_type === 'time_out' ? (
+                          <Badge variant="secondary">Time Out</Badge>
+                        ) : (
+                          <Badge variant="success">Present</Badge>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -370,8 +384,8 @@ export function AttendanceView({ records, students, devices, academic, filters, 
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Class</TableHead>
-                    <TableHead>Term</TableHead>
+                    <TableHead>{labels.label_unit}</TableHead>
+                    <TableHead>{labels.label_period}</TableHead>
                     <TableHead>Year</TableHead>
                     <TableHead className="text-right">Attendance %</TableHead>
                     <TableHead className="text-right">Present</TableHead>

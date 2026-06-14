@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole } from '@/lib/supabase/dal'
+import { requireRole, getInstitution } from '@/lib/supabase/dal'
 import { AttendanceView } from './_components/attendance-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
@@ -11,7 +11,8 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher', 'staff')
+  const { role, assignedUnit, institutionId } = await requireRole('super_admin', 'admin', 'teacher', 'staff')
+  const institution = await getInstitution(institutionId)
 
   const params = await searchParams
   const fromDate = typeof params.from === 'string' ? params.from : undefined
@@ -28,25 +29,32 @@ export default async function AttendancePage({
 
   const supabase = createAdminClient()
 
-  const [studentsRes, devicesRes, academicRes] = await Promise.all([
-    supabase
-      .from('members')
-      .select('id, sid, fullname, group_name, device_id')
-      .eq('status', 'active')
-      .order('fullname'),
-    supabase
-      .from('devices')
-      .select('id, group_name, unit_name')
-      .order('group_name')
-      .order('unit_name'),
-    supabase
-      .from('periods')
-      .select('id, term, year, status')
-      .order('year', { ascending: false })
-      .order('term', { ascending: false }),
-  ])
+  let membersQ = supabase
+    .from('members')
+    .select('id, sid, fullname, group_name, device_id')
+    .eq('status', 'active')
+    .order('fullname')
 
-  // Teachers are locked to their assigned class; URL params are ignored for device filtering
+  let devicesQ = supabase
+    .from('devices')
+    .select('id, group_name, unit_name, display_name')
+    .order('group_name')
+    .order('unit_name')
+
+  let periodsQ = supabase
+    .from('periods')
+    .select('id, term, year, status')
+    .order('year', { ascending: false })
+    .order('term', { ascending: false })
+
+  if (institutionId) {
+    membersQ = membersQ.eq('institution_id', institutionId)
+    devicesQ = devicesQ.eq('institution_id', institutionId)
+    periodsQ = periodsQ.eq('institution_id', institutionId)
+  }
+
+  const [membersRes, devicesRes, periodsRes] = await Promise.all([membersQ, devicesQ, periodsQ])
+
   const allDevices = (devicesRes.data ?? []) as Device[]
   let effectiveDeviceIds = deviceIds
   if (role === 'teacher' || role === 'staff') {
@@ -59,7 +67,7 @@ export default async function AttendancePage({
   let query = supabase
     .from('attendance')
     .select(`
-      id, date, time, status, scan_id,
+      id, date, time, status, scan_type, scan_id,
       student:member_id(id, fullname, sid),
       academic:period_id(id, term, year),
       device:device_id(id, group_name, unit_name)
@@ -68,6 +76,7 @@ export default async function AttendancePage({
     .order('time', { ascending: false })
     .range(offset, offset + PAGE_SIZE - 1)
 
+  if (institutionId) query = query.eq('institution_id', institutionId)
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
   if (termId) query = query.eq('period_id', termId)
@@ -76,8 +85,7 @@ export default async function AttendancePage({
 
   const { data: records, count } = await query
 
-  // Teachers only see students from their class
-  const allStudents = studentsRes.data ?? []
+  const allStudents = membersRes.data ?? []
   const visibleStudents = (role === 'teacher' || role === 'staff') && effectiveDeviceIds[0] !== '__no_match__'
     ? allStudents.filter((s) => s.device_id === effectiveDeviceIds[0])
     : allStudents
@@ -89,13 +97,19 @@ export default async function AttendancePage({
         records={(records ?? []) as unknown as AttendanceRecord[]}
         students={visibleStudents}
         devices={allDevices}
-        academic={(academicRes.data ?? []) as AcademicTerm[]}
+        academic={(periodsRes.data ?? []) as AcademicTerm[]}
         filters={{ fromDate, toDate, termId, studentIds, deviceIds }}
         page={page}
         pageSize={PAGE_SIZE}
         totalCount={count ?? 0}
         role={role}
         assignedUnit={assignedUnit}
+        labels={{
+          label_member: institution.label_member,
+          label_members: institution.label_members,
+          label_unit: institution.label_unit,
+          label_period: institution.label_period,
+        }}
       />
     </>
   )

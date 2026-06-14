@@ -18,25 +18,32 @@ export type EnrollmentJob = {
 }
 
 export default async function EnrollmentPage() {
-  await requireRole('super_admin')
+  const { institutionId } = await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
 
-  const [jobsRes, devicesRes] = await Promise.all([
-    supabase
-      .from('enrollment_jobs')
-      .select(`
-        id, command, status, finger_slot, fid, note, created_at,
-        device:device_id(id, group_name, unit_name),
-        student:student_id(id, fullname, sid)
-      `)
-      .order('created_at', { ascending: false })
-      .limit(100),
-    supabase
-      .from('devices')
-      .select('id, group_name, unit_name')
-      .order('group_name')
-      .order('unit_name'),
-  ])
+  let jobsQ = supabase
+    .from('enrollment_jobs')
+    .select(`
+      id, command, status, finger_slot, fid, note, created_at,
+      device:device_id(id, group_name, unit_name),
+      student:student_id(id, fullname, sid)
+    `)
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  let devicesQ = supabase
+    .from('devices')
+    .select('id, group_name, unit_name, display_name')
+    .not('institution_id', 'is', null)
+    .order('group_name')
+    .order('unit_name')
+
+  if (institutionId) {
+    jobsQ = jobsQ.eq('institution_id', institutionId)
+    devicesQ = devicesQ.eq('institution_id', institutionId)
+  }
+
+  const [jobsRes, devicesRes] = await Promise.all([jobsQ, devicesQ])
 
   return (
     <EnrollmentView
