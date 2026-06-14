@@ -153,6 +153,9 @@ export function AttendanceView({
   const showStaffType = isPlatformAdmin
     ? (selectedInstConfig ? selectedInstConfig.track_staff : true)
     : track_staff
+  // Platform admin sees cross-institution data — always call students "Students".
+  // Non-platform_admin uses their institution's custom label (e.g. "Employees").
+  const studentFilterLabel = isPlatformAdmin ? 'Students' : labels.label_members
 
   const buildParams = useCallback(
     (overrides: Partial<{
@@ -262,8 +265,8 @@ export function AttendanceView({
             value={institutionFilter}
             onChange={(e) => {
               setInstitutionFilter(e.target.value)
-              setStudentIds([]); setStaffIds([]); setDeviceIds([])
-              applyFilters({ institution: e.target.value, students: [], staff: [], classes: [] })
+              setStudentIds([]); setStaffIds([]); setDeviceIds([]); setTypeFilter('')
+              applyFilters({ institution: e.target.value, students: [], staff: [], classes: [], type: '' })
             }}
             className="w-64"
           >
@@ -342,7 +345,7 @@ export function AttendanceView({
           {/* Student member filter */}
           {showStudentType && (
             <div className="flex flex-col gap-1">
-              <Label className="text-xs">{labels.label_members}</Label>
+              <Label className="text-xs">{studentFilterLabel}</Label>
               <MultiSelect
                 options={studentOptions}
                 selected={studentIds}
@@ -350,7 +353,7 @@ export function AttendanceView({
                   setStudentIds(val)
                   applyFilters({ students: val })
                 }}
-                placeholder={`All ${labels.label_members.toLowerCase()}`}
+                placeholder={`All ${studentFilterLabel.toLowerCase()}`}
               />
             </div>
           )}
