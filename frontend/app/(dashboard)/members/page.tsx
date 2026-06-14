@@ -60,6 +60,7 @@ export default async function MembersPage() {
           label_unit: institution.label_unit,
           label_group: institution.label_group,
         }}
+        institutionType={institution.type}
       />
     </>
   )

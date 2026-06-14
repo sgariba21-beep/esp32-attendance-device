@@ -29,6 +29,7 @@ type Props = {
   devices: Device[]
   usedFids: Record<string, number[]>
   labels: Labels
+  institutionType: 'school' | 'office'
 }
 
 type EnrollStep = {
@@ -184,7 +185,8 @@ function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: Fin
 
 const emptyForm = { sid: '', fullname: '', device_id: '', member_type: 'member' as 'student' | 'staff' | 'member' }
 
-export function MemberDialog({ open, onOpenChange, member, devices, usedFids, labels }: Props) {
+export function MemberDialog({ open, onOpenChange, member, devices, usedFids, labels, institutionType }: Props) {
+  const isOffice = institutionType === 'office'
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -306,7 +308,7 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
               value={form.member_type}
               onChange={(e) => set('member_type', e.target.value)}
             >
-              <option value="student">Student</option>
+              {!isOffice && <option value="student">Student</option>}
               <option value="staff">Staff</option>
               <option value="member">Member</option>
             </NativeSelect>

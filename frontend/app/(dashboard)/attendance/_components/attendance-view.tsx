@@ -24,11 +24,13 @@ import { Pagination } from '@/components/ui/pagination'
 import { MultiSelect } from './multi-select'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
-type StudentOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
+type MemberOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
 
 type Labels = {
   label_member: string
   label_members: string
+  label_staff: string
+  label_staff_plural: string
   label_unit: string
   label_period: string
 }
@@ -38,6 +40,7 @@ type Filters = {
   toDate?: string
   termId?: string
   studentIds: string[]
+  staffIds: string[]
   deviceIds: string[]
   typeFilter?: string
   institutionFilter?: string
@@ -45,7 +48,8 @@ type Filters = {
 
 type Props = {
   records: AttendanceRecord[]
-  students: StudentOption[]
+  students: MemberOption[]
+  staffMembers: MemberOption[]
   devices: Device[]
   academic: AcademicTerm[]
   filters: Filters
@@ -56,6 +60,9 @@ type Props = {
   assignedUnit: string | null
   labels: Labels
   institutions: { id: string; name: string }[]
+  track_students: boolean
+  track_staff: boolean
+  institutionType: 'school' | 'office'
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -114,9 +121,14 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
-export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit, labels, institutions }: Props) {
+export function AttendanceView({
+  records, students, staffMembers, devices, academic, filters, page, pageSize,
+  totalCount, role, assignedUnit, labels, institutions,
+  track_students, track_staff, institutionType,
+}: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
   const isPlatformAdmin = role === 'platform_admin'
+  const isOffice = institutionType === 'office'
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
@@ -125,39 +137,40 @@ export function AttendanceView({ records, students, devices, academic, filters, 
   const [toDate, setToDate] = useState(filters.toDate ?? '')
   const [termId, setTermId] = useState(filters.termId ?? '')
   const [studentIds, setStudentIds] = useState<string[]>(filters.studentIds)
+  const [staffIds, setStaffIds] = useState<string[]>(filters.staffIds)
   const [deviceIds, setDeviceIds] = useState<string[]>(filters.deviceIds)
   const [typeFilter, setTypeFilter] = useState(filters.typeFilter ?? '')
   const [institutionFilter, setInstitutionFilter] = useState(filters.institutionFilter ?? '')
 
   const buildParams = useCallback(
-    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[]; type: string; institution: string; page: number }>) => {
+    (overrides: Partial<{
+      from: string; to: string; term: string
+      students: string[]; staff: string[]; classes: string[]
+      type: string; institution: string; page: number
+    }>) => {
       const current = {
-        from: fromDate,
-        to: toDate,
-        term: termId,
-        students: studentIds,
-        classes: deviceIds,
-        type: typeFilter,
-        institution: institutionFilter,
-        page: 1,
+        from: fromDate, to: toDate, term: termId,
+        students: studentIds, staff: staffIds, classes: deviceIds,
+        type: typeFilter, institution: institutionFilter, page: 1,
         ...overrides,
       }
-      const params = new URLSearchParams()
-      if (current.from) params.set('from', current.from)
-      if (current.to) params.set('to', current.to)
-      if (current.term) params.set('term', current.term)
-      if (current.students.length) params.set('students', current.students.join(','))
-      if (current.classes.length) params.set('classes', current.classes.join(','))
-      if (current.type) params.set('type', current.type)
-      if (current.institution) params.set('institution', current.institution)
-      if (current.page > 1) params.set('page', current.page.toString())
-      return params.toString()
+      const p = new URLSearchParams()
+      if (current.from) p.set('from', current.from)
+      if (current.to) p.set('to', current.to)
+      if (current.term) p.set('term', current.term)
+      if (current.students.length) p.set('students', current.students.join(','))
+      if (current.staff.length) p.set('staff', current.staff.join(','))
+      if (current.classes.length) p.set('classes', current.classes.join(','))
+      if (current.type) p.set('type', current.type)
+      if (current.institution) p.set('institution', current.institution)
+      if (current.page > 1) p.set('page', current.page.toString())
+      return p.toString()
     },
-    [fromDate, toDate, termId, studentIds, deviceIds, typeFilter, institutionFilter]
+    [fromDate, toDate, termId, studentIds, staffIds, deviceIds, typeFilter, institutionFilter]
   )
 
   const applyFilters = useCallback(
-    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[]; type: string; institution: string }>) => {
+    (overrides: Parameters<typeof buildParams>[0]) => {
       startTransition(() => {
         router.push(`${pathname}?${buildParams(overrides)}`)
       })
@@ -175,16 +188,10 @@ export function AttendanceView({ records, students, devices, academic, filters, 
   )
 
   function clearFilters() {
-    setFromDate('')
-    setToDate('')
-    setTermId('')
-    setStudentIds([])
-    setDeviceIds([])
-    setTypeFilter('')
-    setInstitutionFilter('')
-    startTransition(() => {
-      router.push(pathname)
-    })
+    setFromDate(''); setToDate(''); setTermId('')
+    setStudentIds([]); setStaffIds([]); setDeviceIds([])
+    setTypeFilter(''); setInstitutionFilter('')
+    startTransition(() => { router.push(pathname) })
   }
 
   function buildExportUrl() {
@@ -192,7 +199,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
     return `/api/attendance/export${qs ? `?${qs}` : ''}`
   }
 
-  const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0 || typeFilter || institutionFilter
+  const hasFilters = !!(fromDate || toDate || termId || studentIds.length || staffIds.length || deviceIds.length || typeFilter || institutionFilter)
   const summary = buildSummary(records)
   const totalPages = Math.ceil(totalCount / pageSize)
   const showInstitutionColumn = isPlatformAdmin
@@ -201,16 +208,17 @@ export function AttendanceView({ records, students, devices, academic, filters, 
     const base = deviceIds.length > 0
       ? students.filter((s) => deviceIds.includes(s.device_id))
       : students
-    return base.map((s) => ({
-      value: s.id,
-      label: `${s.fullname} (${s.sid})`,
-    }))
+    return base.map((s) => ({ value: s.id, label: `${s.fullname} (${s.sid})` }))
   }, [students, deviceIds])
 
-  const classOptions = devices.map((d) => ({
-    value: d.id,
-    label: formatClass(d),
-  }))
+  const staffOptions = useMemo(() => {
+    const base = deviceIds.length > 0
+      ? staffMembers.filter((s) => deviceIds.includes(s.device_id))
+      : staffMembers
+    return base.map((s) => ({ value: s.id, label: `${s.fullname} (${s.sid})` }))
+  }, [staffMembers, deviceIds])
+
+  const classOptions = devices.map((d) => ({ value: d.id, label: formatClass(d) }))
 
   return (
     <div className="space-y-6">
@@ -242,9 +250,8 @@ export function AttendanceView({ records, students, devices, academic, filters, 
             value={institutionFilter}
             onChange={(e) => {
               setInstitutionFilter(e.target.value)
-              setStudentIds([])
-              setDeviceIds([])
-              applyFilters({ institution: e.target.value, students: [], classes: [] })
+              setStudentIds([]); setStaffIds([]); setDeviceIds([])
+              applyFilters({ institution: e.target.value, students: [], staff: [], classes: [] })
             }}
             className="w-64"
           >
@@ -258,6 +265,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-3 items-end">
+        {/* Date range */}
         <div className="flex items-end gap-2">
           <div className="flex flex-col gap-1">
             <Label htmlFor="from-date" className="text-xs">From</Label>
@@ -265,65 +273,53 @@ export function AttendanceView({ records, students, devices, academic, filters, 
               id="from-date"
               type="date"
               value={fromDate}
-              onChange={(e) => {
-                setFromDate(e.target.value)
-                applyFilters({ from: e.target.value })
-              }}
+              onChange={(e) => { setFromDate(e.target.value); applyFilters({ from: e.target.value }) }}
             />
           </div>
-
           <div className="flex flex-col gap-1">
             <Label htmlFor="to-date" className="text-xs">To</Label>
             <Input
               id="to-date"
               type="date"
               value={toDate}
-              onChange={(e) => {
-                setToDate(e.target.value)
-                applyFilters({ to: e.target.value })
-              }}
+              onChange={(e) => { setToDate(e.target.value); applyFilters({ to: e.target.value }) }}
             />
           </div>
         </div>
 
+        {/* Period filter */}
         <div className="flex flex-col gap-1">
           <Label htmlFor="term-filter" className="text-xs">{labels.label_period}</Label>
           <NativeSelect
             id="term-filter"
             value={termId}
-            onChange={(e) => {
-              setTermId(e.target.value)
-              applyFilters({ term: e.target.value })
-            }}
+            onChange={(e) => { setTermId(e.target.value); applyFilters({ term: e.target.value }) }}
           >
             <option value="">All {labels.label_period.toLowerCase()}s</option>
             {academic.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.term} {a.year}
-              </option>
+              <option key={a.id} value={a.id}>{a.term} {a.year}</option>
             ))}
           </NativeSelect>
         </div>
 
+        {/* Member type filter */}
         <div className="flex flex-col gap-1">
           <Label htmlFor="type-filter" className="text-xs">Member type</Label>
           <NativeSelect
             id="type-filter"
             value={typeFilter}
-            onChange={(e) => {
-              setTypeFilter(e.target.value)
-              applyFilters({ type: e.target.value })
-            }}
+            onChange={(e) => { setTypeFilter(e.target.value); applyFilters({ type: e.target.value }) }}
           >
             <option value="">All types</option>
-            <option value="student">Student</option>
-            <option value="staff">Staff</option>
+            {!isOffice && <option value="student">Student</option>}
+            {track_staff && <option value="staff">{labels.label_staff}</option>}
             <option value="member">Member</option>
           </NativeSelect>
         </div>
 
         <div className="w-px self-stretch bg-border mx-1" />
 
+        {/* Member-level filters */}
         <div className="flex items-end gap-2">
           {isTeacher && assignedUnit && (
             <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground self-end h-8">
@@ -332,19 +328,39 @@ export function AttendanceView({ records, students, devices, academic, filters, 
             </div>
           )}
 
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">{labels.label_members}</Label>
-            <MultiSelect
-              options={studentOptions}
-              selected={studentIds}
-              onChange={(val) => {
-                setStudentIds(val)
-                applyFilters({ students: val })
-              }}
-              placeholder={`All ${labels.label_members.toLowerCase()}`}
-            />
-          </div>
+          {/* Student member filter — hidden for office institutions */}
+          {!isOffice && track_students && (
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">{labels.label_members}</Label>
+              <MultiSelect
+                options={studentOptions}
+                selected={studentIds}
+                onChange={(val) => {
+                  setStudentIds(val)
+                  applyFilters({ students: val })
+                }}
+                placeholder={`All ${labels.label_members.toLowerCase()}`}
+              />
+            </div>
+          )}
 
+          {/* Staff member filter */}
+          {track_staff && (
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs">{labels.label_staff_plural}</Label>
+              <MultiSelect
+                options={staffOptions}
+                selected={staffIds}
+                onChange={(val) => {
+                  setStaffIds(val)
+                  applyFilters({ staff: val })
+                }}
+                placeholder={`All ${labels.label_staff_plural.toLowerCase()}`}
+              />
+            </div>
+          )}
+
+          {/* Unit filter */}
           {!isTeacher && (
             <div className="flex flex-col gap-1">
               <Label className="text-xs">{labels.label_unit}s</Label>
@@ -353,14 +369,18 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 selected={deviceIds}
                 onChange={(val) => {
                   setDeviceIds(val)
+                  // When unit filter changes, drop member selections that no longer match
                   const validIds = val.length > 0
-                    ? new Set(students.filter((s) => val.includes(s.device_id)).map((s) => s.id))
+                    ? new Set([
+                        ...students.filter((s) => val.includes(s.device_id)).map((s) => s.id),
+                        ...staffMembers.filter((s) => val.includes(s.device_id)).map((s) => s.id),
+                      ])
                     : null
-                  const nextStudentIds = validIds
-                    ? studentIds.filter((id) => validIds.has(id))
-                    : studentIds
+                  const nextStudentIds = validIds ? studentIds.filter((id) => validIds.has(id)) : studentIds
+                  const nextStaffIds = validIds ? staffIds.filter((id) => validIds.has(id)) : staffIds
                   if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
-                  applyFilters({ classes: val, students: nextStudentIds })
+                  if (nextStaffIds.length !== staffIds.length) setStaffIds(nextStaffIds)
+                  applyFilters({ classes: val, students: nextStudentIds, staff: nextStaffIds })
                 }}
                 placeholder={`All ${labels.label_unit.toLowerCase()}s`}
               />
@@ -370,123 +390,115 @@ export function AttendanceView({ records, students, devices, academic, filters, 
       </div>
 
       <div className={`transition-opacity duration-150 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
-      <Tabs defaultValue="records">
-        <TabsList>
-          <TabsTrigger value="records">Records ({totalCount.toLocaleString()})</TabsTrigger>
-          <TabsTrigger value="summary">Summary</TabsTrigger>
-        </TabsList>
+        <Tabs defaultValue="records">
+          <TabsList>
+            <TabsTrigger value="records">Records ({totalCount.toLocaleString()})</TabsTrigger>
+            <TabsTrigger value="summary">Summary</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="records" className="mt-4 space-y-3">
-          {records.length === 0 ? (
-            <EmptyState
-              icon={CalendarDays}
-              message="No attendance records match your filters."
-            />
-          ) : (
-            <div className="rounded-xl border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    {showInstitutionColumn && <TableHead>Institution</TableHead>}
-                    <TableHead>{labels.label_member}</TableHead>
-                    <TableHead>ID</TableHead>
-                    <TableHead>{labels.label_unit}</TableHead>
-                    <TableHead>{labels.label_period}</TableHead>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {records.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="whitespace-nowrap">{formatDate(r.date)}</TableCell>
-                      {showInstitutionColumn && (
-                        <TableCell className="text-muted-foreground text-xs">{r.institution?.name ?? '—'}</TableCell>
-                      )}
-                      <TableCell>{r.student?.fullname ?? '—'}</TableCell>
-                      <TableCell className="font-mono tabular-nums text-muted-foreground text-xs">
-                        {r.student?.sid ?? '—'}
-                      </TableCell>
-                      <TableCell>
-                        {r.device ? formatClass(r.device) : '—'}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
-                        {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
-                      <TableCell>
-                        {r.status === 'absent' ? (
-                          <Badge variant="destructive">Absent</Badge>
-                        ) : r.scan_type === 'time_in' ? (
-                          <Badge variant="secondary">Time In</Badge>
-                        ) : r.scan_type === 'time_out' ? (
-                          <Badge variant="secondary">Time Out</Badge>
-                        ) : (
-                          <Badge variant="success">Present</Badge>
+          <TabsContent value="records" className="mt-4 space-y-3">
+            {records.length === 0 ? (
+              <EmptyState icon={CalendarDays} message="No attendance records match your filters." />
+            ) : (
+              <div className="rounded-xl border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      {showInstitutionColumn && <TableHead>Institution</TableHead>}
+                      <TableHead>{labels.label_member}</TableHead>
+                      <TableHead>ID</TableHead>
+                      <TableHead>{labels.label_unit}</TableHead>
+                      <TableHead>{labels.label_period}</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {records.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="whitespace-nowrap">{formatDate(r.date)}</TableCell>
+                        {showInstitutionColumn && (
+                          <TableCell className="text-muted-foreground text-xs">{r.institution?.name ?? '—'}</TableCell>
                         )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-          {totalCount > pageSize && (
-            <Pagination
-              page={page}
-              totalPages={totalPages}
-              totalCount={totalCount}
-              pageSize={pageSize}
-              onPageChange={goToPage}
-            />
-          )}
-        </TabsContent>
+                        <TableCell>{r.student?.fullname ?? '—'}</TableCell>
+                        <TableCell className="font-mono tabular-nums text-muted-foreground text-xs">
+                          {r.student?.sid ?? '—'}
+                        </TableCell>
+                        <TableCell>{r.device ? formatClass(r.device) : '—'}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
+                          {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
+                        <TableCell>
+                          {r.status === 'absent' ? (
+                            <Badge variant="destructive">Absent</Badge>
+                          ) : r.scan_type === 'time_in' ? (
+                            <Badge variant="secondary">Time In</Badge>
+                          ) : r.scan_type === 'time_out' ? (
+                            <Badge variant="secondary">Time Out</Badge>
+                          ) : (
+                            <Badge variant="success">Present</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {totalCount > pageSize && (
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                pageSize={pageSize}
+                onPageChange={goToPage}
+              />
+            )}
+          </TabsContent>
 
-        <TabsContent value="summary" className="mt-4">
-          {summary.length === 0 ? (
-            <EmptyState
-              icon={CalendarDays}
-              message="No data to summarise. Add attendance records first."
-            />
-          ) : (
-            <div className="rounded-xl border overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{labels.label_unit}</TableHead>
-                    <TableHead>{labels.label_period}</TableHead>
-                    <TableHead>Year</TableHead>
-                    <TableHead className="text-right">Attendance %</TableHead>
-                    <TableHead className="text-right">Present</TableHead>
-                    <TableHead className="text-right">Absent</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {summary.map((row) => (
-                    <TableRow key={row.key}>
-                      <TableCell>{row.classLabel}</TableCell>
-                      <TableCell>{row.term}</TableCell>
-                      <TableCell>{row.year}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {row.total > 0 ? `${Math.round((row.present / row.total) * 100)}%` : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-success-foreground font-medium">
-                        {row.present}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-destructive font-medium">
-                        {row.absent}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{row.total}</TableCell>
+          <TabsContent value="summary" className="mt-4">
+            {summary.length === 0 ? (
+              <EmptyState icon={CalendarDays} message="No data to summarise. Add attendance records first." />
+            ) : (
+              <div className="rounded-xl border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{labels.label_unit}</TableHead>
+                      <TableHead>{labels.label_period}</TableHead>
+                      <TableHead>Year</TableHead>
+                      <TableHead className="text-right">Attendance %</TableHead>
+                      <TableHead className="text-right">Present</TableHead>
+                      <TableHead className="text-right">Absent</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+                  </TableHeader>
+                  <TableBody>
+                    {summary.map((row) => (
+                      <TableRow key={row.key}>
+                        <TableCell>{row.classLabel}</TableCell>
+                        <TableCell>{row.term}</TableCell>
+                        <TableCell>{row.year}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">
+                          {row.total > 0 ? `${Math.round((row.present / row.total) * 100)}%` : '—'}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-success-foreground font-medium">
+                          {row.present}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-destructive font-medium">
+                          {row.absent}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{row.total}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   )

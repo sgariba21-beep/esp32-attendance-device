@@ -32,12 +32,14 @@ type Props = {
   devices: Device[]
   role: UserRole
   labels: Labels
+  institutionType: 'school' | 'office'
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 type TypeFilter = 'all' | 'student' | 'staff' | 'member'
 
-export function MembersView({ members, devices, role, labels }: Props) {
+export function MembersView({ members, devices, role, labels, institutionType }: Props) {
+  const isOffice = institutionType === 'office'
   const isTeacher = role === 'teacher' || role === 'staff'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<MemberWithDevice | null>(null)
@@ -128,7 +130,7 @@ export function MembersView({ members, devices, role, labels }: Props) {
           onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1) }}
         >
           <option value="all">All types</option>
-          <option value="student">Student</option>
+          {!isOffice && <option value="student">Student</option>}
           <option value="staff">Staff</option>
           <option value="member">Member</option>
         </NativeSelect>
@@ -241,6 +243,7 @@ export function MembersView({ members, devices, role, labels }: Props) {
         devices={devices}
         usedFids={usedFids}
         labels={labels}
+        institutionType={institutionType}
       />
 
       <ConfirmDialog

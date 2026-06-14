@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
   const toDate = p.get('to') ?? undefined
   const termId = p.get('term') ?? undefined
   const studentIds = p.get('students')?.split(',').filter(Boolean) ?? []
+  const staffIds = p.get('staff')?.split(',').filter(Boolean) ?? []
   const deviceIds = p.get('classes')?.split(',').filter(Boolean) ?? []
   const typeFilter = p.get('type') ?? undefined
   const institutionParam = p.get('institution') ?? undefined
@@ -57,7 +58,8 @@ export async function GET(req: NextRequest) {
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
   if (termId) query = query.eq('period_id', termId)
-  if (studentIds.length) query = query.in('member_id', studentIds)
+  const allMemberIds = [...studentIds, ...staffIds]
+  if (allMemberIds.length) query = query.in('member_id', allMemberIds)
   if (deviceIds.length) query = query.in('device_id', deviceIds)
   if (typeMemberIds !== null) query = query.in('member_id', typeMemberIds)
 

@@ -21,6 +21,9 @@ export default async function AttendancePage({
   const studentIds = typeof params.students === 'string'
     ? params.students.split(',').filter(Boolean)
     : []
+  const staffFilterIds = typeof params.staff === 'string'
+    ? params.staff.split(',').filter(Boolean)
+    : []
   const deviceIds = typeof params.classes === 'string'
     ? params.classes.split(',').filter(Boolean)
     : []
@@ -34,9 +37,11 @@ export default async function AttendancePage({
   // Effective institution scope for this request
   const effectiveInstitutionId = institutionId ?? institutionFilter ?? null
 
+  // Fetch all members with member_type so we can split into students vs staff for
+  // the filter dropdowns in the view.
   let membersQ = supabase
     .from('members')
-    .select('id, sid, fullname, group_name, device_id')
+    .select('id, sid, fullname, group_name, device_id, member_type')
     .eq('status', 'active')
     .order('fullname')
 
@@ -67,12 +72,30 @@ export default async function AttendancePage({
 
   const allDevices = (devicesRes.data ?? []) as Device[]
   let effectiveDeviceIds = deviceIds
-  if (role === 'teacher' || role === 'staff') {
+  const isTeacherRole = role === 'teacher' || role === 'staff'
+  let teacherDeviceId: string | null = null
+  if (isTeacherRole) {
     const teacherDevice = assignedUnit
       ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
       : null
-    effectiveDeviceIds = teacherDevice ? [teacherDevice.id] : ['__no_match__']
+    teacherDeviceId = teacherDevice?.id ?? null
+    effectiveDeviceIds = teacherDeviceId ? [teacherDeviceId] : ['__no_match__']
   }
+
+  // Split fetched members into students (non-staff) and staff for the view's filter dropdowns
+  type MemberRow = { id: string; sid: string; fullname: string; group_name: string; device_id: string; member_type: string }
+  const allMembersList = (membersRes.data ?? []) as MemberRow[]
+  const allStudents = allMembersList.filter((m) => m.member_type !== 'staff')
+  const allStaffMembers = allMembersList.filter((m) => m.member_type === 'staff')
+
+  // Apply teacher restriction (teacher sees only their unit's members)
+  const noTeacherMatch = isTeacherRole && !teacherDeviceId
+  const visibleStudents = isTeacherRole && !noTeacherMatch
+    ? allStudents.filter((s) => s.device_id === teacherDeviceId)
+    : noTeacherMatch ? [] : allStudents
+  const visibleStaff = isTeacherRole && !noTeacherMatch
+    ? allStaffMembers.filter((s) => s.device_id === teacherDeviceId)
+    : noTeacherMatch ? [] : allStaffMembers
 
   // If type filter active, resolve member IDs of that type first
   let typeMemberIds: string[] | null = null
@@ -100,16 +123,15 @@ export default async function AttendancePage({
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
   if (termId) query = query.eq('period_id', termId)
-  if (studentIds.length > 0) query = query.in('member_id', studentIds)
+
+  // Combine student and staff member ID filters — both can be set independently
+  const combinedMemberIds = [...studentIds, ...staffFilterIds]
+  if (combinedMemberIds.length > 0) query = query.in('member_id', combinedMemberIds)
+
   if (effectiveDeviceIds.length > 0) query = query.in('device_id', effectiveDeviceIds)
   if (typeMemberIds !== null) query = query.in('member_id', typeMemberIds)
 
   const { data: records, count } = await query
-
-  const allStudents = membersRes.data ?? []
-  const visibleStudents = (role === 'teacher' || role === 'staff') && effectiveDeviceIds[0] !== '__no_match__'
-    ? allStudents.filter((s) => s.device_id === effectiveDeviceIds[0])
-    : allStudents
 
   return (
     <>
@@ -117,18 +139,24 @@ export default async function AttendancePage({
       <AttendanceView
         records={(records ?? []) as unknown as AttendanceRecord[]}
         students={visibleStudents}
+        staffMembers={visibleStaff}
         devices={allDevices}
         academic={(periodsRes.data ?? []) as AcademicTerm[]}
-        filters={{ fromDate, toDate, termId, studentIds, deviceIds, typeFilter, institutionFilter }}
+        filters={{ fromDate, toDate, termId, studentIds, staffIds: staffFilterIds, deviceIds, typeFilter, institutionFilter }}
         page={page}
         pageSize={PAGE_SIZE}
         totalCount={count ?? 0}
         role={role}
         assignedUnit={assignedUnit}
         institutions={allInstitutions}
+        track_students={institution.track_students}
+        track_staff={institution.track_staff}
+        institutionType={institution.type}
         labels={{
           label_member: institution.label_member,
           label_members: institution.label_members,
+          label_staff: institution.label_staff,
+          label_staff_plural: institution.label_staff_plural,
           label_unit: institution.label_unit,
           label_period: institution.label_period,
         }}
