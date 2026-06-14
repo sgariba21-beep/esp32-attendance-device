@@ -45,9 +45,10 @@ type Props = {
   users: UserRow[]
   currentUserId: string
   devices: DeviceOption[]
+  labelUnit: string
 }
 
-export function UsersView({ users, currentUserId, devices }: Props) {
+export function UsersView({ users, currentUserId, devices, labelUnit }: Props) {
   const [dialogOpen, setDialogOpen]     = useState(false)
   const [editing, setEditing]           = useState<UserRow | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<UserRow | null>(null)
@@ -93,7 +94,7 @@ export function UsersView({ users, currentUserId, devices }: Props) {
                 <TableRow>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Class</TableHead>
+                  <TableHead>{labelUnit}</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -147,7 +148,7 @@ export function UsersView({ users, currentUserId, devices }: Props) {
         </div>
       )}
 
-      <UserDialog open={dialogOpen} onOpenChange={setDialogOpen} user={editing} devices={devices} />
+      <UserDialog open={dialogOpen} onOpenChange={setDialogOpen} user={editing} devices={devices} labelUnit={labelUnit} />
 
       <ConfirmDialog
         open={confirmTarget !== null}

@@ -107,7 +107,12 @@ export default async function PromotionPage() {
   return (
     <>
       <RealtimeRefresh />
-      <PromotionView groups={groups} totalActive={students.length} />
+      <PromotionView
+        groups={groups}
+        totalActive={students.length}
+        labelUnit={institution.label_unit}
+        labelGroup={institution.label_group}
+      />
     </>
   )
 }

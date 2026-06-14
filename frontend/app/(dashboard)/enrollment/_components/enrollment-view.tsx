@@ -16,6 +16,7 @@ import type { Device } from '@/lib/types'
 type Props = {
   initialJobs: EnrollmentJob[]
   devices: Device[]
+  labelUnit: string
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -61,7 +62,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
   )
 }
 
-export function EnrollmentView({ initialJobs, devices }: Props) {
+export function EnrollmentView({ initialJobs, devices, labelUnit }: Props) {
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
@@ -207,6 +208,7 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         devices={devices}
+        labelUnit={labelUnit}
       />
     </div>
   )

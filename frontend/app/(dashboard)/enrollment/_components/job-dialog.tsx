@@ -20,6 +20,7 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   devices: Device[]
+  labelUnit: string
 }
 
 const COMMANDS: { value: Command; label: string; description: string }[] = [
@@ -44,7 +45,7 @@ const empty = {
   master_name: '',
 }
 
-export function JobDialog({ open, onOpenChange, devices }: Props) {
+export function JobDialog({ open, onOpenChange, devices, labelUnit }: Props) {
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -214,7 +215,7 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
                 ))}
               </NativeSelect>
               {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
-                <p className="text-xs text-muted-foreground">No active students in this class.</p>
+                <p className="text-xs text-muted-foreground">No active students in this {labelUnit.toLowerCase()}.</p>
               )}
             </div>
           )}

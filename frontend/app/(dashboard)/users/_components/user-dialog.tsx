@@ -20,6 +20,7 @@ type Props = {
   onOpenChange: (open: boolean) => void
   user: UserRow | null
   devices: DeviceOption[]
+  labelUnit: string
 }
 
 const ROLES: { value: UserRole; label: string }[] = [
@@ -30,7 +31,7 @@ const ROLES: { value: UserRole; label: string }[] = [
   { value: 'platform_admin', label: 'Platform Admin' },
 ]
 
-export function UserDialog({ open, onOpenChange, user, devices }: Props) {
+export function UserDialog({ open, onOpenChange, user, devices, labelUnit }: Props) {
   const [email, setEmail]             = useState('')
   const [password, setPassword]       = useState('')
   const [role, setRole]               = useState<UserRole>('teacher')
@@ -120,7 +121,7 @@ export function UserDialog({ open, onOpenChange, user, devices }: Props) {
 
           {role === 'teacher' && (
             <div className="space-y-2">
-              <Label>Assigned class</Label>
+              <Label>Assigned {labelUnit.toLowerCase()}</Label>
               <SingleSelect
                 options={devices
                   .slice()
@@ -128,10 +129,10 @@ export function UserDialog({ open, onOpenChange, user, devices }: Props) {
                   .map((d) => ({ value: `${d.group_name} ${d.unit_name}`, label: `${d.group_name} ${d.unit_name}` }))}
                 value={assignedUnit}
                 onChange={setAssignedUnit}
-                placeholder="Select a class…"
+                placeholder={`Select a ${labelUnit.toLowerCase()}…`}
               />
               <p className="text-xs text-muted-foreground">
-                Teachers only see attendance records for this class.
+                Teachers only see attendance records for this {labelUnit.toLowerCase()}.
               </p>
             </div>
           )}

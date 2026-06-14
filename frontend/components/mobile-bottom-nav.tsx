@@ -38,6 +38,9 @@ function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavIte
   items.push(
     { href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] },
   )
+  if (institution.type !== 'office') {
+    items.push({ href: '/academic', label: 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin'] })
+  }
   return items
 }
 
@@ -46,10 +49,7 @@ function buildMoreNav(institution: InstitutionConfig): NavItem[] {
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin'] },
   ]
   if (institution.type !== 'office') {
-    items.push(
-      { href: '/academic',  label: 'Academic',  icon: BookOpen,      roles: ['super_admin', 'admin', 'platform_admin'] },
-      { href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] },
-    )
+    items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
   }
   items.push(
     { href: '/users',        label: 'Accounts',           icon: ShieldCheck,  roles: ['super_admin', 'platform_admin'] },

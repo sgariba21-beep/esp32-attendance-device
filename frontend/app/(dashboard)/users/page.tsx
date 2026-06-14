@@ -1,10 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole } from '@/lib/supabase/dal'
+import { requireRole, getInstitution } from '@/lib/supabase/dal'
 import { UsersView } from './_components/users-view'
 import type { UserRole } from '@/lib/supabase/dal'
 
 export default async function UsersPage() {
   const { user: currentUser, institutionId } = await requireRole('super_admin', 'platform_admin')
+  const institution = await getInstitution(institutionId)
   const admin = createAdminClient()
 
   let profilesQ = admin.from('profiles').select('id, role, assigned_unit, institution_id')
@@ -38,6 +39,7 @@ export default async function UsersPage() {
       users={users}
       currentUserId={currentUser.id}
       devices={(devices ?? []) as { id: string; group_name: string; unit_name: string }[]}
+      labelUnit={institution.label_unit}
     />
   )
 }

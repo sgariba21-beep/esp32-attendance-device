@@ -28,7 +28,7 @@ export async function createInstitutionWithAdmin(data: OnboardingFormData) {
       label_member:       data.institution_type === 'office' ? 'Employee'  : 'Student',
       label_members:      data.institution_type === 'office' ? 'Employees' : 'Students',
       label_group:        data.institution_type === 'office' ? 'Department': 'Form',
-      label_unit:         data.institution_type === 'office' ? 'Team'      : 'Class',
+      label_unit:         data.institution_type === 'office' ? 'Branch'    : 'Class',
       label_period:       data.institution_type === 'office' ? 'Quarter'   : 'Term',
       label_staff:        data.institution_type === 'office' ? 'Staff'     : 'Teacher',
       label_staff_plural: data.institution_type === 'office' ? 'Staff'     : 'Teachers',

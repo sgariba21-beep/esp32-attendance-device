@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole } from '@/lib/supabase/dal'
+import { requireRole, getInstitution } from '@/lib/supabase/dal'
 import { EnrollmentView } from './_components/enrollment-view'
 import type { Device } from '@/lib/types'
 
@@ -19,6 +19,7 @@ export type EnrollmentJob = {
 
 export default async function EnrollmentPage() {
   const { institutionId } = await requireRole('super_admin', 'platform_admin')
+  const institution = await getInstitution(institutionId)
   const supabase = createAdminClient()
 
   let jobsQ = supabase
@@ -49,6 +50,7 @@ export default async function EnrollmentPage() {
     <EnrollmentView
       initialJobs={(jobsRes.data ?? []) as unknown as EnrollmentJob[]}
       devices={(devicesRes.data ?? []) as Device[]}
+      labelUnit={institution.label_unit}
     />
   )
 }

@@ -141,7 +141,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_unit">Unit</Label>
-            <Input id="label_unit" value={form.label_unit} onChange={(e) => set('label_unit', e.target.value)} placeholder="Class" />
+            <Input id="label_unit" value={form.label_unit} onChange={(e) => set('label_unit', e.target.value)} placeholder="Class / Branch" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_period">Period</Label>
