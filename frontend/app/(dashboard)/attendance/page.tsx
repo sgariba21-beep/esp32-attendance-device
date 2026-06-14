@@ -11,7 +11,7 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher')
+  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher', 'staff')
 
   const params = await searchParams
   const fromDate = typeof params.from === 'string' ? params.from : undefined
@@ -49,7 +49,7 @@ export default async function AttendancePage({
   // Teachers are locked to their assigned class; URL params are ignored for device filtering
   const allDevices = (devicesRes.data ?? []) as Device[]
   let effectiveDeviceIds = deviceIds
-  if (role === 'teacher') {
+  if (role === 'teacher' || role === 'staff') {
     const teacherDevice = assignedUnit
       ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
       : null
@@ -78,7 +78,7 @@ export default async function AttendancePage({
 
   // Teachers only see students from their class
   const allStudents = studentsRes.data ?? []
-  const visibleStudents = role === 'teacher' && effectiveDeviceIds[0] !== '__no_match__'
+  const visibleStudents = (role === 'teacher' || role === 'staff') && effectiveDeviceIds[0] !== '__no_match__'
     ? allStudents.filter((s) => s.device_id === effectiveDeviceIds[0])
     : allStudents
 

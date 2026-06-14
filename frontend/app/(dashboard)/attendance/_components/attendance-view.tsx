@@ -104,7 +104,7 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
 }
 
 export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit }: Props) {
-  const isTeacher = role === 'teacher'
+  const isTeacher = role === 'teacher' || role === 'staff'
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()

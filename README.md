@@ -1,6 +1,6 @@
 # ESP32 Fingerprint Attendance System
 
-Biometric classroom attendance tracking system. ESP32 devices with R503 fingerprint sensors record student attendance; a Next.js dashboard backed by Supabase provides real-time reporting and management.
+Multi-tenant biometric attendance tracking system. ESP32 devices with R503 fingerprint sensors record attendance; a Next.js dashboard backed by Supabase provides real-time reporting, device provisioning, and management. Each institution (school, office, etc.) is isolated — one cloud Supabase project serves all tenants.
 
 ---
 
@@ -10,29 +10,40 @@ Biometric classroom attendance tracking system. ESP32 devices with R503 fingerpr
 ┌─────────────────────────────┐
 │       ESP32 Devices         │
 │  R503 fingerprint sensor    │
-│  One device per classroom   │
+│  One device per unit        │
 └────────────┬────────────────┘
-             │ HTTPS (x-device-secret)
-             │ Cloudflare Tunnel
+             │ HTTPS (x-device-secret / x-bootstrap-secret)
              ▼
 ┌─────────────────────────────┐
+│  Supabase Edge Functions    │
+│  (cloud, lxpemewonievaazboyez) │
+│  log-attendance             │
+│  mark-absent (pg_cron)      │
+│  get-enrollment-job         │
+│  update-enrollment-job      │
+│  register                   │
+│  assignment-poll            │
+└────────────┬────────────────┘
+             │ service role
+             ▼
+┌─────────────────────────────┐
+│   Supabase PostgreSQL       │
+│   (cloud)                   │
+│   Multi-tenant schema       │
+│   RLS policies (defence-in- │
+│   depth; dormant for svc    │
+│   role access)              │
+└─────────────────────────────┘
+             ▲
+             │ server-side only (service role)
+┌────────────┴────────────────┐
 │     Next.js Dashboard       │
-│     (Node.js server)        │
-│  /api/* — device endpoints  │
-└────────────┬────────────────┘
-             │ localhost
-             ▼
-┌─────────────────────────────┐
-│   Supabase (local instance) │
-│   PostgreSQL + Auth         │
-│   pg_cron (mark-absent)     │
-│   127.0.0.1:54321           │
+│     Deployed on Vercel      │
+│  All Supabase calls are     │
+│  server-side (no browser    │
+│  exposure of keys)          │
 └─────────────────────────────┘
 ```
-
-**Why Cloudflare Tunnel?** The school WiFi enforces client isolation — devices on the network cannot reach each other directly. The ESP32s connect outbound through a Cloudflare Tunnel to the Next.js server, which is the only machine that can reach the local Supabase instance.
-
-**Why server-side only auth?** Supabase runs on `127.0.0.1` and is not reachable from a browser on another device. All Supabase calls go through Next.js server components and API routes.
 
 ---
 
@@ -41,13 +52,12 @@ Biometric classroom attendance tracking system. ESP32 devices with R503 fingerpr
 | Layer | Technology |
 |---|---|
 | Firmware | Arduino (ESP32), FreeRTOS, R503 fingerprint library |
-| Database | Supabase (local), PostgreSQL, pg_cron |
-| Backend | Next.js App Router API routes |
-| Frontend | Next.js App Router, shadcn/ui, TailwindCSS |
-| Auth | Supabase Auth (server-side only) |
-| Tunnel | Cloudflare Tunnel |
+| Database | Supabase (cloud PostgreSQL + Auth + Storage + pg_cron) |
+| Edge functions | Deno (Supabase Edge Functions) |
+| Dashboard | Next.js App Router, shadcn/ui, TailwindCSS |
+| Hosting | Vercel (dashboard) |
 
-> **Note on Next.js version:** This project uses a version with breaking API changes from standard Next.js. The `middleware.ts` convention is not used — middleware logic lives in `frontend/proxy.ts` and its matcher explicitly excludes `/api` routes so device handlers are not redirected. Read `frontend/AGENTS.md` before writing any Next.js code.
+> **Note on Next.js:** This project uses a version with breaking API changes from standard Next.js. Middleware lives in `frontend/proxy.ts`, not `middleware.ts`. Read `frontend/AGENTS.md` before writing any Next.js code.
 
 ---
 
@@ -74,68 +84,76 @@ Biometric classroom attendance tracking system. ESP32 devices with R503 fingerpr
 
 ## Database Schema
 
-All tables use RLS with service-role-only policies. All data access from Next.js uses `createAdminClient()` (service role key).
+All dashboard data access uses `createAdminClient()` (service role — bypasses RLS). RLS policies exist as defence-in-depth and will become load-bearing if authenticated client access is introduced.
 
 ```sql
--- Academic terms
-academic        (id, term, year, status, start_date, end_date)
+-- Institution registry (one row per tenant)
+institutions    (id, name, type, logo_url, label_member, label_members, label_group,
+                 label_unit, label_period, skip_weekends, device_secret, timezone)
 
--- Students
-students        (id, sid, fullname, form, class, fin1, fin2, status, device_id, created_at)
+-- Members (students, staff, etc.) — scoped to institution
+members         (id, sid, fullname, group_name, fin1, fin2, status, device_id,
+                 institution_id, created_at)
 
--- One ESP32 per classroom
-devices         (id, form, class)
+-- One ESP32 per unit — scoped to institution
+devices         (id, group_name, unit_name, display_name, mac, institution_id)
 
--- Attendance records (present/absent), written by ESP32 or pg_cron
-attendance      (id, sid→students, academic_id→academic, device_id→devices, date, time, status, scan_id)
+-- Academic periods — scoped to institution (nullable for office-type institutions)
+periods         (id, term, year, status, start_date, end_date, institution_id)
+
+-- Attendance records — scoped to institution
+attendance      (id, member_id→members, period_id→periods, device_id→devices,
+                 date, time, status, scan_id, institution_id)
 
 -- Remote fingerprint enrollment queue
-enrollment_jobs (id, device_id→devices, student_id→students, finger_slot, command, status, fid, note, created_at)
+enrollment_jobs (id, device_id→devices, student_id→members, finger_slot, command,
+                 status, fid, note, institution_id, created_at)
 
--- School holidays (excluded from mark-absent cron)
-holidays        (id, date, label)
+-- Holidays (date ranges) — scoped to institution
+holidays        (id, label, start_date, end_date, institution_id)
 
--- Dashboard user roles (one row per auth.users entry)
-profiles        (id→auth.users, role, assigned_class)
+-- Dashboard user roles — scoped to institution (platform_admin has null institution_id)
+profiles        (id→auth.users, role, assigned_unit, institution_id)
 ```
 
 ### Migrations
 
-All migrations are in `backend/supabase/migrations/`. Apply with `supabase migration up` or `supabase db reset`.
+All migrations are in `backend/supabase/migrations/`. They are applied to the cloud instance — do not re-run locally unless testing from scratch.
 
 ---
 
 ## Auth & RBAC
 
-Authentication uses Supabase Auth. Role-based access is enforced via the `profiles` table.
+Authentication uses Supabase Auth (server-side only — all Supabase calls go through Next.js server components and API routes, never from the browser).
 
 ### Account Types
 
-| Role | Access |
-|---|---|
-| `super_admin` | Everything — devices, enrollment, promotion, academic, students, attendance, user management |
-| `admin` | Students, academic, promotion, attendance — no devices or enrollment |
-| `teacher` | Read-only attendance and students, scoped to their `assigned_class` only |
+| Role | Scope | Access |
+|---|---|---|
+| `platform_admin` | Cross-institution (no institution_id) | All pages, bypasses all role gates, operates via service role. Responsible for creating institutions and bootstrapping first super_admin per institution. |
+| `super_admin` | Institution-scoped | All pages — devices, enrollment, promotion, academic, members, attendance, user management. Can manage users within their institution but cannot create platform_admins. |
+| `admin` | Institution-scoped | Members, academic, promotion, attendance — no devices or enrollment. |
+| `teacher` | Institution-scoped, unit-scoped | Read-only attendance and members, filtered to their `assigned_unit` only. |
+| `staff` | Institution-scoped, unit-scoped | Same as teacher — read-only attendance and members, filtered to their `assigned_unit`. Intended for non-teaching staff in office-type institutions. |
 
 ### How it works
 
 - `frontend/lib/supabase/dal.ts` exports `verifySession()` and `requireRole(...roles)`.
-- `verifySession()` is `cache()`-wrapped — multiple calls per render cycle hit the DB once.
-- `requireRole()` calls `verifySession()` and redirects to `/unauthorized` if the role doesn't match.
-- Every page and every server action calls `requireRole()` at the top.
-- The dashboard layout calls `verifySession()` and passes `role` to the sidebar and mobile nav, which filter their nav items accordingly.
-- Teachers have an `assigned_class` (e.g. `"Form 3 Science 1"`) stored in `profiles`. Attendance and student data is filtered server-side to that class before rendering.
+- `verifySession()` is `cache()`-wrapped — one DB hit per render cycle regardless of how many pages call it.
+- `requireRole()` calls `verifySession()` and redirects to `/unauthorized` if the role doesn't match. `platform_admin` bypasses all role checks.
+- The dashboard layout calls `verifySession()` and passes `role` to the sidebar and mobile nav, which filter nav items by role.
+- `teacher` and `staff` have an `assigned_unit` in their profile. Attendance and member data is filtered server-side to that unit before rendering.
 
-### Creating the first super_admin
+### Creating the first super_admin (per institution)
 
-After running migrations, insert a profile row for the existing Supabase Auth user:
+After creating an institution in Supabase, insert a profile row for the Supabase Auth user:
 
 ```sql
-insert into profiles (id, role)
-values ('<auth-user-uuid>', 'super_admin');
+insert into profiles (id, role, institution_id)
+values ('<auth-user-uuid>', 'super_admin', '<institution-uuid>');
 ```
 
-Additional accounts are created through the `/users` page in the dashboard.
+Additional accounts are managed through the `/users` page in the dashboard.
 
 ---
 
@@ -143,29 +161,39 @@ Additional accounts are created through the `/users` page in the dashboard.
 
 | Route | Access | Description |
 |---|---|---|
-| `/attendance` | All | Attendance records with date, term, student, class filters. Teachers see only their class and can filter by student. |
-| `/students` | All (teacher: read-only) | Student roster. Teachers see only their class with no edit controls. |
-| `/devices` | super_admin | ESP32 device registry — form and class per device. |
-| `/academic` | super_admin, admin | Academic terms (with dates) and school holidays. |
-| `/enrollment` | super_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. |
-| `/promotion` | super_admin, admin | Bulk year-end promotion — moves students to the next form, resets finger slots, deactivates final-year students. |
-| `/users` | super_admin | Dashboard account management — create/edit/delete accounts, assign roles. At least one super_admin must always exist. |
-| `/unauthorized` | — | Shown when a user navigates to a page their role can't access. |
+| `/attendance` | All roles | Attendance records with date, period, member, unit filters. `teacher`/`staff` see only their unit. |
+| `/students` | All roles | Member roster. `teacher`/`staff` see only their unit, no edit controls. |
+| `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, set display names. |
+| `/academic` | super_admin, admin, platform_admin | Academic periods and school holidays. |
+| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. |
+| `/promotion` | super_admin, admin, platform_admin | Bulk year-end promotion — moves members to the next group, resets finger slots, deactivates final-year members. |
+| `/users` | super_admin, platform_admin | Dashboard account management — create/edit/delete accounts, assign roles. At least one super_admin must always exist. |
+| `/unauthorized` | — | Shown when a user navigates to a page their role cannot access. |
 
 ---
 
-## Device Authentication
+## Device Authentication & Provisioning
 
-ESP32 devices authenticate using an `x-device-secret` header on all API calls. The pg_cron mark-absent job uses a Bearer token. Both secrets are environment variables on the Next.js server.
+### Provisioning (new devices)
 
----
+1. Device boots with no `device_identity.json` in SPIFFS.
+2. Calls `POST /register` with its MAC address (`x-bootstrap-secret` header).
+3. Receives a `device_id` and `status: "pending"`.
+4. Shows yellow breathing LED and polls `POST /assignment-poll` every 5 s.
+5. An admin assigns the device from the dashboard `/devices` page.
+6. Poll returns `status: "assigned"` with `institution_id`, `device_secret`, `display_name`.
+7. Device writes `device_identity.json` to SPIFFS and begins normal operation.
 
-## Session Behaviour
+### Normal operation
 
-- Sessions use Supabase Auth cookies managed entirely server-side.
-- `frontend/components/session-manager.tsx` enforces a 10-minute inactivity timeout client-side.
-- A `sessionStorage` flag (`app_session_active`) guards against cross-tab session reuse — navigating to the dashboard in a new tab signs the user out.
-- Login rate-limiting: 3 failed attempts trigger a 5-minute client-side lockout (stored in `localStorage`).
+- Every scan: `POST /log-attendance` with `x-device-secret: <per-institution secret>`.
+- Enrollment polling: `POST /get-enrollment-job` with `{ device_id }`.
+- Enrollment result: `POST /update-enrollment-job` with `{ id, institution_id, status, ... }`.
+- `pg_cron` calls `POST /mark-absent` daily with `x-cron-secret` (set in Supabase Vault).
+
+### OTA
+
+Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest` on boot. Releases must be tagged `firmware-v<version>` (e.g. `firmware-v1.1.6`). The `.bin` asset is downloaded and flashed via the ESP32 `Update` library.
 
 ---
 
@@ -173,63 +201,57 @@ ESP32 devices authenticate using an `x-device-secret` header on all API calls. T
 
 ```
 esp32-attendance-device/
-├── README.md                                    ← you are here
+├── README.md
 ├── firmware/
-│   └── ClassAttendance_Current_RTC.ino          ← ESP32 firmware
+│   └── ClassAttendance_Current_RTC/
+│       └── ClassAttendance_Current_RTC.ino   ← ESP32 firmware (Phase 3)
 ├── backend/
 │   └── supabase/
-│       └── migrations/                          ← all DB migrations (apply in order)
+│       ├── config.toml                        ← edge function config (verify_jwt = false for all)
+│       ├── migrations/                        ← Migrations A–I applied to cloud
+│       └── functions/
+│           ├── log-attendance/
+│           ├── mark-absent/
+│           ├── get-enrollment-job/
+│           ├── update-enrollment-job/
+│           ├── register/                      ← new in Phase 2
+│           └── assignment-poll/               ← new in Phase 2
 └── frontend/
-    ├── proxy.ts                                 ← Next.js middleware (NOT middleware.ts)
-    ├── AGENTS.md                                ← read before writing any Next.js code
+    ├── proxy.ts                               ← Next.js middleware (NOT middleware.ts)
+    ├── AGENTS.md                              ← read before writing any Next.js code
     ├── app/
-    │   ├── (auth)/login/                        ← login page
-    │   ├── (dashboard)/                         ← all protected pages
-    │   │   ├── layout.tsx                       ← verifySession, passes role to nav
+    │   ├── (auth)/login/
+    │   ├── (dashboard)/
+    │   │   ├── layout.tsx                     ← verifySession, passes role to nav
     │   │   ├── attendance/
-    │   │   ├── students/
+    │   │   ├── students/                      ← to be renamed members/ in Phase 4
     │   │   ├── devices/
     │   │   ├── academic/
     │   │   ├── enrollment/
     │   │   ├── promotion/
     │   │   └── users/
     │   ├── api/
-    │   │   ├── signin/                          ← sets Supabase auth cookies
-    │   │   └── signout/                         ← clears Supabase auth cookies
-    │   └── unauthorized/                        ← access denied page
+    │   │   ├── signin/
+    │   │   └── signout/
+    │   └── unauthorized/
     ├── lib/
     │   └── supabase/
-    │       ├── dal.ts                           ← verifySession, requireRole, UserRole
-    │       └── server.ts                        ← createAuthClient, createAdminClient
+    │       ├── dal.ts                         ← verifySession, requireRole, UserRole
+    │       └── server.ts                      ← createAuthClient, createAdminClient
     └── components/
-        ├── sidebar.tsx                          ← desktop nav, role-filtered
-        ├── mobile-bottom-nav.tsx                ← mobile nav, role-filtered
-        └── session-manager.tsx                  ← inactivity timeout + sessionStorage guard
+        ├── sidebar.tsx
+        ├── mobile-bottom-nav.tsx
+        └── session-manager.tsx                ← inactivity timeout + sessionStorage guard
 ```
 
 ---
 
-## Getting Started
+## Phase Status
 
-### 1. Start Supabase
-
-```bash
-supabase start
-supabase migration up
-```
-
-Insert a super_admin profile row (see [Creating the first super_admin](#creating-the-first-super_admin)).
-
-### 2. Run the dashboard
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The dashboard is available at `http://localhost:3000`.
-
-### 3. Flash a device
-
-Open `firmware/ClassAttendance_Current_RTC.ino` in Arduino IDE, fill in WiFi credentials and the Cloudflare Tunnel URL, select the ESP32 board, and upload.
+| Phase | Description | Status |
+|---|---|---|
+| 1 | Cloud deployment (single-tenant) | ✅ Complete |
+| 2 | Multi-tenant schema + edge functions | ✅ Complete |
+| 3 | Firmware provisioning flow | ✅ Complete |
+| 4 | Frontend — de-brand, institution config, devices page, settings | 🔲 Not started |
+| 5 | Captive portal — WiFi-only, remove class fields | ✅ Done (completed in Phase 3) |

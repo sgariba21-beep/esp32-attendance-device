@@ -5,7 +5,7 @@ import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function StudentsPage() {
-  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher')
+  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher', 'staff')
   const supabase = createAdminClient()
 
   const [studentsRes, devicesRes] = await Promise.all([
@@ -24,7 +24,7 @@ export default async function StudentsPage() {
   const allStudents = (studentsRes.data ?? []) as unknown as StudentWithDevice[]
 
   // Teachers only see students from their assigned class
-  const visibleStudents = role === 'teacher'
+  const visibleStudents = role === 'teacher' || role === 'staff'
     ? (() => {
         const teacherDevice = assignedUnit
           ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)

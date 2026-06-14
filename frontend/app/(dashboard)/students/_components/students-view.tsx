@@ -29,7 +29,7 @@ type Props = {
 type StatusFilter = 'all' | 'active' | 'inactive'
 
 export function StudentsView({ students, devices, role }: Props) {
-  const isTeacher = role === 'teacher'
+  const isTeacher = role === 'teacher' || role === 'staff'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<StudentWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
