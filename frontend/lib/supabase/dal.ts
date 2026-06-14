@@ -28,7 +28,8 @@ export const verifySession = cache(async () => {
 
 export async function requireRole(...roles: UserRole[]) {
   const session = await verifySession()
-  if (!roles.includes(session.role)) {
+  // platform_admin is a super-role that bypasses all page-level role checks
+  if (session.role !== 'platform_admin' && !roles.includes(session.role)) {
     redirect('/unauthorized')
   }
   return session
