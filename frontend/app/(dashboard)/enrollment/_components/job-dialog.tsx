@@ -12,6 +12,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
 import type { StudentOption } from '../_actions'
 import type { Device } from '@/lib/types'
+import { indefiniteArticle } from '@/lib/utils'
 
 type Command = 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
 type FingerSlot = 'fin1' | 'fin2'
@@ -41,9 +42,10 @@ const empty = {
 
 export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers }: Props) {
   const member = labelMember.toLowerCase()
+  const article = indefiniteArticle(labelMember)
   const COMMANDS: { value: Command; label: string; description: string }[] = [
-    { value: 'register',        label: 'Register',      description: `Enroll a fingerprint for a ${member}.` },
-    { value: 'delete',          label: 'Delete',        description: `Remove a ${member}'s fingerprint from the device.` },
+    { value: 'register',        label: 'Register',      description: `Enroll a fingerprint for ${article} ${member}.` },
+    { value: 'delete',          label: 'Delete',        description: `Remove ${article} ${member}'s fingerprint from the device.` },
     { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
     { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
     { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
@@ -84,7 +86,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.device_id) { setError('Please select a device.'); return }
-    if (needsStudent && !form.student_id) { setError(`Please select a ${member}.`); return }
+    if (needsStudent && !form.student_id) { setError(`Please select ${article} ${member}.`); return }
     if (needsMasterName && !form.master_name.trim()) { setError('Please enter a name for the master.'); return }
 
     setLoading(true)
@@ -212,7 +214,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
                 required
                 disabled={loadingStudents}
               >
-                <option value="">{loadingStudents ? 'Loading…' : `Select a ${member}…`}</option>
+                <option value="">{loadingStudents ? 'Loading…' : `Select ${article} ${member}…`}</option>
                 {deviceStudents.map((s) => (
                   <option key={s.id} value={s.id}>{s.fullname} ({s.sid})</option>
                 ))}

@@ -46,9 +46,12 @@ type Props = {
   currentUserId: string
   devices: DeviceOption[]
   labelUnit: string
+  labelStaff: string
+  institutionType: 'school' | 'office'
+  currentUserRole: UserRole
 }
 
-export function UsersView({ users, currentUserId, devices, labelUnit }: Props) {
+export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff, institutionType, currentUserRole }: Props) {
   const [dialogOpen, setDialogOpen]     = useState(false)
   const [editing, setEditing]           = useState<UserRow | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<UserRow | null>(null)
@@ -109,7 +112,7 @@ export function UsersView({ users, currentUserId, devices, labelUnit }: Props) {
                     </TableCell>
                     <TableCell>
                       <Badge variant={ROLE_BADGE[u.role]}>
-                        {ROLE_LABELS[u.role]}
+                        {u.role === 'teacher' || u.role === 'staff' ? labelStaff : ROLE_LABELS[u.role]}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
@@ -148,7 +151,16 @@ export function UsersView({ users, currentUserId, devices, labelUnit }: Props) {
         </div>
       )}
 
-      <UserDialog open={dialogOpen} onOpenChange={setDialogOpen} user={editing} devices={devices} labelUnit={labelUnit} />
+      <UserDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        user={editing}
+        devices={devices}
+        labelUnit={labelUnit}
+        labelStaff={labelStaff}
+        institutionType={institutionType}
+        currentUserRole={currentUserRole}
+      />
 
       <ConfirmDialog
         open={confirmTarget !== null}

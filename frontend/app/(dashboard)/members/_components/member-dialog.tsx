@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { createMember, updateMember } from '../_actions'
 import { createEnrollmentJob } from '../../enrollment/_actions'
+import { indefiniteArticle } from '@/lib/utils'
 import type { MemberWithDevice } from '../page'
 import type { Device } from '@/lib/types'
 
@@ -209,7 +210,7 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.device_id) { setError(`Please select a ${labels.label_unit.toLowerCase()}.`); return }
+    if (!form.device_id) { setError(`Please select ${indefiniteArticle(labels.label_unit)} ${labels.label_unit.toLowerCase()}.`); return }
 
     setLoading(true)
     setError(null)
@@ -307,7 +308,7 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
               onChange={(e) => set('device_id', e.target.value)}
               required
             >
-              <option value="">Select a {labels.label_unit.toLowerCase()}…</option>
+              <option value="">Select {indefiniteArticle(labels.label_unit)} {labels.label_unit.toLowerCase()}…</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.group_name} {d.unit_name}

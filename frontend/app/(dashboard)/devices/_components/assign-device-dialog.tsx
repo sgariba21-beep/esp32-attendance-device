@@ -100,7 +100,7 @@ export function AssignDeviceDialog({ open, onOpenChange, device, institutions }:
               id="group_name"
               value={form.group_name}
               onChange={(e) => set('group_name', e.target.value)}
-              placeholder="e.g. Form 1, Year 2"
+              placeholder="e.g. Form 1, Sales"
               required
             />
           </div>
@@ -122,7 +122,7 @@ export function AssignDeviceDialog({ open, onOpenChange, device, institutions }:
               id="display_name"
               value={form.display_name}
               onChange={(e) => set('display_name', e.target.value)}
-              placeholder="e.g. Form 1 Blue"
+              placeholder="e.g. Form 1 Blue, Sales East"
               required
             />
             <p className="text-xs text-muted-foreground">Shown on the device's captive portal.</p>

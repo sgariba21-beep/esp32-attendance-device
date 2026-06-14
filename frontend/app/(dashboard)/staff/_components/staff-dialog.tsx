@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { createStaffMember, updateStaffMember } from '../_actions'
 import { createEnrollmentJob } from '../../enrollment/_actions'
+import { indefiniteArticle } from '@/lib/utils'
 import type { Device } from '@/lib/types'
 
 type MemberWithDevice = {
@@ -144,7 +145,7 @@ export function StaffDialog({ open, onOpenChange, member, devices, usedFids, lab
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.device_id) { setError(`Please select a ${labels.label_unit.toLowerCase()}.`); return }
+    if (!form.device_id) { setError(`Please select ${indefiniteArticle(labels.label_unit)} ${labels.label_unit.toLowerCase()}.`); return }
     setLoading(true); setError(null)
 
     if (member) {
@@ -206,7 +207,7 @@ export function StaffDialog({ open, onOpenChange, member, devices, usedFids, lab
           <div className="space-y-2">
             <Label htmlFor="device_id">{labels.label_unit}</Label>
             <NativeSelect id="device_id" value={form.device_id} onChange={(e) => set('device_id', e.target.value)} required>
-              <option value="">Select a {labels.label_unit.toLowerCase()}…</option>
+              <option value="">Select {indefiniteArticle(labels.label_unit)} {labels.label_unit.toLowerCase()}…</option>
               {devices.map((d) => (
                 <option key={d.id} value={d.id}>{d.group_name} {d.unit_name}</option>
               ))}

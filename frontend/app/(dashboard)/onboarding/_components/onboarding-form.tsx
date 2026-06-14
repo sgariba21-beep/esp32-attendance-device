@@ -94,7 +94,7 @@ export function OnboardingForm() {
             id="institution_name"
             value={form.institution_name}
             onChange={(e) => set('institution_name', e.target.value)}
-            placeholder="Westside Academy"
+            placeholder="e.g. Westside Academy or Acme Corp"
             required
           />
         </div>
@@ -195,7 +195,7 @@ export function OnboardingForm() {
             type="email"
             value={form.admin_email}
             onChange={(e) => set('admin_email', e.target.value)}
-            placeholder="admin@westside.edu"
+            placeholder="admin@example.com"
             required
           />
         </div>

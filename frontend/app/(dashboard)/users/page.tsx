@@ -4,7 +4,7 @@ import { UsersView } from './_components/users-view'
 import type { UserRole } from '@/lib/supabase/dal'
 
 export default async function UsersPage() {
-  const { user: currentUser, institutionId } = await requireRole('super_admin', 'platform_admin')
+  const { user: currentUser, role: currentUserRole, institutionId } = await requireRole('super_admin', 'platform_admin')
   const institution = await getInstitution(institutionId)
   const admin = createAdminClient()
 
@@ -40,6 +40,9 @@ export default async function UsersPage() {
       currentUserId={currentUser.id}
       devices={(devices ?? []) as { id: string; group_name: string; unit_name: string }[]}
       labelUnit={institution.label_unit}
+      labelStaff={institution.label_staff}
+      institutionType={institution.type}
+      currentUserRole={currentUserRole}
     />
   )
 }

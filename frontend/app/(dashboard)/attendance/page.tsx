@@ -133,6 +133,14 @@ export default async function AttendancePage({
 
   const { data: records, count } = await query
 
+  // The records table spans every tracked member type, so its member-column header
+  // reflects all of them (e.g. "Student / Teacher") rather than a single type.
+  const memberHeaderParts = [institution.label_member]
+  if (institution.track_students && institution.track_staff) {
+    memberHeaderParts.push(institution.label_staff)
+  }
+  const memberHeader = memberHeaderParts.join(' / ')
+
   return (
     <>
       <RealtimeRefresh />
@@ -153,7 +161,7 @@ export default async function AttendancePage({
         track_staff={institution.track_staff}
         institutionType={institution.type}
         labels={{
-          label_member: institution.label_member,
+          label_member: memberHeader,
           label_members: institution.label_members,
           label_staff: institution.label_staff,
           label_staff_plural: institution.label_staff_plural,

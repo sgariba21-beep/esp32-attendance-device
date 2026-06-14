@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { SingleSelect } from './single-select'
 import { createUser, updateUserRole } from '../_actions'
+import { indefiniteArticle } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { UserRow } from './users-view'
 
@@ -21,32 +22,58 @@ type Props = {
   user: UserRow | null
   devices: DeviceOption[]
   labelUnit: string
+  labelStaff: string
+  institutionType: 'school' | 'office'
+  currentUserRole: UserRole
 }
 
-const ROLES: { value: UserRole; label: string }[] = [
-  { value: 'super_admin',   label: 'Super Admin'   },
-  { value: 'admin',         label: 'Admin'         },
-  { value: 'teacher',       label: 'Teacher'       },
-  { value: 'staff',         label: 'Staff'         },
-  { value: 'platform_admin', label: 'Platform Admin' },
-]
+const ROLE_DISPLAY: Record<UserRole, string> = {
+  super_admin:    'Super Admin',
+  admin:          'Admin',
+  teacher:        'Teacher',
+  staff:          'Staff',
+  platform_admin: 'Platform Admin',
+}
 
-export function UserDialog({ open, onOpenChange, user, devices, labelUnit }: Props) {
+export function UserDialog({ open, onOpenChange, user, devices, labelUnit, labelStaff, institutionType, currentUserRole }: Props) {
+  // The unit-scoped viewer role is called "Teacher" in schools and "Staff" in
+  // offices — same access, institution-appropriate wording.
+  const unitScopedRole: UserRole = institutionType === 'office' ? 'staff' : 'teacher'
+
+  const roles: { value: UserRole; label: string }[] = [
+    { value: 'super_admin', label: 'Super Admin' },
+    { value: 'admin',       label: 'Admin' },
+    { value: unitScopedRole, label: labelStaff },
+  ]
+  // Only a platform admin may grant the platform-admin role.
+  if (currentUserRole === 'platform_admin') {
+    roles.push({ value: 'platform_admin', label: 'Platform Admin' })
+  }
+
   const [email, setEmail]             = useState('')
   const [password, setPassword]       = useState('')
-  const [role, setRole]               = useState<UserRole>('teacher')
+  const [role, setRole]               = useState<UserRole>(unitScopedRole)
   const [assignedUnit, setAssignedUnit] = useState('')
   const [error, setError]             = useState<string | null>(null)
   const [loading, setLoading]         = useState(false)
+
+  // When editing an account whose role isn't in the offered list (e.g. a legacy
+  // 'teacher' inside an office), keep it selectable so it isn't silently changed.
+  if (user && !roles.some((r) => r.value === user.role)) {
+    roles.push({ value: user.role, label: ROLE_DISPLAY[user.role] })
+  }
+
+  const isUnitScoped = role === 'teacher' || role === 'staff'
 
   useEffect(() => {
     if (open) {
       setError(null)
       setEmail('')
       setPassword('')
-      setRole(user?.role ?? 'teacher')
+      setRole(user?.role ?? unitScopedRole)
       setAssignedUnit(user?.assigned_unit ?? '')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -80,7 +107,7 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit }: Pro
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@school.edu"
+                  placeholder="name@example.com"
                   autoComplete="off"
                   required
                 />
@@ -113,13 +140,13 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit }: Pro
               value={role}
               onChange={(e) => setRole(e.target.value as UserRole)}
             >
-              {ROLES.map((r) => (
+              {roles.map((r) => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </NativeSelect>
           </div>
 
-          {role === 'teacher' && (
+          {isUnitScoped && (
             <div className="space-y-2">
               <Label>Assigned {labelUnit.toLowerCase()}</Label>
               <SingleSelect
@@ -129,10 +156,10 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit }: Pro
                   .map((d) => ({ value: `${d.group_name} ${d.unit_name}`, label: `${d.group_name} ${d.unit_name}` }))}
                 value={assignedUnit}
                 onChange={setAssignedUnit}
-                placeholder={`Select a ${labelUnit.toLowerCase()}…`}
+                placeholder={`Select ${indefiniteArticle(labelUnit)} ${labelUnit.toLowerCase()}…`}
               />
               <p className="text-xs text-muted-foreground">
-                Teachers only see attendance records for this {labelUnit.toLowerCase()}.
+                This account only sees attendance records for the assigned {labelUnit.toLowerCase()}.
               </p>
             </div>
           )}

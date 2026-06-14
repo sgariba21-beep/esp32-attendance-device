@@ -11,7 +11,13 @@ export async function createUser(data: {
   role: UserRole
   assigned_unit: string | null
 }) {
-  await requireRole('super_admin')
+  const session = await requireRole('super_admin')
+
+  // Only a platform admin may grant the platform-admin role.
+  if (data.role === 'platform_admin' && session.role !== 'platform_admin') {
+    return { error: 'You are not allowed to assign the platform admin role.' }
+  }
+
   const admin = createAdminClient()
 
   const { data: authData, error } = await admin.auth.admin.createUser({
@@ -26,6 +32,9 @@ export async function createUser(data: {
     id: authData.user.id,
     role: data.role,
     assigned_unit: data.assigned_unit || null,
+    // Scope the new account to the creator's institution so it can't see other
+    // tenants' data. Platform admins (institutionId = null) create platform-level accounts.
+    institution_id: session.institutionId,
   })
 
   if (profileError) {
@@ -47,7 +56,13 @@ async function superAdminCount() {
 }
 
 export async function updateUserRole(id: string, role: UserRole, assigned_unit: string | null) {
-  await requireRole('super_admin')
+  const session = await requireRole('super_admin')
+
+  // Only a platform admin may grant the platform-admin role.
+  if (role === 'platform_admin' && session.role !== 'platform_admin') {
+    return { error: 'You are not allowed to assign the platform admin role.' }
+  }
+
   const admin = createAdminClient()
 
   if (role !== 'super_admin') {

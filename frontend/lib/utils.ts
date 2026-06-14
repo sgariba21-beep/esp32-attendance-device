@@ -20,3 +20,13 @@ export function pluralize(word: string): string {
   if (/[^aeiou]y$/.test(lower)) return word.slice(0, -1) + (word.slice(-1) === 'Y' ? 'IES' : 'ies')
   return word + 's'
 }
+
+/**
+ * Pick "a" or "an" for a word based on its leading sound (letter heuristic).
+ * Used so label-driven copy reads correctly: "an Employee", "a Student",
+ * "a Branch", "an Office". Falls back gracefully on combined labels like
+ * "Student / Teacher" (keys off the first character).
+ */
+export function indefiniteArticle(word: string): string {
+  return /^[aeiou]/i.test(word.trim()) ? 'an' : 'a'
+}

@@ -105,7 +105,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
             <option value="school">School</option>
             <option value="office">Office</option>
           </select>
-          <p className="text-xs text-muted-foreground">Office type hides the Promotion feature.</p>
+          <p className="text-xs text-muted-foreground">Office type tracks staff only and hides the Academic and Promotion features.</p>
         </div>
 
         <div className="space-y-2">
