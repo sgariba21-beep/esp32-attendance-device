@@ -15,7 +15,7 @@ export async function getStudentsByDevice(deviceId: string): Promise<StudentOpti
   await requireRole('super_admin')
   const supabase = createAdminClient()
   const { data } = await supabase
-    .from('students')
+    .from('members')
     .select('id, fullname, sid, device_id')
     .eq('status', 'active')
     .eq('device_id', deviceId)

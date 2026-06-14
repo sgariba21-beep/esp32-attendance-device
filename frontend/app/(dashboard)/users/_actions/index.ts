@@ -9,7 +9,7 @@ export async function createUser(data: {
   email: string
   password: string
   role: UserRole
-  assigned_class: string | null
+  assigned_unit: string | null
 }) {
   await requireRole('super_admin')
   const admin = createAdminClient()
@@ -25,7 +25,7 @@ export async function createUser(data: {
   const { error: profileError } = await admin.from('profiles').insert({
     id: authData.user.id,
     role: data.role,
-    assigned_class: data.assigned_class || null,
+    assigned_unit: data.assigned_unit || null,
   })
 
   if (profileError) {
@@ -46,7 +46,7 @@ async function superAdminCount() {
   return count ?? 0
 }
 
-export async function updateUserRole(id: string, role: UserRole, assigned_class: string | null) {
+export async function updateUserRole(id: string, role: UserRole, assigned_unit: string | null) {
   await requireRole('super_admin')
   const admin = createAdminClient()
 
@@ -59,7 +59,7 @@ export async function updateUserRole(id: string, role: UserRole, assigned_class:
 
   const { error } = await admin
     .from('profiles')
-    .update({ role, assigned_class: assigned_class || null })
+    .update({ role, assigned_unit: assigned_unit || null })
     .eq('id', id)
 
   if (error) return { error: error.message }

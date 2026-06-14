@@ -6,7 +6,6 @@ const supabase = createClient(
 );
 
 Deno.serve(async (req: Request) => {
-  // Only allow POST requests
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -14,45 +13,61 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Authenticate the device — every ESP32 must send the shared secret as X-Device-Secret.
-  // The secret lives in an env var so it never appears in source code.
-  if (req.headers.get("x-device-secret") !== Deno.env.get("DEVICE_SHARED_SECRET")) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const { institution_id, sid, scan_id, timestamp } = await req.json();
 
-  // Parse the request body
-  const { sid, scan_id, timestamp } = await req.json();
-
-  // Validate required fields
-  if (!sid || !scan_id || !timestamp) {
+  if (!institution_id || !sid || !scan_id || !timestamp) {
     return new Response(JSON.stringify({ error: "Missing required fields" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Parse date and time from timestamp
-  const dt = new Date(timestamp);
-  const date = dt.toISOString().split("T")[0];             // "2025-06-02"
-  const time = dt.toISOString().split("T")[1].slice(0, 8); // "08:30:00"
+  // Look up institution to validate per-institution secret and read config.
+  // Auth failure returns the same 401 whether the institution doesn't exist
+  // or the secret is wrong — no enumeration of valid institution IDs.
+  const { data: institution, error: instError } = await supabase
+    .from("institutions")
+    .select("device_secret, skip_weekends")
+    .eq("id", institution_id)
+    .single();
 
-  // Check 1: Skip weekends (0 = Sunday, 6 = Saturday)
-  const dayOfWeek = dt.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 6) {
-    return new Response(
-      JSON.stringify({ message: "Weekend — scan ignored" }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+  if (instError || !institution) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  // Check 2: Skip public holidays
+  if (req.headers.get("x-device-secret") !== institution.device_secret) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const dt = new Date(timestamp);
+  const date = dt.toISOString().split("T")[0];
+  const time = dt.toISOString().split("T")[1].slice(0, 8);
+
+  // Read skip_weekends from institution config, not hardcoded.
+  if (institution.skip_weekends) {
+    const dayOfWeek = dt.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return new Response(
+        JSON.stringify({ message: "Weekend — scan ignored" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+  }
+
+  // Holiday check: range overlap (today BETWEEN start_date AND end_date).
+  // Replaces the old exact .eq("date", date) match.
   const { data: holiday } = await supabase
     .from("holidays")
     .select("label")
-    .eq("date", date)
+    .eq("institution_id", institution_id)
+    .lte("start_date", date)
+    .gte("end_date", date)
     .maybeSingle();
 
   if (holiday) {
@@ -62,69 +77,66 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // Look up the student by school ID
-  const { data: student, error: studentError } = await supabase
-    .from("students")
+  // Look up member by sid, scoped to institution.
+  const { data: member, error: memberError } = await supabase
+    .from("members")
     .select("id, device_id")
     .eq("sid", sid)
+    .eq("institution_id", institution_id)
     .eq("status", "active")
     .single();
 
-  if (studentError || !student) {
-    return new Response(JSON.stringify({ error: "Student not found" }), {
+  if (memberError || !member) {
+    return new Response(JSON.stringify({ error: "Member not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // Find the currently active academic record
-  const { data: academic, error: academicError } = await supabase
-    .from("academic")
+  // Find active period — nullable result, no error if none exists (Decision 3).
+  // Office-type institutions have no period concept and attendance inserts
+  // with period_id = null.
+  const { data: period } = await supabase
+    .from("periods")
     .select("id, start_date, end_date")
+    .eq("institution_id", institution_id)
     .eq("status", "active")
-    .single();
+    .maybeSingle();
 
-  if (academicError || !academic) {
-    return new Response(JSON.stringify({ error: "No active academic term" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
+  if (period) {
+    if (period.start_date && date < period.start_date) {
+      return new Response(
+        JSON.stringify({ message: "Before period start — scan ignored" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    if (period.end_date && date > period.end_date) {
+      return new Response(
+        JSON.stringify({ message: "After period end — scan ignored" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }
 
-  // Check 3: Skip if outside the active term's date range
-  if (academic.start_date && date < academic.start_date) {
-    return new Response(
-      JSON.stringify({ message: "Before term start — scan ignored" }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
-  }
-  if (academic.end_date && date > academic.end_date) {
-    return new Response(
-      JSON.stringify({ message: "After term end — scan ignored" }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  // Insert attendance record
   const { error: insertError } = await supabase
     .from("attendance")
     .insert({
-      sid: student.id,
-      academic_id: academic.id,
-      device_id: student.device_id,
+      member_id: member.id,
+      period_id: period?.id ?? null,
+      device_id: member.device_id,
+      institution_id,
       date,
       time,
       status: "present",
       scan_id,
     });
 
-  // If scan_id already exists, treat it as a duplicate and return success
   if (insertError) {
     if (insertError.code === "23505") {
-      return new Response(JSON.stringify({ message: "Duplicate scan ignored" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ message: "Duplicate scan ignored" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
     }
     return new Response(JSON.stringify({ error: insertError.message }), {
       status: 500,

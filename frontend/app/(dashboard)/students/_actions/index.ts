@@ -18,19 +18,19 @@ export async function createStudent(data: StudentFormData) {
 
   const device = await supabase
     .from('devices')
-    .select('form')
+    .select('group_name')
     .eq('id', data.device_id)
     .single()
 
   if (!device.data) return { error: 'Device not found.', id: null }
 
   const { data: newStudent, error } = await supabase
-    .from('students')
+    .from('members')
     .insert({
       sid: data.sid.trim(),
       fullname: data.fullname.trim(),
       device_id: data.device_id,
-      form: device.data.form,
+      group_name: device.data.group_name,
       fin1: 0,
       fin2: 0,
       status: 'active',
@@ -53,19 +53,19 @@ export async function updateStudent(id: string, data: StudentFormData) {
 
   const device = await supabase
     .from('devices')
-    .select('form')
+    .select('group_name')
     .eq('id', data.device_id)
     .single()
 
   if (!device.data) return { error: 'Device not found.' }
 
   const { error } = await supabase
-    .from('students')
+    .from('members')
     .update({
       sid: data.sid.trim(),
       fullname: data.fullname.trim(),
       device_id: data.device_id,
-      form: device.data.form,
+      group_name: device.data.group_name,
       // fin1/fin2 are managed exclusively by the enrollment workflow — never touched here
     })
     .eq('id', id)
@@ -84,7 +84,7 @@ export async function setStudentStatus(id: string, status: 'active' | 'inactive'
   const supabase = createAdminClient()
 
   const { error } = await supabase
-    .from('students')
+    .from('members')
     .update({ status })
     .eq('id', id)
 

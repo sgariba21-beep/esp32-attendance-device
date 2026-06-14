@@ -19,24 +19,24 @@ import {
 } from 'lucide-react'
 
 const primaryNav = [
-  { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher'] },
-  { href: '/students',   label: 'Students',   icon: Users,        roles: ['super_admin', 'admin', 'teacher'] },
-  { href: '/devices',    label: 'Devices',    icon: Cpu,          roles: ['super_admin']                    },
-  { href: '/academic',   label: 'Academic',   icon: BookOpen,     roles: ['super_admin', 'admin']            },
+  { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'platform_admin'] },
+  { href: '/students',   label: 'Students',   icon: Users,        roles: ['super_admin', 'admin', 'teacher', 'platform_admin'] },
+  { href: '/devices',    label: 'Devices',    icon: Cpu,          roles: ['super_admin', 'platform_admin']                    },
+  { href: '/academic',   label: 'Academic',   icon: BookOpen,     roles: ['super_admin', 'admin', 'platform_admin']            },
 ] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
 
 const moreNav = [
-  { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin']           },
-  { href: '/promotion',  label: 'Promotion',  icon: ArrowUpCircle, roles: ['super_admin', 'admin']  },
-  { href: '/users',      label: 'Accounts',   icon: ShieldCheck,   roles: ['super_admin']           },
+  { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin']           },
+  { href: '/promotion',  label: 'Promotion',  icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin']  },
+  { href: '/users',      label: 'Accounts',   icon: ShieldCheck,   roles: ['super_admin', 'platform_admin']           },
 ] satisfies { href: string; label: string; icon: React.ElementType; roles: UserRole[] }[]
 
 export function MobileBottomNav({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
 
-  const visiblePrimary = primaryNav.filter((item) => item.roles.includes(role))
-  const visibleMore = moreNav.filter((item) => item.roles.includes(role))
+  const visiblePrimary = primaryNav.filter((item) => (item.roles as UserRole[]).includes(role))
+  const visibleMore = moreNav.filter((item) => (item.roles as UserRole[]).includes(role))
   const isMoreActive = visibleMore.some((item) => pathname.startsWith(item.href))
 
   async function handleSignOut() {

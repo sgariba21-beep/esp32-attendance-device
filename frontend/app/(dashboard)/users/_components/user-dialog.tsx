@@ -13,7 +13,7 @@ import { createUser, updateUserRole } from '../_actions'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { UserRow } from './users-view'
 
-type DeviceOption = { id: string; form: string; class: string }
+type DeviceOption = { id: string; group_name: string; unit_name: string }
 
 type Props = {
   open: boolean
@@ -23,18 +23,20 @@ type Props = {
 }
 
 const ROLES: { value: UserRole; label: string }[] = [
-  { value: 'super_admin', label: 'Super Admin' },
-  { value: 'admin',       label: 'Admin'       },
-  { value: 'teacher',     label: 'Teacher'     },
+  { value: 'super_admin',   label: 'Super Admin'   },
+  { value: 'admin',         label: 'Admin'         },
+  { value: 'teacher',       label: 'Teacher'       },
+  { value: 'staff',         label: 'Staff'         },
+  { value: 'platform_admin', label: 'Platform Admin' },
 ]
 
 export function UserDialog({ open, onOpenChange, user, devices }: Props) {
-  const [email, setEmail]               = useState('')
-  const [password, setPassword]         = useState('')
-  const [role, setRole]                 = useState<UserRole>('teacher')
-  const [assignedClass, setAssignedClass] = useState('')
-  const [error, setError]               = useState<string | null>(null)
-  const [loading, setLoading]           = useState(false)
+  const [email, setEmail]             = useState('')
+  const [password, setPassword]       = useState('')
+  const [role, setRole]               = useState<UserRole>('teacher')
+  const [assignedUnit, setAssignedUnit] = useState('')
+  const [error, setError]             = useState<string | null>(null)
+  const [loading, setLoading]         = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -42,7 +44,7 @@ export function UserDialog({ open, onOpenChange, user, devices }: Props) {
       setEmail('')
       setPassword('')
       setRole(user?.role ?? 'teacher')
-      setAssignedClass(user?.assigned_class ?? '')
+      setAssignedUnit(user?.assigned_unit ?? '')
     }
   }, [open, user])
 
@@ -52,8 +54,8 @@ export function UserDialog({ open, onOpenChange, user, devices }: Props) {
     setError(null)
 
     const result = user
-      ? await updateUserRole(user.id, role, assignedClass || null)
-      : await createUser({ email, password, role, assigned_class: assignedClass || null })
+      ? await updateUserRole(user.id, role, assignedUnit || null)
+      : await createUser({ email, password, role, assigned_unit: assignedUnit || null })
 
     setLoading(false)
     if (result.error) { setError(result.error); return }
@@ -122,10 +124,10 @@ export function UserDialog({ open, onOpenChange, user, devices }: Props) {
               <SingleSelect
                 options={devices
                   .slice()
-                  .sort((a, b) => a.form.localeCompare(b.form, undefined, { numeric: true }) || a.class.localeCompare(b.class))
-                  .map((d) => ({ value: `Form ${d.form} ${d.class}`, label: `Form ${d.form} ${d.class}` }))}
-                value={assignedClass}
-                onChange={setAssignedClass}
+                  .sort((a, b) => a.group_name.localeCompare(b.group_name, undefined, { numeric: true }) || a.unit_name.localeCompare(b.unit_name))
+                  .map((d) => ({ value: `${d.group_name} ${d.unit_name}`, label: `${d.group_name} ${d.unit_name}` }))}
+                value={assignedUnit}
+                onChange={setAssignedUnit}
                 placeholder="Select a class…"
               />
               <p className="text-xs text-muted-foreground">

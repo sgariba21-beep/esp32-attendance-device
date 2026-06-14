@@ -35,7 +35,7 @@ export function EnrollFingerDialog({ open, onOpenChange, student, slot, defaultF
 
   const fingerLabel = slot === 'fin1' ? 'Finger 1' : 'Finger 2'
   const deviceName = student.device
-    ? `${student.device.form} ${student.device.class}`
+    ? `${student.device.group_name} ${student.device.unit_name}`
     : 'Unknown class'
 
   async function handleSubmit(e: React.FormEvent) {

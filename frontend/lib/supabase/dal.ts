@@ -3,7 +3,7 @@ import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { createAuthClient, createAdminClient } from './server'
 
-export type UserRole = 'super_admin' | 'admin' | 'teacher'
+export type UserRole = 'super_admin' | 'admin' | 'teacher' | 'staff' | 'platform_admin'
 
 export const verifySession = cache(async () => {
   const supabase = await createAuthClient()
@@ -16,19 +16,20 @@ export const verifySession = cache(async () => {
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('role, assigned_class')
+    .select('role, assigned_unit')
     .eq('id', user!.id)
     .single()
 
-  const role = (profile?.role ?? 'teacher') as UserRole
-  const assignedClass = profile?.assigned_class as string | null ?? null
+  const role = (profile?.role ?? 'super_admin') as UserRole
+  const assignedUnit = profile?.assigned_unit as string | null ?? null
 
-  return { user: user!, role, assignedClass }
+  return { user: user!, role, assignedUnit }
 })
 
 export async function requireRole(...roles: UserRole[]) {
   const session = await verifySession()
-  if (!roles.includes(session.role)) {
+  // platform_admin is a super-role that bypasses all page-level role checks
+  if (session.role !== 'platform_admin' && !roles.includes(session.role)) {
     redirect('/unauthorized')
   }
   return session

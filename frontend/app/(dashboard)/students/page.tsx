@@ -5,19 +5,19 @@ import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function StudentsPage() {
-  const { role, assignedClass } = await requireRole('super_admin', 'admin', 'teacher')
+  const { role, assignedUnit } = await requireRole('super_admin', 'admin', 'teacher')
   const supabase = createAdminClient()
 
   const [studentsRes, devicesRes] = await Promise.all([
     supabase
-      .from('students')
-      .select('id, sid, fullname, form, fin1, fin2, status, device_id, created_at, device:device_id(id, form, class)')
+      .from('members')
+      .select('id, sid, fullname, group_name, fin1, fin2, status, device_id, created_at, device:device_id(id, group_name, unit_name)')
       .order('fullname'),
     supabase
       .from('devices')
-      .select('id, form, class')
-      .order('form')
-      .order('class'),
+      .select('id, group_name, unit_name')
+      .order('group_name')
+      .order('unit_name'),
   ])
 
   const allDevices = (devicesRes.data ?? []) as Device[]
@@ -26,8 +26,8 @@ export default async function StudentsPage() {
   // Teachers only see students from their assigned class
   const visibleStudents = role === 'teacher'
     ? (() => {
-        const teacherDevice = assignedClass
-          ? allDevices.find((d) => `Form ${d.form} ${d.class}` === assignedClass)
+        const teacherDevice = assignedUnit
+          ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
           : null
         return teacherDevice
           ? allStudents.filter((s) => s.device_id === teacherDevice.id)
@@ -51,11 +51,11 @@ export type StudentWithDevice = {
   id: string
   sid: string
   fullname: string
-  form: string
+  group_name: string
   fin1: number
   fin2: number
   status: 'active' | 'inactive'
   created_at: string
   device_id: string
-  device: { id: string; form: string; class: string } | null
+  device: { id: string; group_name: string; unit_name: string } | null
 }

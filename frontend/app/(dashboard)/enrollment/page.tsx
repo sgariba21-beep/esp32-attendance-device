@@ -13,7 +13,7 @@ export type EnrollmentJob = {
   fid: number | null
   note: string | null
   created_at: string
-  device: { id: string; form: string; class: string } | null
+  device: { id: string; group_name: string; unit_name: string } | null
   student: { id: string; fullname: string; sid: string } | null
 }
 
@@ -26,16 +26,16 @@ export default async function EnrollmentPage() {
       .from('enrollment_jobs')
       .select(`
         id, command, status, finger_slot, fid, note, created_at,
-        device:device_id(id, form, class),
+        device:device_id(id, group_name, unit_name),
         student:student_id(id, fullname, sid)
       `)
       .order('created_at', { ascending: false })
       .limit(100),
     supabase
       .from('devices')
-      .select('id, form, class')
-      .order('form')
-      .order('class'),
+      .select('id, group_name, unit_name')
+      .order('group_name')
+      .order('unit_name'),
   ])
 
   return (

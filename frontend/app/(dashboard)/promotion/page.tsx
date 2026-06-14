@@ -26,61 +26,61 @@ export default async function PromotionPage() {
 
   const [studentsRes, devicesRes] = await Promise.all([
     supabase
-      .from('students')
-      .select('id, sid, fullname, form, device_id, device:device_id(form, class)')
+      .from('members')
+      .select('id, sid, fullname, group_name, device_id, device:device_id(group_name, unit_name)')
       .eq('status', 'active')
       .order('fullname'),
     supabase
       .from('devices')
-      .select('id, form, class')
-      .order('form')
-      .order('class'),
+      .select('id, group_name, unit_name')
+      .order('group_name')
+      .order('unit_name'),
   ])
 
   const students = studentsRes.data ?? []
   const devices = devicesRes.data ?? []
 
-  // Sorted form sequence (natural numeric: Form 1 → Form 2 → Form 3)
-  const sortedForms = [...new Set(devices.map((d) => d.form))].sort((a, b) =>
+  // Sorted group sequence (natural numeric: Form 1 → Form 2 → Form 3)
+  const sortedForms = [...new Set(devices.map((d) => d.group_name))].sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   )
 
   // Fast lookup: "Form 2|A" → device id
   const deviceByKey = new Map<string, string>()
   for (const d of devices) {
-    deviceByKey.set(`${d.form}|${d['class']}`, d.id)
+    deviceByKey.set(`${d.group_name}|${d.unit_name}`, d.id)
   }
 
-  // Group students by current form
+  // Group students by current group_name
   const groupMap = new Map<string, PromotionGroup>()
 
   for (const s of students) {
-    const device = s.device as unknown as { form: string; class: string } | null
+    const device = s.device as unknown as { group_name: string; unit_name: string } | null
     if (!device) continue
 
-    const idx = sortedForms.indexOf(s.form)
-    if (idx === -1) continue // unknown form — skip
+    const idx = sortedForms.indexOf(s.group_name)
+    if (idx === -1) continue // unknown group — skip
 
     const toForm = idx === sortedForms.length - 1 ? null : sortedForms[idx + 1]
     const targetDeviceId = toForm
-      ? (deviceByKey.get(`${toForm}|${device['class']}`) ?? null)
+      ? (deviceByKey.get(`${toForm}|${device.unit_name}`) ?? null)
       : null  // deactivating — no device needed
 
     const ps: PromotionStudent = {
       id: s.id,
       sid: s.sid,
       fullname: s.fullname,
-      fromForm: s.form,
-      fromClass: device['class'],
+      fromForm: s.group_name,
+      fromClass: device.unit_name,
       toForm,
       targetDeviceId,
     }
 
-    if (!groupMap.has(s.form)) {
-      groupMap.set(s.form, { fromForm: s.form, toForm, matched: [], unmatched: [] })
+    if (!groupMap.has(s.group_name)) {
+      groupMap.set(s.group_name, { fromForm: s.group_name, toForm, matched: [], unmatched: [] })
     }
 
-    const group = groupMap.get(s.form)!
+    const group = groupMap.get(s.group_name)!
     // Deactivations (toForm === null) always go in matched — no device needed
     if (toForm === null || targetDeviceId !== null) {
       group.matched.push(ps)
@@ -89,7 +89,7 @@ export default async function PromotionPage() {
     }
   }
 
-  // Return groups in sorted form order
+  // Return groups in sorted group order
   const groups: PromotionGroup[] = sortedForms
     .map((f) => groupMap.get(f))
     .filter((g): g is PromotionGroup => g !== undefined)

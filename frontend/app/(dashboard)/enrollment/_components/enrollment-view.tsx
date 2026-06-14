@@ -25,8 +25,8 @@ const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'd
   failed:      { label: 'Failed',      variant: 'destructive' },
 }
 
-function formatClass(device: { form: string; class: string }) {
-  return `${device.form} ${device.class}`
+function formatClass(device: { group_name: string; unit_name: string }) {
+  return `${device.group_name} ${device.unit_name}`
 }
 
 function formatTime(iso: string) {

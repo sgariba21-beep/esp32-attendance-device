@@ -105,7 +105,7 @@ export function StudentsView({ students, devices, role }: Props) {
           <option value="">All classes</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>
-              {d.form} {d.class}
+              {d.group_name} {d.unit_name}
             </option>
           ))}
         </NativeSelect>
@@ -167,7 +167,7 @@ export function StudentsView({ students, devices, role }: Props) {
                         {s.sid}
                       </TableCell>
                       <TableCell className={cn(inactive && 'opacity-60')}>
-                        {s.device ? `${s.device.form} ${s.device.class}` : '—'}
+                        {s.device ? `${s.device.group_name} ${s.device.unit_name}` : '—'}
                       </TableCell>
                       <TableCell className={cn(inactive && 'opacity-60')}>
                         <span className="flex items-center gap-1.5" title={`Finger 1: ${s.fin1 ? `slot ${s.fin1}` : 'not enrolled'} · Finger 2: ${s.fin2 ? `slot ${s.fin2}` : 'not enrolled'}`}>

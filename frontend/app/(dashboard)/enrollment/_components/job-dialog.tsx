@@ -175,7 +175,7 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
             >
               <option value="">Select a device…</option>
               {devices.map((d) => (
-                <option key={d.id} value={d.id}>{d.form} {d.class}</option>
+                <option key={d.id} value={d.id}>{d.group_name} {d.unit_name}</option>
               ))}
             </NativeSelect>
           </div>
