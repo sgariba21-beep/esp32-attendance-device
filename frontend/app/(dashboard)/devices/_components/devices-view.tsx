@@ -126,9 +126,6 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
                         {d.display_name && (
                           <p className="text-xs text-muted-foreground truncate">{d.display_name}</p>
                         )}
-                        {d.mode === 'time_in_out' && (
-                          <p className="text-xs text-muted-foreground">Time in/out</p>
-                        )}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <button

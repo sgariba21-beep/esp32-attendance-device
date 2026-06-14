@@ -10,6 +10,20 @@ import type { InstitutionConfig } from '@/lib/types'
 
 type Props = { institution: InstitutionConfig }
 
+function ScanModeSelect({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <select
+      id={id}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+    >
+      <option value="present_absent">Present / Absent</option>
+      <option value="time_in_out">Time In / Time Out</option>
+    </select>
+  )
+}
+
 export function SettingsForm({ institution }: Props) {
   const [form, setForm] = useState({
     name: institution.name,
@@ -22,6 +36,10 @@ export function SettingsForm({ institution }: Props) {
     label_period: institution.label_period,
     skip_weekends: institution.skip_weekends,
     timezone: institution.timezone,
+    track_students: institution.track_students,
+    track_staff: institution.track_staff,
+    student_scan_mode: institution.student_scan_mode,
+    staff_scan_mode: institution.staff_scan_mode,
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,6 +52,10 @@ export function SettingsForm({ institution }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!form.track_students && !form.track_staff) {
+      setError('At least one member type must be tracked.')
+      return
+    }
     setLoading(true)
     setError(null)
     setSaved(false)
@@ -41,6 +63,8 @@ export function SettingsForm({ institution }: Props) {
     const result = await updateInstitutionSettings({
       ...form,
       type: form.type as 'school' | 'office',
+      student_scan_mode: form.student_scan_mode as 'present_absent' | 'time_in_out',
+      staff_scan_mode: form.staff_scan_mode as 'present_absent' | 'time_in_out',
     })
 
     setLoading(false)
@@ -115,9 +139,63 @@ export function SettingsForm({ institution }: Props) {
         </div>
       </section>
 
-      {/* Attendance settings */}
+      {/* Attendance tracking */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Attendance</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Attendance tracking</h2>
+        <p className="text-xs text-muted-foreground">
+          Choose which member types have their attendance recorded and what scan mode each uses.
+          &ldquo;Members&rdquo; (the neutral type) follow the student rules.
+        </p>
+
+        <div className="space-y-4 rounded-lg border p-4">
+          <div className="flex items-start gap-3">
+            <input
+              id="track_students"
+              type="checkbox"
+              checked={form.track_students}
+              onChange={(e) => set('track_students', e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+            />
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="track_students" className="cursor-pointer font-medium">Track students</Label>
+              {form.track_students && (
+                <div className="space-y-1">
+                  <Label htmlFor="student_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
+                  <ScanModeSelect
+                    id="student_scan_mode"
+                    value={form.student_scan_mode}
+                    onChange={(v) => set('student_scan_mode', v)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t" />
+
+          <div className="flex items-start gap-3">
+            <input
+              id="track_staff"
+              type="checkbox"
+              checked={form.track_staff}
+              onChange={(e) => set('track_staff', e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+            />
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="track_staff" className="cursor-pointer font-medium">Track staff</Label>
+              {form.track_staff && (
+                <div className="space-y-1">
+                  <Label htmlFor="staff_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
+                  <ScanModeSelect
+                    id="staff_scan_mode"
+                    value={form.staff_scan_mode}
+                    onChange={(v) => set('staff_scan_mode', v)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
         <div className="flex items-center gap-3">
           <input

@@ -10,6 +10,10 @@ export type InstitutionConfig = {
   label_period: string
   skip_weekends: boolean
   timezone: string
+  track_students: boolean
+  track_staff: boolean
+  student_scan_mode: 'present_absent' | 'time_in_out'
+  staff_scan_mode: 'present_absent' | 'time_in_out'
 }
 
 export const DEFAULT_INSTITUTION: InstitutionConfig = {
@@ -24,6 +28,10 @@ export const DEFAULT_INSTITUTION: InstitutionConfig = {
   label_period: 'Period',
   skip_weekends: false,
   timezone: 'UTC',
+  track_students: true,
+  track_staff: false,
+  student_scan_mode: 'present_absent',
+  staff_scan_mode: 'present_absent',
 }
 
 export type AttendanceRecord = {

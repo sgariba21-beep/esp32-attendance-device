@@ -22,10 +22,12 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Validate per-institution secret. Same 401 for missing institution or wrong secret.
+  // Validate secret and load institution config in one query.
   const { data: institution, error: instError } = await supabase
     .from("institutions")
-    .select("device_secret, skip_weekends")
+    .select(
+      "device_secret, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode"
+    )
     .eq("id", institution_id)
     .single();
 
@@ -57,7 +59,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Holiday check: range overlap.
+  // Holiday check.
   const { data: holiday } = await supabase
     .from("holidays")
     .select("label")
@@ -73,10 +75,10 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // Look up member — also fetch their device's mode so we know scan semantics.
+  // Look up member — include member_type to determine tracking rules.
   const { data: member, error: memberError } = await supabase
     .from("members")
-    .select("id, device_id, device:device_id(mode)")
+    .select("id, device_id, member_type")
     .eq("sid", sid)
     .eq("institution_id", institution_id)
     .eq("status", "active")
@@ -89,11 +91,31 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const deviceMode =
-    (member.device as unknown as { mode: string } | null)?.mode ??
-    "present_absent";
+  // Determine tracking rules based on member_type.
+  // 'member' (the neutral/generic type) follows student rules.
+  const isStudentLike =
+    member.member_type === "student" || member.member_type === "member";
+  const isStaff = member.member_type === "staff";
 
-  // Find active period (nullable — office-type institutions have none).
+  if (isStudentLike && !institution.track_students) {
+    return new Response(
+      JSON.stringify({ message: "Member type not tracked — scan ignored" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  if (isStaff && !institution.track_staff) {
+    return new Response(
+      JSON.stringify({ message: "Member type not tracked — scan ignored" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  const scanMode = isStaff
+    ? institution.staff_scan_mode
+    : institution.student_scan_mode;
+
+  // Find active period (nullable — office-type institutions may have none).
   const { data: period } = await supabase
     .from("periods")
     .select("id, start_date, end_date")
@@ -116,49 +138,47 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Determine scan_type based on the mode configured for this member type.
   let scan_type: "present" | "time_in" | "time_out";
 
-  if (deviceMode === "time_in_out") {
-    // Determine whether this is time_in or time_out based on today's records.
-    const { data: todayScans } = await supabase
+  if (scanMode === "time_in_out") {
+    // Check what has already been recorded for this member today.
+    const { data: existing } = await supabase
       .from("attendance")
       .select("scan_type")
       .eq("member_id", member.id)
       .eq("date", date)
       .in("scan_type", ["time_in", "time_out"]);
 
-    const existing = new Set((todayScans ?? []).map((r) => r.scan_type));
+    const hasTimeIn = existing?.some((r) => r.scan_type === "time_in") ?? false;
+    const hasTimeOut = existing?.some((r) => r.scan_type === "time_out") ?? false;
 
-    if (!existing.has("time_in")) {
-      scan_type = "time_in";
-    } else if (!existing.has("time_out")) {
-      scan_type = "time_out";
-    } else {
-      // Both already recorded today — ignore.
+    if (hasTimeIn && hasTimeOut) {
       return new Response(
-        JSON.stringify({ message: "Already fully logged today" }),
+        JSON.stringify({ message: "Already fully logged for today — scan ignored" }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    scan_type = hasTimeIn ? "time_out" : "time_in";
   } else {
     scan_type = "present";
   }
 
-  const { error: insertError } = await supabase
-    .from("attendance")
-    .insert({
-      member_id: member.id,
-      period_id: period?.id ?? null,
-      device_id: member.device_id,
-      institution_id,
-      date,
-      time,
-      status: "present",
-      scan_id,
-      scan_type,
-    });
+  const { error: insertError } = await supabase.from("attendance").insert({
+    member_id: member.id,
+    period_id: period?.id ?? null,
+    device_id: member.device_id,
+    institution_id,
+    date,
+    time,
+    status: "present",
+    scan_type,
+    scan_id,
+  });
 
   if (insertError) {
+    // Unique constraint (member_id, date, scan_type) — duplicate scan for same type today.
     if (insertError.code === "23505") {
       return new Response(
         JSON.stringify({ message: "Duplicate scan ignored" }),

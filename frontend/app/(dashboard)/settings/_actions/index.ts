@@ -15,6 +15,10 @@ export type SettingsFormData = {
   label_period: string
   skip_weekends: boolean
   timezone: string
+  track_students: boolean
+  track_staff: boolean
+  student_scan_mode: 'present_absent' | 'time_in_out'
+  staff_scan_mode: 'present_absent' | 'time_in_out'
 }
 
 export async function updateInstitutionSettings(data: SettingsFormData) {
@@ -36,6 +40,10 @@ export async function updateInstitutionSettings(data: SettingsFormData) {
       label_period: data.label_period.trim() || 'Period',
       skip_weekends: data.skip_weekends,
       timezone: data.timezone.trim() || 'UTC',
+      track_students: data.track_students,
+      track_staff: data.track_staff,
+      student_scan_mode: data.student_scan_mode,
+      staff_scan_mode: data.staff_scan_mode,
     })
     .eq('id', institutionId)
 
