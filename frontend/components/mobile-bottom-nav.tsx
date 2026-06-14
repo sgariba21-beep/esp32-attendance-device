@@ -9,6 +9,7 @@ import type { InstitutionConfig } from '@/lib/types'
 import {
   CalendarDays,
   Users,
+  UserCog,
   Cpu,
   BookOpen,
   ClipboardList,
@@ -19,17 +20,24 @@ import {
   LogOut,
   MoreHorizontal,
   X,
+  Building2 as BuildingList,
 } from 'lucide-react'
 
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
 function buildPrimaryNav(institution: InstitutionConfig): NavItem[] {
-  return [
-    { href: '/attendance', label: 'Attendance',              icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-    { href: '/members',    label: institution.label_members,  icon: Users,        roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-    { href: '/devices',    label: 'Devices',                 icon: Cpu,          roles: ['super_admin', 'platform_admin']                    },
-    { href: '/academic',   label: 'Academic',                icon: BookOpen,     roles: ['super_admin', 'admin', 'platform_admin']            },
+  const items: NavItem[] = [
+    { href: '/attendance', label: 'Attendance',               icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/members',    label: institution.label_members,   icon: Users,        roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
   ]
+  if (institution.track_staff) {
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+  }
+  items.push(
+    { href: '/devices',    label: 'Devices',  icon: Cpu,      roles: ['super_admin', 'platform_admin']            },
+    { href: '/academic',   label: 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin']   },
+  )
+  return items
 }
 
 function buildMoreNav(institution: InstitutionConfig): NavItem[] {
@@ -40,9 +48,10 @@ function buildMoreNav(institution: InstitutionConfig): NavItem[] {
     items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
   }
   items.push(
-    { href: '/users',      label: 'Accounts',            icon: ShieldCheck, roles: ['super_admin', 'platform_admin'] },
-    { href: '/settings',   label: 'Settings',            icon: Settings2,   roles: ['super_admin', 'platform_admin'] },
-    { href: '/onboarding', label: 'Create institution',  icon: Plus,        roles: ['platform_admin'] },
+    { href: '/users',        label: 'Accounts',           icon: ShieldCheck,  roles: ['super_admin', 'platform_admin'] },
+    { href: '/settings',     label: 'Settings',           icon: Settings2,    roles: ['super_admin', 'platform_admin'] },
+    { href: '/institutions', label: 'Institutions',       icon: BuildingList, roles: ['platform_admin'] },
+    { href: '/onboarding',   label: 'Create institution', icon: Plus,         roles: ['platform_admin'] },
   )
   return items
 }

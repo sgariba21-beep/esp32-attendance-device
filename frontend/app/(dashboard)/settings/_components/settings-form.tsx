@@ -5,10 +5,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { updateInstitutionSettings } from '../_actions'
+import { updateInstitutionSettings, type SettingsFormData } from '../_actions'
 import type { InstitutionConfig } from '@/lib/types'
 
-type Props = { institution: InstitutionConfig }
+type Props = {
+  institution: InstitutionConfig
+  saveAction?: (data: SettingsFormData) => Promise<{ error: string | null }>
+}
 
 function ScanModeSelect({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
   return (
@@ -24,7 +27,7 @@ function ScanModeSelect({ id, value, onChange }: { id: string; value: string; on
   )
 }
 
-export function SettingsForm({ institution }: Props) {
+export function SettingsForm({ institution, saveAction }: Props) {
   const [form, setForm] = useState({
     name: institution.name,
     type: institution.type,
@@ -34,6 +37,8 @@ export function SettingsForm({ institution }: Props) {
     label_group: institution.label_group,
     label_unit: institution.label_unit,
     label_period: institution.label_period,
+    label_staff: institution.label_staff,
+    label_staff_plural: institution.label_staff_plural,
     skip_weekends: institution.skip_weekends,
     timezone: institution.timezone,
     track_students: institution.track_students,
@@ -60,7 +65,8 @@ export function SettingsForm({ institution }: Props) {
     setError(null)
     setSaved(false)
 
-    const result = await updateInstitutionSettings({
+    const action = saveAction ?? updateInstitutionSettings
+    const result = await action({
       ...form,
       type: form.type as 'school' | 'office',
       student_scan_mode: form.student_scan_mode as 'present_absent' | 'time_in_out',
@@ -135,6 +141,14 @@ export function SettingsForm({ institution }: Props) {
           <div className="space-y-2">
             <Label htmlFor="label_period">Period</Label>
             <Input id="label_period" value={form.label_period} onChange={(e) => set('label_period', e.target.value)} placeholder="Term" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="label_staff">Staff (singular)</Label>
+            <Input id="label_staff" value={form.label_staff} onChange={(e) => set('label_staff', e.target.value)} placeholder="Teacher" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="label_staff_plural">Staff (plural)</Label>
+            <Input id="label_staff_plural" value={form.label_staff_plural} onChange={(e) => set('label_staff_plural', e.target.value)} placeholder="Teachers" />
           </div>
         </div>
       </section>

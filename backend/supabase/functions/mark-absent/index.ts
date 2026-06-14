@@ -13,8 +13,6 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // x-cron-secret auth: Kong strips Authorization headers; custom header
-  // survives. Same pattern as before, unchanged.
   if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
@@ -22,10 +20,11 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // Single global cron iterates all institutions (Decision 7).
   const { data: institutions, error: instError } = await supabase
     .from("institutions")
-    .select("id, skip_weekends, timezone");
+    .select(
+      "id, skip_weekends, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
+    );
 
   if (instError || !institutions || institutions.length === 0) {
     return new Response(JSON.stringify({ error: "No institutions found" }), {
@@ -39,13 +38,10 @@ Deno.serve(async (req: Request) => {
   for (const inst of institutions) {
     const now = new Date();
 
-    // Resolve today's date in the institution's local timezone (Decision 6).
-    // en-CA gives "YYYY-MM-DD" which is the format used by the date columns.
     const todayInTz = now.toLocaleDateString("en-CA", {
       timeZone: inst.timezone,
     });
 
-    // UTC time for the attendance.time column (all timestamps stored UTC).
     const currentTimeUtc = now.toISOString().split("T")[1].slice(0, 8);
 
     if (inst.skip_weekends) {
@@ -59,7 +55,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Holiday check: range overlap in institution's local date.
     const { data: holiday } = await supabase
       .from("holidays")
       .select("label")
@@ -73,8 +68,6 @@ Deno.serve(async (req: Request) => {
       continue;
     }
 
-    // Active period — nullable (Decision 3). Office-type institutions run
-    // without a period; attendance inserts with period_id = null for them.
     const { data: period } = await supabase
       .from("periods")
       .select("id, start_date, end_date")
@@ -93,47 +86,83 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const { data: members, error: membersError } = await supabase
-      .from("members")
-      .select("id, device_id")
-      .eq("institution_id", inst.id)
-      .eq("status", "active");
+    // Determine which member types to mark absent for this institution.
+    // 'member' (generic/neutral) follows student rules.
+    const trackedTypes: string[] = [];
+    if (inst.track_students) trackedTypes.push("student", "member");
+    if (inst.track_staff) trackedTypes.push("staff");
 
-    if (membersError || !members || members.length === 0) {
-      results.push(`${inst.id}: no active members`);
+    if (trackedTypes.length === 0) {
+      results.push(`${inst.id}: no member types tracked — skipped`);
       continue;
     }
 
+    const { data: members, error: membersError } = await supabase
+      .from("members")
+      .select("id, device_id, member_type")
+      .eq("institution_id", inst.id)
+      .eq("status", "active")
+      .in("member_type", trackedTypes);
+
+    if (membersError || !members || members.length === 0) {
+      results.push(`${inst.id}: no active tracked members`);
+      continue;
+    }
+
+    // For each member type group, determine the scan_type to use for absent records.
+    // present_absent mode → scan_type = 'present' (the slot that was never filled)
+    // time_in_out mode  → scan_type = 'time_in'  (they never clocked in)
+    const studentScanType =
+      inst.student_scan_mode === "time_in_out" ? "time_in" : "present";
+    const staffScanType =
+      inst.staff_scan_mode === "time_in_out" ? "time_in" : "present";
+
+    function scanTypeFor(memberType: string): "present" | "time_in" {
+      return memberType === "staff" ? staffScanType : studentScanType;
+    }
+
+    // Collect all present/time_in records for today across this institution.
     const { data: presentRecords, error: presentError } = await supabase
       .from("attendance")
-      .select("member_id")
+      .select("member_id, scan_type")
       .eq("institution_id", inst.id)
       .eq("date", todayInTz)
       .eq("status", "present");
 
     if (presentError) {
-      results.push(`${inst.id}: error reading present records — ${presentError.message}`);
+      results.push(
+        `${inst.id}: error reading present records — ${presentError.message}`
+      );
       continue;
     }
 
-    const presentIds = new Set((presentRecords || []).map((r) => r.member_id));
-    const absentMembers = members.filter((m) => !presentIds.has(m.id));
+    // A member is "present today" if they have a present record whose scan_type
+    // matches what we'd use for absent (i.e., they already have the relevant slot filled).
+    const presentSet = new Set(
+      (presentRecords || []).map((r) => `${r.member_id}:${r.scan_type}`)
+    );
 
-    if (absentMembers.length === 0) {
-      results.push(`${inst.id}: all present`);
+    const absentRecords = members
+      .filter((m) => {
+        const expected = scanTypeFor(m.member_type);
+        return !presentSet.has(`${m.id}:${expected}`);
+      })
+      .map((m) => ({
+        member_id: m.id,
+        period_id: period?.id ?? null,
+        device_id: m.device_id,
+        institution_id: inst.id,
+        date: todayInTz,
+        time: currentTimeUtc,
+        status: "absent",
+        scan_type: scanTypeFor(m.member_type),
+        scan_id: null,
+      }));
+
+    if (absentRecords.length === 0) {
+      results.push(`${inst.id}: all tracked members present`);
       continue;
     }
-
-    const absentRecords = absentMembers.map((m) => ({
-      member_id: m.id,
-      period_id: period?.id ?? null,
-      device_id: m.device_id,
-      institution_id: inst.id,
-      date: todayInTz,
-      time: currentTimeUtc,
-      status: "absent",
-      scan_id: null,
-    }));
 
     const { error: insertError } = await supabase
       .from("attendance")
@@ -142,7 +171,7 @@ Deno.serve(async (req: Request) => {
     if (insertError) {
       results.push(`${inst.id}: insert error — ${insertError.message}`);
     } else {
-      results.push(`${inst.id}: marked ${absentMembers.length} absent`);
+      results.push(`${inst.id}: marked ${absentRecords.length} absent`);
     }
   }
 

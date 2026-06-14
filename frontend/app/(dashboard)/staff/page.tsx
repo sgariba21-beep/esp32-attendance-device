@@ -1,24 +1,19 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution } from '@/lib/supabase/dal'
-import { MembersView } from './_components/members-view'
+import { StaffView, type StaffMemberWithDevice } from './_components/staff-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
-export default async function MembersPage() {
+export default async function StaffPage() {
   const { role, assignedUnit, institutionId } = await requireRole('super_admin', 'admin', 'teacher', 'staff')
   const supabase = createAdminClient()
   const institution = await getInstitution(institutionId)
 
   let membersQ = supabase
     .from('members')
-    .select('id, sid, fullname, group_name, fin1, fin2, status, member_type, device_id, created_at, device:device_id(id, group_name, unit_name)')
+    .select('id, sid, fullname, group_name, fin1, fin2, status, device_id, created_at, device:device_id(id, group_name, unit_name)')
+    .eq('member_type', 'staff')
     .order('fullname')
-
-  // When the institution tracks both types, /members shows students + generic members only.
-  // Staff appear on the dedicated /staff page.
-  if (institution.track_staff) {
-    membersQ = membersQ.neq('member_type', 'staff')
-  }
 
   let devicesQ = supabase
     .from('devices')
@@ -34,7 +29,7 @@ export default async function MembersPage() {
   const [membersRes, devicesRes] = await Promise.all([membersQ, devicesQ])
 
   const allDevices = (devicesRes.data ?? []) as Device[]
-  const allMembers = (membersRes.data ?? []) as unknown as MemberWithDevice[]
+  const allMembers = (membersRes.data ?? []) as unknown as StaffMemberWithDevice[]
 
   const visibleMembers = role === 'teacher' || role === 'staff'
     ? (() => {
@@ -50,31 +45,17 @@ export default async function MembersPage() {
   return (
     <>
       <RealtimeRefresh />
-      <MembersView
+      <StaffView
         members={visibleMembers}
         devices={allDevices}
         role={role}
         labels={{
-          label_member: institution.label_member,
-          label_members: institution.label_members,
+          label_member: institution.label_staff,
+          label_members: institution.label_staff_plural,
           label_unit: institution.label_unit,
           label_group: institution.label_group,
         }}
       />
     </>
   )
-}
-
-export type MemberWithDevice = {
-  id: string
-  sid: string
-  fullname: string
-  group_name: string
-  fin1: number
-  fin2: number
-  status: 'active' | 'inactive'
-  member_type: 'student' | 'staff' | 'member'
-  created_at: string
-  device_id: string
-  device: { id: string; group_name: string; unit_name: string } | null
 }

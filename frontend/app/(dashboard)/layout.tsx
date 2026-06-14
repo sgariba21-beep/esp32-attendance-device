@@ -17,7 +17,7 @@ export default async function DashboardLayout({
       <Sidebar role={role} institution={institution} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <SessionManager />
-        <MobileHeader logoUrl={institution.logo_url} name={institution.name} />
+        <MobileHeader institution={institution} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-16 md:pb-6">
           {children}
         </main>

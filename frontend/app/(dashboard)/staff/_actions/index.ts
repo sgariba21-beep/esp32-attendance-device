@@ -4,16 +4,15 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 
-export type MemberFormData = {
+export type StaffFormData = {
   sid: string
   fullname: string
   device_id: string
-  member_type: 'student' | 'staff' | 'member'
   fin1: number
   fin2: number
 }
 
-export async function createMember(data: MemberFormData) {
+export async function createStaffMember(data: StaffFormData) {
   const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
@@ -33,7 +32,7 @@ export async function createMember(data: MemberFormData) {
       device_id: data.device_id,
       group_name: device.data.group_name,
       institution_id: institutionId ?? device.data.institution_id,
-      member_type: data.member_type,
+      member_type: 'staff',
       fin1: 0,
       fin2: 0,
       status: 'active',
@@ -46,12 +45,12 @@ export async function createMember(data: MemberFormData) {
     return { error: error.message, id: null }
   }
 
-  revalidatePath('/members')
   revalidatePath('/staff')
+  revalidatePath('/members')
   return { error: null, id: newMember.id as string }
 }
 
-export async function updateMember(id: string, data: MemberFormData) {
+export async function updateStaffMember(id: string, data: StaffFormData) {
   await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
@@ -70,7 +69,7 @@ export async function updateMember(id: string, data: MemberFormData) {
       fullname: data.fullname.trim(),
       device_id: data.device_id,
       group_name: device.data.group_name,
-      member_type: data.member_type,
+      member_type: 'staff',
     })
     .eq('id', id)
 
@@ -79,12 +78,12 @@ export async function updateMember(id: string, data: MemberFormData) {
     return { error: error.message }
   }
 
-  revalidatePath('/members')
   revalidatePath('/staff')
+  revalidatePath('/members')
   return { error: null }
 }
 
-export async function setMemberStatus(id: string, status: 'active' | 'inactive') {
+export async function setStaffMemberStatus(id: string, status: 'active' | 'inactive') {
   await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
@@ -95,7 +94,6 @@ export async function setMemberStatus(id: string, status: 'active' | 'inactive')
 
   if (error) return { error: error.message }
 
-  revalidatePath('/members')
   revalidatePath('/staff')
   return { error: null }
 }

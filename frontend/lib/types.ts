@@ -8,6 +8,8 @@ export type InstitutionConfig = {
   label_group: string
   label_unit: string
   label_period: string
+  label_staff: string
+  label_staff_plural: string
   skip_weekends: boolean
   timezone: string
   track_students: boolean
@@ -26,6 +28,8 @@ export const DEFAULT_INSTITUTION: InstitutionConfig = {
   label_group: 'Group',
   label_unit: 'Unit',
   label_period: 'Period',
+  label_staff: 'Staff',
+  label_staff_plural: 'Staff',
   skip_weekends: false,
   timezone: 'UTC',
   track_students: true,
@@ -56,6 +60,7 @@ export type AttendanceRecord = {
     group_name: string
     unit_name: string
   } | null
+  institution: { name: string } | null
 }
 
 export type Member = {

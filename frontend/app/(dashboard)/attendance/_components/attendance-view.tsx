@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { CalendarDays, Lock } from 'lucide-react'
+import { CalendarDays, Lock, Download } from 'lucide-react'
 import type { UserRole } from '@/lib/supabase/dal'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -39,6 +39,8 @@ type Filters = {
   termId?: string
   studentIds: string[]
   deviceIds: string[]
+  typeFilter?: string
+  institutionFilter?: string
 }
 
 type Props = {
@@ -53,6 +55,7 @@ type Props = {
   role: UserRole
   assignedUnit: string | null
   labels: Labels
+  institutions: { id: string; name: string }[]
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -111,8 +114,9 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
-export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit, labels }: Props) {
+export function AttendanceView({ records, students, devices, academic, filters, page, pageSize, totalCount, role, assignedUnit, labels, institutions }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
+  const isPlatformAdmin = role === 'platform_admin'
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
@@ -122,15 +126,19 @@ export function AttendanceView({ records, students, devices, academic, filters, 
   const [termId, setTermId] = useState(filters.termId ?? '')
   const [studentIds, setStudentIds] = useState<string[]>(filters.studentIds)
   const [deviceIds, setDeviceIds] = useState<string[]>(filters.deviceIds)
+  const [typeFilter, setTypeFilter] = useState(filters.typeFilter ?? '')
+  const [institutionFilter, setInstitutionFilter] = useState(filters.institutionFilter ?? '')
 
   const buildParams = useCallback(
-    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[]; page: number }>) => {
+    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[]; type: string; institution: string; page: number }>) => {
       const current = {
         from: fromDate,
         to: toDate,
         term: termId,
         students: studentIds,
         classes: deviceIds,
+        type: typeFilter,
+        institution: institutionFilter,
         page: 1,
         ...overrides,
       }
@@ -140,14 +148,16 @@ export function AttendanceView({ records, students, devices, academic, filters, 
       if (current.term) params.set('term', current.term)
       if (current.students.length) params.set('students', current.students.join(','))
       if (current.classes.length) params.set('classes', current.classes.join(','))
+      if (current.type) params.set('type', current.type)
+      if (current.institution) params.set('institution', current.institution)
       if (current.page > 1) params.set('page', current.page.toString())
       return params.toString()
     },
-    [fromDate, toDate, termId, studentIds, deviceIds]
+    [fromDate, toDate, termId, studentIds, deviceIds, typeFilter, institutionFilter]
   )
 
   const applyFilters = useCallback(
-    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[] }>) => {
+    (overrides: Partial<{ from: string; to: string; term: string; students: string[]; classes: string[]; type: string; institution: string }>) => {
       startTransition(() => {
         router.push(`${pathname}?${buildParams(overrides)}`)
       })
@@ -170,14 +180,22 @@ export function AttendanceView({ records, students, devices, academic, filters, 
     setTermId('')
     setStudentIds([])
     setDeviceIds([])
+    setTypeFilter('')
+    setInstitutionFilter('')
     startTransition(() => {
       router.push(pathname)
     })
   }
 
-  const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0
+  function buildExportUrl() {
+    const qs = buildParams({ page: 1 })
+    return `/api/attendance/export${qs ? `?${qs}` : ''}`
+  }
+
+  const hasFilters = fromDate || toDate || termId || studentIds.length > 0 || deviceIds.length > 0 || typeFilter || institutionFilter
   const summary = buildSummary(records)
   const totalPages = Math.ceil(totalCount / pageSize)
+  const showInstitutionColumn = isPlatformAdmin
 
   const studentOptions = useMemo(() => {
     const base = deviceIds.length > 0
@@ -199,13 +217,44 @@ export function AttendanceView({ records, students, devices, academic, filters, 
       <PageHeader
         title="Attendance"
         actions={
-          hasFilters ? (
-            <Button variant="ghost" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            {hasFilters && (
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+            <a href={buildExportUrl()} download="attendance-export.csv">
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-1.5" />
+                Export CSV
+              </Button>
+            </a>
+          </div>
         }
       />
+
+      {/* Institution filter — platform_admin only */}
+      {isPlatformAdmin && institutions.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="institution-filter" className="text-xs">Institution</Label>
+          <NativeSelect
+            id="institution-filter"
+            value={institutionFilter}
+            onChange={(e) => {
+              setInstitutionFilter(e.target.value)
+              setStudentIds([])
+              setDeviceIds([])
+              applyFilters({ institution: e.target.value, students: [], classes: [] })
+            }}
+            className="w-64"
+          >
+            <option value="">All institutions</option>
+            {institutions.map((inst) => (
+              <option key={inst.id} value={inst.id}>{inst.name}</option>
+            ))}
+          </NativeSelect>
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="flex flex-wrap gap-3 items-end">
@@ -253,6 +302,23 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 {a.term} {a.year}
               </option>
             ))}
+          </NativeSelect>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="type-filter" className="text-xs">Member type</Label>
+          <NativeSelect
+            id="type-filter"
+            value={typeFilter}
+            onChange={(e) => {
+              setTypeFilter(e.target.value)
+              applyFilters({ type: e.target.value })
+            }}
+          >
+            <option value="">All types</option>
+            <option value="student">Student</option>
+            <option value="staff">Staff</option>
+            <option value="member">Member</option>
           </NativeSelect>
         </div>
 
@@ -322,6 +388,7 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                 <TableHeader>
                   <TableRow>
                     <TableHead>Date</TableHead>
+                    {showInstitutionColumn && <TableHead>Institution</TableHead>}
                     <TableHead>{labels.label_member}</TableHead>
                     <TableHead>ID</TableHead>
                     <TableHead>{labels.label_unit}</TableHead>
@@ -334,6 +401,9 @@ export function AttendanceView({ records, students, devices, academic, filters, 
                   {records.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell className="whitespace-nowrap">{formatDate(r.date)}</TableCell>
+                      {showInstitutionColumn && (
+                        <TableCell className="text-muted-foreground text-xs">{r.institution?.name ?? '—'}</TableCell>
+                      )}
                       <TableCell>{r.student?.fullname ?? '—'}</TableCell>
                       <TableCell className="font-mono tabular-nums text-muted-foreground text-xs">
                         {r.student?.sid ?? '—'}
