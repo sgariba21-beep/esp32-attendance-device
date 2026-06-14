@@ -129,18 +129,6 @@ export function AttendanceView({
   const isTeacher = role === 'teacher' || role === 'staff'
   const isPlatformAdmin = role === 'platform_admin'
   const isOffice = institutionType === 'office'
-
-  // For platform_admin: when an institution is selected, use its tracking flags to
-  // control which type options appear. When none selected, show both.
-  const selectedInstConfig = isPlatformAdmin && institutionFilter
-    ? institutions.find((i) => i.id === institutionFilter) ?? null
-    : null
-  const showStudentType = isPlatformAdmin
-    ? (selectedInstConfig ? selectedInstConfig.track_students : true)
-    : (!isOffice && track_students)
-  const showStaffType = isPlatformAdmin
-    ? (selectedInstConfig ? selectedInstConfig.track_staff : true)
-    : track_staff
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
@@ -153,6 +141,18 @@ export function AttendanceView({
   const [deviceIds, setDeviceIds] = useState<string[]>(filters.deviceIds)
   const [typeFilter, setTypeFilter] = useState(filters.typeFilter ?? '')
   const [institutionFilter, setInstitutionFilter] = useState(filters.institutionFilter ?? '')
+
+  // For platform_admin: when an institution is selected, use its tracking flags to
+  // control which type options appear. When none selected, show both.
+  const selectedInstConfig = isPlatformAdmin && institutionFilter
+    ? institutions.find((i) => i.id === institutionFilter) ?? null
+    : null
+  const showStudentType = isPlatformAdmin
+    ? (selectedInstConfig ? selectedInstConfig.track_students : true)
+    : (!isOffice && track_students)
+  const showStaffType = isPlatformAdmin
+    ? (selectedInstConfig ? selectedInstConfig.track_staff : true)
+    : track_staff
 
   const buildParams = useCallback(
     (overrides: Partial<{
