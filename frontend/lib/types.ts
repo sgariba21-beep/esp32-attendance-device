@@ -81,6 +81,7 @@ export type Student = Member
 
 export type Device = {
   id: string
+  mac?: string | null
   group_name: string
   unit_name: string
   display_name: string | null

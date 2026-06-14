@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Cpu, Pencil, Trash2, Wifi } from 'lucide-react'
+import { Cpu, Pencil, Settings, Trash2, Wifi } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,14 +17,18 @@ import type { UserRole } from '@/lib/supabase/dal'
 
 type Props = {
   devices: Device[]
+  pendingSetupDevices: Device[]
   unassignedDevices: UnassignedDevice[]
   role: UserRole
   institution: InstitutionConfig
   allInstitutions: { id: string; name: string }[]
 }
 
-export function DevicesView({ devices, unassignedDevices, role, institution, allInstitutions }: Props) {
+export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, role, institution, allInstitutions }: Props) {
+  const isPlatformAdmin = role === 'platform_admin'
+
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [dialogTitle, setDialogTitle] = useState<string | undefined>(undefined)
   const [editing, setEditing] = useState<Device | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<Device | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -33,8 +37,9 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
   const [assignOpen, setAssignOpen] = useState(false)
   const [assignTarget, setAssignTarget] = useState<UnassignedDevice | null>(null)
 
-  function openAdd() { setEditing(null); setDialogOpen(true) }
-  function openEdit(device: Device) { setEditing(device); setDialogOpen(true) }
+  function openAdd() { setEditing(null); setDialogTitle(undefined); setDialogOpen(true) }
+  function openEdit(device: Device) { setEditing(device); setDialogTitle(undefined); setDialogOpen(true) }
+  function openConfigure(device: Device) { setEditing(device); setDialogTitle('Configure device'); setDialogOpen(true) }
 
   async function handleDelete() {
     if (!confirmTarget) return
@@ -62,8 +67,8 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
     <div className="space-y-6">
       <PageHeader
         title="Devices"
-        subtitle={`${devices.length} assigned device${devices.length !== 1 ? 's' : ''}`}
-        actions={<Button onClick={openAdd}>Add device</Button>}
+        subtitle={`${devices.length} device${devices.length !== 1 ? 's' : ''}`}
+        actions={isPlatformAdmin ? <Button onClick={openAdd}>Add device</Button> : undefined}
       />
 
       {/* Unassigned devices — platform_admin only */}
@@ -73,6 +78,9 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
             <Wifi className="h-4 w-4 text-warning-foreground" />
             <h2 className="text-sm font-semibold">Pending assignment ({unassignedDevices.length})</h2>
           </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            These devices have provisioned but haven&apos;t been assigned to an institution yet.
+          </p>
           <div className="rounded-xl border border-warning/30 bg-warning/5 divide-y divide-border">
             {unassignedDevices.map((d) => (
               <div key={d.id} className="flex items-center justify-between px-4 py-3 gap-4">
@@ -97,12 +105,49 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
         </div>
       )}
 
-      {/* Assigned devices */}
+      {/* Pending setup — institution admins only, for devices assigned but not yet configured */}
+      {!isPlatformAdmin && pendingSetupDevices.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Settings className="h-4 w-4 text-warning-foreground" />
+            <h2 className="text-sm font-semibold">Pending setup ({pendingSetupDevices.length})</h2>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            These devices have been assigned to your institution. Set their {institution.label_group.toLowerCase()} and {institution.label_unit.toLowerCase()} to activate them.
+          </p>
+          <div className="rounded-xl border border-warning/30 bg-warning/5 divide-y divide-border">
+            {pendingSetupDevices.map((d) => (
+              <div key={d.id} className="flex items-center justify-between px-4 py-3 gap-4">
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-sm font-mono text-muted-foreground truncate">{d.mac ?? d.id}</p>
+                  {d.display_name && (
+                    <p className="text-xs text-muted-foreground">{d.display_name}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Badge variant="secondary">Not configured</Badge>
+                  <Button
+                    size="sm"
+                    onClick={() => openConfigure(d)}
+                  >
+                    Configure
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Configured devices */}
       {devices.length === 0 ? (
         <EmptyState
           icon={Cpu}
-          message="No devices yet. Add one to get started."
-          action={<Button onClick={openAdd}>Add device</Button>}
+          message={
+            pendingSetupDevices.length > 0
+              ? `No configured devices yet. Use the ${pendingSetupDevices.length > 1 ? `${pendingSetupDevices.length} devices` : 'device'} above to get started.`
+              : 'No devices yet.'
+          }
         />
       ) : (
         <div className="space-y-3">
@@ -165,6 +210,7 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
         labelGroup={institution.label_group}
         labelUnit={institution.label_unit}
         institutionType={institution.type}
+        title={dialogTitle}
       />
 
       <AssignDeviceDialog

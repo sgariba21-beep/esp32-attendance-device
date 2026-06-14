@@ -72,23 +72,20 @@ export async function deleteDevice(id: string) {
 
 export type AssignDeviceFormData = {
   device_id: string
-  group_name: string
-  unit_name: string
-  display_name: string
   institution_id: string
 }
 
 export async function assignDevice(data: AssignDeviceFormData) {
-  // Only platform_admin can assign devices
+  // Only platform_admin can bind a device to an institution.
+  // Group/unit configuration is done separately by the institution admin.
   const { role } = await requireRole('platform_admin')
   if (role !== 'platform_admin') return { error: 'Only platform admins can assign devices.' }
 
   const supabase = createAdminClient()
 
-  // Fetch the institution's device_secret to confirm it exists
   const { data: inst, error: instErr } = await supabase
     .from('institutions')
-    .select('device_secret')
+    .select('id')
     .eq('id', data.institution_id)
     .single()
 
@@ -96,12 +93,7 @@ export async function assignDevice(data: AssignDeviceFormData) {
 
   const { error } = await supabase
     .from('devices')
-    .update({
-      institution_id: data.institution_id,
-      group_name: data.group_name.trim(),
-      unit_name: data.unit_name.trim(),
-      display_name: data.display_name.trim(),
-    })
+    .update({ institution_id: data.institution_id })
     .eq('id', data.device_id)
     .is('institution_id', null) // safety: only assign unassigned devices
 

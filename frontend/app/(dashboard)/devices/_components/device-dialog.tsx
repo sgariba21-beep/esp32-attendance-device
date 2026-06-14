@@ -17,11 +17,12 @@ type Props = {
   labelGroup: string
   labelUnit: string
   institutionType: 'school' | 'office'
+  title?: string
 }
 
 const empty = { group_name: '', unit_name: '', display_name: '' }
 
-export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit, institutionType }: Props) {
+export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit, institutionType, title }: Props) {
   const isOffice = institutionType === 'office'
   const groupPlaceholder = isOffice ? 'e.g. Sales, Operations' : 'e.g. Form 1, Year 2'
   const unitPlaceholder = isOffice ? 'e.g. East Wing, Floor 2' : 'e.g. Science 1'
@@ -63,7 +64,7 @@ export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>{device ? 'Edit device' : 'Add device'}</DialogTitle>
+          <DialogTitle>{title ?? (device ? 'Edit device' : 'Add device')}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
