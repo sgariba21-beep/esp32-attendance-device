@@ -29,7 +29,6 @@ type Props = {
   devices: Device[]
   usedFids: Record<string, number[]>
   labels: Labels
-  institutionType: 'school' | 'office'
 }
 
 type EnrollStep = {
@@ -185,8 +184,7 @@ function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: Fin
 
 const emptyForm = { sid: '', fullname: '', device_id: '', member_type: 'student' as 'student' | 'staff' }
 
-export function MemberDialog({ open, onOpenChange, member, devices, usedFids, labels, institutionType }: Props) {
-  const isOffice = institutionType === 'office'
+export function MemberDialog({ open, onOpenChange, member, devices, usedFids, labels }: Props) {
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -199,7 +197,7 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
       setForm(
         member
           ? { sid: member.sid, fullname: member.fullname, device_id: member.device_id, member_type: member.member_type }
-          : { sid: '', fullname: '', device_id: devices[0]?.id ?? '', member_type: isOffice ? 'staff' : 'student' }
+          : { sid: '', fullname: '', device_id: devices[0]?.id ?? '', member_type: 'student' }
       )
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -299,18 +297,6 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
               placeholder="e.g. L186"
               required
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="member_type">Type</Label>
-            <NativeSelect
-              id="member_type"
-              value={form.member_type}
-              onChange={(e) => set('member_type', e.target.value)}
-            >
-              {!isOffice && <option value="student">Student</option>}
-              <option value="staff">Staff</option>
-            </NativeSelect>
           </div>
 
           <div className="space-y-2">

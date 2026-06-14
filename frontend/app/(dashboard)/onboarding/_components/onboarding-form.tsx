@@ -40,7 +40,15 @@ export function OnboardingForm() {
   const [created, setCreated] = useState<{ institutionId: string } | null>(null)
 
   function set(field: string, value: string | boolean) {
-    setForm((f) => ({ ...f, [field]: value }))
+    setForm((f) => {
+      const next = { ...f, [field]: value }
+      // Offices don't track students — force the flags to a sensible state on type change.
+      if (field === 'institution_type') {
+        if (value === 'office') { next.track_students = false; next.track_staff = true }
+        else { next.track_students = true }
+      }
+      return next
+    })
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -112,30 +120,34 @@ export function OnboardingForm() {
         </p>
 
         <div className="space-y-4 rounded-lg border p-4">
-          <div className="flex items-start gap-3">
-            <input
-              id="track_students"
-              type="checkbox"
-              checked={form.track_students}
-              onChange={(e) => set('track_students', e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
-            />
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="track_students" className="cursor-pointer font-medium">Track students</Label>
-              {form.track_students && (
-                <div className="space-y-1">
-                  <Label htmlFor="student_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
-                  <ScanModeSelect
-                    id="student_scan_mode"
-                    value={form.student_scan_mode}
-                    onChange={(v) => set('student_scan_mode', v)}
-                  />
+          {form.institution_type !== 'office' && (
+            <>
+              <div className="flex items-start gap-3">
+                <input
+                  id="track_students"
+                  type="checkbox"
+                  checked={form.track_students}
+                  onChange={(e) => set('track_students', e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                />
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="track_students" className="cursor-pointer font-medium">Track students</Label>
+                  {form.track_students && (
+                    <div className="space-y-1">
+                      <Label htmlFor="student_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
+                      <ScanModeSelect
+                        id="student_scan_mode"
+                        value={form.student_scan_mode}
+                        onChange={(v) => set('student_scan_mode', v)}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          <div className="border-t" />
+              <div className="border-t" />
+            </>
+          )}
 
           <div className="flex items-start gap-3">
             <input

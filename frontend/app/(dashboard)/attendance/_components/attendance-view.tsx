@@ -22,6 +22,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pagination } from '@/components/ui/pagination'
 import { MultiSelect } from './multi-select'
+import { pluralize } from '@/lib/utils'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
 type MemberOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
@@ -310,7 +311,7 @@ export function AttendanceView({
             value={termId}
             onChange={(e) => { setTermId(e.target.value); applyFilters({ term: e.target.value }) }}
           >
-            <option value="">All {labels.label_period.toLowerCase()}s</option>
+            <option value="">All {pluralize(labels.label_period.toLowerCase())}</option>
             {academic.map((a) => (
               <option key={a.id} value={a.id}>{a.term} {a.year}</option>
             ))}
@@ -377,7 +378,7 @@ export function AttendanceView({
           {/* Unit filter */}
           {!isTeacher && (
             <div className="flex flex-col gap-1">
-              <Label className="text-xs">{labels.label_unit}s</Label>
+              <Label className="text-xs">{pluralize(labels.label_unit)}</Label>
               <MultiSelect
                 options={classOptions}
                 selected={deviceIds}
@@ -396,7 +397,7 @@ export function AttendanceView({
                   if (nextStaffIds.length !== staffIds.length) setStaffIds(nextStaffIds)
                   applyFilters({ classes: val, students: nextStudentIds, staff: nextStaffIds })
                 }}
-                placeholder={`All ${labels.label_unit.toLowerCase()}s`}
+                placeholder={`All ${pluralize(labels.label_unit.toLowerCase())}`}
               />
             </div>
           )}

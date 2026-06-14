@@ -14,11 +14,18 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   device: Device | null
+  labelGroup: string
+  labelUnit: string
+  institutionType: 'school' | 'office'
 }
 
 const empty = { group_name: '', unit_name: '', display_name: '' }
 
-export function DeviceDialog({ open, onOpenChange, device }: Props) {
+export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit, institutionType }: Props) {
+  const isOffice = institutionType === 'office'
+  const groupPlaceholder = isOffice ? 'e.g. Sales, Operations' : 'e.g. Form 1, Year 2'
+  const unitPlaceholder = isOffice ? 'e.g. East Wing, Floor 2' : 'e.g. Science 1'
+  const displayPlaceholder = isOffice ? 'e.g. Sales — East Wing (shown on device)' : 'e.g. Form 1 Blue (shown on device)'
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -61,23 +68,23 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="group_name">Group (year level)</Label>
+            <Label htmlFor="group_name">{labelGroup}</Label>
             <Input
               id="group_name"
               value={form.group_name}
               onChange={(e) => set('group_name', e.target.value)}
-              placeholder="e.g. Form 1, Year 2"
+              placeholder={groupPlaceholder}
               required
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="unit_name">Unit name</Label>
+            <Label htmlFor="unit_name">{labelUnit}</Label>
             <Input
               id="unit_name"
               value={form.unit_name}
               onChange={(e) => set('unit_name', e.target.value)}
-              placeholder="e.g. Science 1"
+              placeholder={unitPlaceholder}
               required
             />
           </div>
@@ -88,7 +95,7 @@ export function DeviceDialog({ open, onOpenChange, device }: Props) {
               id="display_name"
               value={form.display_name}
               onChange={(e) => set('display_name', e.target.value)}
-              placeholder="e.g. Form 1 Blue (shown on device)"
+              placeholder={displayPlaceholder}
             />
           </div>
 

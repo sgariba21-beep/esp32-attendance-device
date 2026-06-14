@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution } from '@/lib/supabase/dal'
+import { pluralize } from '@/lib/utils'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AcademicView } from './_components/academic-view'
@@ -36,7 +37,7 @@ export default async function AcademicPage() {
         <h1 className="text-2xl font-semibold">Academic</h1>
         <Tabs defaultValue="terms">
           <TabsList>
-            <TabsTrigger value="terms">{institution.label_period}s</TabsTrigger>
+            <TabsTrigger value="terms">{pluralize(institution.label_period)}</TabsTrigger>
             <TabsTrigger value="holidays">Holidays</TabsTrigger>
           </TabsList>
           <TabsContent value="terms" className="mt-4">

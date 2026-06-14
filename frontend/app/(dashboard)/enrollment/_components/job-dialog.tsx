@@ -21,15 +21,9 @@ type Props = {
   onOpenChange: (open: boolean) => void
   devices: Device[]
   labelUnit: string
+  labelMember: string
+  labelMembers: string
 }
-
-const COMMANDS: { value: Command; label: string; description: string }[] = [
-  { value: 'register',        label: 'Register',      description: 'Enroll a fingerprint for a student.' },
-  { value: 'delete',          label: 'Delete',        description: "Remove a student's fingerprint from the device." },
-  { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
-  { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
-  { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
-]
 
 const FINGER_SLOTS: { value: FingerSlot; label: string }[] = [
   { value: 'fin1', label: 'Finger 1' },
@@ -45,7 +39,16 @@ const empty = {
   master_name: '',
 }
 
-export function JobDialog({ open, onOpenChange, devices, labelUnit }: Props) {
+export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers }: Props) {
+  const member = labelMember.toLowerCase()
+  const COMMANDS: { value: Command; label: string; description: string }[] = [
+    { value: 'register',        label: 'Register',      description: `Enroll a fingerprint for a ${member}.` },
+    { value: 'delete',          label: 'Delete',        description: `Remove a ${member}'s fingerprint from the device.` },
+    { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
+    { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
+    { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
+  ]
+
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -81,7 +84,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.device_id) { setError('Please select a device.'); return }
-    if (needsStudent && !form.student_id) { setError('Please select a student.'); return }
+    if (needsStudent && !form.student_id) { setError(`Please select a ${member}.`); return }
     if (needsMasterName && !form.master_name.trim()) { setError('Please enter a name for the master.'); return }
 
     setLoading(true)
@@ -198,10 +201,10 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit }: Props) {
             </div>
           )}
 
-          {/* Student (register / delete only) */}
+          {/* Member (register / delete only) */}
           {needsStudent && (
             <div className="space-y-2">
-              <Label htmlFor="student_id">Student</Label>
+              <Label htmlFor="student_id">{labelMember}</Label>
               <NativeSelect
                 id="student_id"
                 value={form.student_id}
@@ -209,13 +212,13 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit }: Props) {
                 required
                 disabled={loadingStudents}
               >
-                <option value="">{loadingStudents ? 'Loading…' : 'Select a student…'}</option>
+                <option value="">{loadingStudents ? 'Loading…' : `Select a ${member}…`}</option>
                 {deviceStudents.map((s) => (
                   <option key={s.id} value={s.id}>{s.fullname} ({s.sid})</option>
                 ))}
               </NativeSelect>
               {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
-                <p className="text-xs text-muted-foreground">No active students in this {labelUnit.toLowerCase()}.</p>
+                <p className="text-xs text-muted-foreground">No active {labelMembers.toLowerCase()} in this {labelUnit.toLowerCase()}.</p>
               )}
             </div>
           )}

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/table'
 import { AcademicDialog } from './academic-dialog'
 import { setActiveTerm, deleteAcademicTerm } from '../_actions'
+import { pluralize } from '@/lib/utils'
 import type { AcademicTerm } from '@/lib/types'
 
 type Props = { terms: AcademicTerm[]; labelPeriod: string }
@@ -84,7 +85,7 @@ export function AcademicView({ terms, labelPeriod }: Props) {
       {terms.length === 0 ? (
         <EmptyState
           icon={BookOpen}
-          message={`No ${labelPeriod.toLowerCase()}s yet. Add one to get started.`}
+          message={`No ${pluralize(labelPeriod.toLowerCase())} yet. Add one to get started.`}
           action={<Button onClick={openAdd}>Add {labelPeriod.toLowerCase()}</Button>}
         />
       ) : (
@@ -92,7 +93,7 @@ export function AcademicView({ terms, labelPeriod }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Term</TableHead>
+                <TableHead>{labelPeriod}</TableHead>
                 <TableHead>Dates</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -167,9 +168,9 @@ export function AcademicView({ terms, labelPeriod }: Props) {
       <ConfirmDialog
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
-        title="Delete term?"
-        description={confirmTarget ? `This will permanently delete ${confirmTarget.term} ${confirmTarget.year}. All attendance records for this term will be unlinked.` : ''}
-        confirmLabel="Delete term"
+        title={`Delete ${labelPeriod.toLowerCase()}?`}
+        description={confirmTarget ? `This will permanently delete ${confirmTarget.term} ${confirmTarget.year}. All attendance records for this ${labelPeriod.toLowerCase()} will be unlinked.` : ''}
+        confirmLabel={`Delete ${labelPeriod.toLowerCase()}`}
         loading={loadingId === confirmTarget?.id}
         onConfirm={async () => {
           if (!confirmTarget) return

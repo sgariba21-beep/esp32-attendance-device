@@ -129,15 +129,15 @@ export function SettingsForm({ institution, saveAction }: Props) {
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="label_member">Member (singular)</Label>
-            <Input id="label_member" value={form.label_member} onChange={(e) => set('label_member', e.target.value)} placeholder="Student" />
+            <Input id="label_member" value={form.label_member} onChange={(e) => set('label_member', e.target.value)} placeholder="Student / Employee" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_members">Member (plural)</Label>
-            <Input id="label_members" value={form.label_members} onChange={(e) => set('label_members', e.target.value)} placeholder="Students" />
+            <Input id="label_members" value={form.label_members} onChange={(e) => set('label_members', e.target.value)} placeholder="Students / Employees" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_group">Group</Label>
-            <Input id="label_group" value={form.label_group} onChange={(e) => set('label_group', e.target.value)} placeholder="Form" />
+            <Input id="label_group" value={form.label_group} onChange={(e) => set('label_group', e.target.value)} placeholder="Form / Department" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_unit">Unit</Label>
@@ -145,15 +145,15 @@ export function SettingsForm({ institution, saveAction }: Props) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_period">Period</Label>
-            <Input id="label_period" value={form.label_period} onChange={(e) => set('label_period', e.target.value)} placeholder="Term" />
+            <Input id="label_period" value={form.label_period} onChange={(e) => set('label_period', e.target.value)} placeholder="Term / Quarter" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_staff">Staff (singular)</Label>
-            <Input id="label_staff" value={form.label_staff} onChange={(e) => set('label_staff', e.target.value)} placeholder="Teacher" />
+            <Input id="label_staff" value={form.label_staff} onChange={(e) => set('label_staff', e.target.value)} placeholder="Teacher / Staff" />
           </div>
           <div className="space-y-2">
             <Label htmlFor="label_staff_plural">Staff (plural)</Label>
-            <Input id="label_staff_plural" value={form.label_staff_plural} onChange={(e) => set('label_staff_plural', e.target.value)} placeholder="Teachers" />
+            <Input id="label_staff_plural" value={form.label_staff_plural} onChange={(e) => set('label_staff_plural', e.target.value)} placeholder="Teachers / Staff" />
           </div>
         </div>
       </section>
@@ -163,7 +163,6 @@ export function SettingsForm({ institution, saveAction }: Props) {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Attendance tracking</h2>
         <p className="text-xs text-muted-foreground">
           Choose which member types have their attendance recorded and what scan mode each uses.
-          &ldquo;Members&rdquo; (the neutral type) follow the student rules.
         </p>
 
         <div className="space-y-4 rounded-lg border p-4">

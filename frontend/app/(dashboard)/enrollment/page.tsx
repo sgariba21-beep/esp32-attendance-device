@@ -51,6 +51,8 @@ export default async function EnrollmentPage() {
       initialJobs={(jobsRes.data ?? []) as unknown as EnrollmentJob[]}
       devices={(devicesRes.data ?? []) as Device[]}
       labelUnit={institution.label_unit}
+      labelMember={institution.label_member}
+      labelMembers={institution.label_members}
     />
   )
 }

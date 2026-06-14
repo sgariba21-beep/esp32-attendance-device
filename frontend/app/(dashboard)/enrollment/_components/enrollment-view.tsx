@@ -17,6 +17,8 @@ type Props = {
   initialJobs: EnrollmentJob[]
   devices: Device[]
   labelUnit: string
+  labelMember: string
+  labelMembers: string
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -62,7 +64,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
   )
 }
 
-export function EnrollmentView({ initialJobs, devices, labelUnit }: Props) {
+export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, labelMembers }: Props) {
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
@@ -140,7 +142,7 @@ export function EnrollmentView({ initialJobs, devices, labelUnit }: Props) {
                 <TableHead>Created</TableHead>
                 <TableHead>Command</TableHead>
                 <TableHead>Device</TableHead>
-                <TableHead>Student</TableHead>
+                <TableHead>{labelMember}</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Note</TableHead>
               </TableRow>
@@ -209,6 +211,8 @@ export function EnrollmentView({ initialJobs, devices, labelUnit }: Props) {
         onOpenChange={setDialogOpen}
         devices={devices}
         labelUnit={labelUnit}
+        labelMember={labelMember}
+        labelMembers={labelMembers}
       />
     </div>
   )

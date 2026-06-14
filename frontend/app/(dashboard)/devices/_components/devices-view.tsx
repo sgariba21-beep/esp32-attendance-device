@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { DeviceDialog } from './device-dialog'
 import { AssignDeviceDialog } from './assign-device-dialog'
 import { deleteDevice } from '../_actions'
+import { pluralize } from '@/lib/utils'
 import type { Device, UnassignedDevice, InstitutionConfig } from '@/lib/types'
 import type { UserRole } from '@/lib/supabase/dal'
 
@@ -110,7 +111,7 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
               <div className="flex items-center justify-between">
                 <p className="text-sm font-semibold">{group_name}</p>
                 <span className="text-xs text-muted-foreground tabular-nums">
-                  {group.length} unit{group.length !== 1 ? 's' : ''}
+                  {group.length} {group.length !== 1 ? pluralize(institution.label_unit.toLowerCase()) : institution.label_unit.toLowerCase()}
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
@@ -157,7 +158,14 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
         </div>
       )}
 
-      <DeviceDialog open={dialogOpen} onOpenChange={setDialogOpen} device={editing} />
+      <DeviceDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        device={editing}
+        labelGroup={institution.label_group}
+        labelUnit={institution.label_unit}
+        institutionType={institution.type}
+      />
 
       <AssignDeviceDialog
         open={assignOpen}
@@ -170,7 +178,7 @@ export function DevicesView({ devices, unassignedDevices, role, institution, all
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
         title="Delete device?"
-        description={confirmTarget ? `This will permanently delete the ${confirmTarget.group_name} ${confirmTarget.unit_name} device. Members assigned to it will lose their unit assignment.` : ''}
+        description={confirmTarget ? `This will permanently delete the ${confirmTarget.group_name} ${confirmTarget.unit_name} device. Members assigned to it will lose their ${institution.label_unit.toLowerCase()} assignment.` : ''}
         confirmLabel="Delete device"
         loading={deleting}
         onConfirm={handleDelete}

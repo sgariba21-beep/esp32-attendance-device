@@ -13,7 +13,7 @@ import { Pagination } from '@/components/ui/pagination'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
+import { cn, pluralize } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import { StaffDialog } from './staff-dialog'
 import { setStaffMemberStatus } from '../_actions'
@@ -112,7 +112,7 @@ export function StaffView({ members, devices, role, labels }: Props) {
         />
 
         <NativeSelect value={unitFilter} onChange={(e) => { setUnitFilter(e.target.value); setPage(1) }}>
-          <option value="">All {labels.label_unit.toLowerCase()}s</option>
+          <option value="">All {pluralize(labels.label_unit.toLowerCase())}</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>{d.group_name} {d.unit_name}</option>
           ))}

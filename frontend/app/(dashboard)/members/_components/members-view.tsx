@@ -13,7 +13,7 @@ import { Pagination } from '@/components/ui/pagination'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
+import { cn, pluralize } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import { MemberDialog } from './member-dialog'
 import { setMemberStatus } from '../_actions'
@@ -32,14 +32,11 @@ type Props = {
   devices: Device[]
   role: UserRole
   labels: Labels
-  institutionType: 'school' | 'office'
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
-type TypeFilter = 'all' | 'student' | 'staff'
 
-export function MembersView({ members, devices, role, labels, institutionType }: Props) {
-  const isOffice = institutionType === 'office'
+export function MembersView({ members, devices, role, labels }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<MemberWithDevice | null>(null)
@@ -49,7 +46,6 @@ export function MembersView({ members, devices, role, labels, institutionType }:
   const [search, setSearch] = useState('')
   const [unitFilter, setUnitFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [page, setPage] = useState(1)
 
   const PAGE_SIZE = 50
@@ -70,12 +66,11 @@ export function MembersView({ members, devices, role, labels, institutionType }:
       if (q && !m.fullname.toLowerCase().includes(q) && !m.sid.toLowerCase().includes(q)) return false
       if (unitFilter && m.device_id !== unitFilter) return false
       if (statusFilter !== 'all' && m.status !== statusFilter) return false
-      if (typeFilter !== 'all' && m.member_type !== typeFilter) return false
       return true
     })
-  }, [members, search, unitFilter, statusFilter, typeFilter])
+  }, [members, search, unitFilter, statusFilter])
 
-  const hasFilters = search || unitFilter || statusFilter !== 'all' || typeFilter !== 'all'
+  const hasFilters = search || unitFilter || statusFilter !== 'all'
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -108,7 +103,7 @@ export function MembersView({ members, devices, role, labels, institutionType }:
           value={unitFilter}
           onChange={(e) => { setUnitFilter(e.target.value); setPage(1) }}
         >
-          <option value="">All {labels.label_unit.toLowerCase()}s</option>
+          <option value="">All {pluralize(labels.label_unit.toLowerCase())}</option>
           {devices.map((d) => (
             <option key={d.id} value={d.id}>
               {d.group_name} {d.unit_name}
@@ -125,20 +120,11 @@ export function MembersView({ members, devices, role, labels, institutionType }:
           <option value="inactive">Inactive</option>
         </NativeSelect>
 
-        <NativeSelect
-          value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setPage(1) }}
-        >
-          <option value="all">All types</option>
-          {!isOffice && <option value="student">Student</option>}
-          <option value="staff">Staff</option>
-        </NativeSelect>
-
         {hasFilters && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setSearch(''); setUnitFilter(''); setStatusFilter('all'); setTypeFilter('all'); setPage(1) }}
+            onClick={() => { setSearch(''); setUnitFilter(''); setStatusFilter('all'); setPage(1) }}
           >
             Clear
           </Button>
@@ -161,7 +147,6 @@ export function MembersView({ members, devices, role, labels, institutionType }:
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>ID</TableHead>
-                  <TableHead>Type</TableHead>
                   <TableHead>{labels.label_unit}</TableHead>
                   <TableHead>Fingerprints</TableHead>
                   <TableHead>Status</TableHead>
@@ -178,9 +163,6 @@ export function MembersView({ members, devices, role, labels, institutionType }:
                       </TableCell>
                       <TableCell className={cn('font-mono tabular-nums text-muted-foreground text-xs', inactive && 'opacity-60')}>
                         {m.sid}
-                      </TableCell>
-                      <TableCell className={cn('capitalize text-muted-foreground text-xs', inactive && 'opacity-60')}>
-                        {m.member_type}
                       </TableCell>
                       <TableCell className={cn(inactive && 'opacity-60')}>
                         {m.device ? `${m.device.group_name} ${m.device.unit_name}` : '—'}
@@ -242,7 +224,6 @@ export function MembersView({ members, devices, role, labels, institutionType }:
         devices={devices}
         usedFids={usedFids}
         labels={labels}
-        institutionType={institutionType}
       />
 
       <ConfirmDialog

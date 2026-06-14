@@ -14,11 +14,8 @@ export default async function MembersPage() {
     .select('id, sid, fullname, group_name, fin1, fin2, status, member_type, device_id, created_at, device:device_id(id, group_name, unit_name)')
     .order('fullname')
 
-  // When the institution tracks both types, /members shows students + generic members only.
-  // Staff appear on the dedicated /staff page.
-  if (institution.track_staff) {
-    membersQ = membersQ.neq('member_type', 'staff')
-  }
+  // /members is the students page; staff are managed on the dedicated /staff page.
+  membersQ = membersQ.neq('member_type', 'staff')
 
   let devicesQ = supabase
     .from('devices')
@@ -60,7 +57,6 @@ export default async function MembersPage() {
           label_unit: institution.label_unit,
           label_group: institution.label_group,
         }}
-        institutionType={institution.type}
       />
     </>
   )
