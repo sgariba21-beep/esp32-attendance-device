@@ -23,13 +23,16 @@ import {
 
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
-function buildNavItems(institution: InstitutionConfig): NavItem[] {
+function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[] {
   const items: NavItem[] = [
-    { href: '/attendance',  label: 'Attendance',                     icon: CalendarDays,  roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-    { href: '/members',     label: institution.label_members,         icon: Users,         roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
   ]
 
-  if (institution.track_staff) {
+  if (institution.track_students) {
+    items.push({ href: '/members', label: institution.label_members, icon: Users, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+  }
+
+  if (institution.track_staff || role === 'platform_admin') {
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
   }
 
@@ -55,7 +58,7 @@ function buildNavItems(institution: InstitutionConfig): NavItem[] {
 
 export function Sidebar({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
   const pathname = usePathname()
-  const navItems = buildNavItems(institution)
+  const navItems = buildNavItems(institution, role)
   const visible = navItems.filter((item) => (item.roles as UserRole[]).includes(role))
 
   async function handleSignOut() {

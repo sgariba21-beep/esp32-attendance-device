@@ -65,7 +65,7 @@ export default async function AttendancePage({
 
   // Fetch all institutions for platform_admin filter dropdown
   const allInstitutions = role === 'platform_admin'
-    ? (await supabase.from('institutions').select('id, name').order('name')).data ?? []
+    ? (await supabase.from('institutions').select('id, name, track_students, track_staff').order('name')).data ?? []
     : []
 
   const [membersRes, devicesRes, periodsRes] = await Promise.all([membersQ, devicesQ, periodsQ])

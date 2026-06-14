@@ -25,12 +25,14 @@ import {
 
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
-function buildPrimaryNav(institution: InstitutionConfig): NavItem[] {
+function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavItem[] {
   const items: NavItem[] = [
-    { href: '/attendance', label: 'Attendance',               icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
-    { href: '/members',    label: institution.label_members,   icon: Users,        roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
   ]
-  if (institution.track_staff) {
+  if (institution.track_students) {
+    items.push({ href: '/members', label: institution.label_members, icon: Users, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+  }
+  if (institution.track_staff || role === 'platform_admin') {
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
   }
   items.push(
@@ -60,7 +62,7 @@ export function MobileBottomNav({ role, institution }: { role: UserRole; institu
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
 
-  const primaryNav = buildPrimaryNav(institution)
+  const primaryNav = buildPrimaryNav(institution, role)
   const moreNav = buildMoreNav(institution)
 
   const visiblePrimary = primaryNav.filter((item) => (item.roles as UserRole[]).includes(role))

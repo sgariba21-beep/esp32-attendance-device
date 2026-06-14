@@ -74,7 +74,7 @@ export type MemberWithDevice = {
   fin1: number
   fin2: number
   status: 'active' | 'inactive'
-  member_type: 'student' | 'staff' | 'member'
+  member_type: 'student' | 'staff'
   created_at: string
   device_id: string
   device: { id: string; group_name: string; unit_name: string } | null

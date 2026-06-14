@@ -1,0 +1,10 @@
+-- Remove 'member' from member_type check constraint and update default to 'student'.
+-- No data migration needed — confirmed no rows with member_type = 'member'.
+--
+-- Run as three separate db query calls (multi-statement not supported):
+--
+-- 1. Drop old check constraint (auto-named by PostgreSQL):
+-- DO $$ DECLARE cname text; BEGIN SELECT conname INTO cname FROM pg_constraint WHERE conrelid = 'members'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%member_type%'; IF cname IS NOT NULL THEN EXECUTE 'ALTER TABLE members DROP CONSTRAINT ' || quote_ident(cname); END IF; END $$;
+--
+-- 2. Add new constraint + update default:
+-- ALTER TABLE members ADD CONSTRAINT members_member_type_check CHECK (member_type IN ('student', 'staff')), ALTER COLUMN member_type SET DEFAULT 'student';

@@ -8,7 +8,7 @@ export type MemberFormData = {
   sid: string
   fullname: string
   device_id: string
-  member_type: 'student' | 'staff' | 'member'
+  member_type: 'student' | 'staff'
   fin1: number
   fin2: number
 }

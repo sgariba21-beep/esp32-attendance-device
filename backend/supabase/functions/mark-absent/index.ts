@@ -89,7 +89,7 @@ Deno.serve(async (req: Request) => {
     // Determine which member types to mark absent for this institution.
     // 'member' (generic/neutral) follows student rules.
     const trackedTypes: string[] = [];
-    if (inst.track_students) trackedTypes.push("student", "member");
+    if (inst.track_students) trackedTypes.push("student");
     if (inst.track_staff) trackedTypes.push("staff");
 
     if (trackedTypes.length === 0) {

@@ -59,7 +59,7 @@ type Props = {
   role: UserRole
   assignedUnit: string | null
   labels: Labels
-  institutions: { id: string; name: string }[]
+  institutions: { id: string; name: string; track_students: boolean; track_staff: boolean }[]
   track_students: boolean
   track_staff: boolean
   institutionType: 'school' | 'office'
@@ -129,6 +129,18 @@ export function AttendanceView({
   const isTeacher = role === 'teacher' || role === 'staff'
   const isPlatformAdmin = role === 'platform_admin'
   const isOffice = institutionType === 'office'
+
+  // For platform_admin: when an institution is selected, use its tracking flags to
+  // control which type options appear. When none selected, show both.
+  const selectedInstConfig = isPlatformAdmin && institutionFilter
+    ? institutions.find((i) => i.id === institutionFilter) ?? null
+    : null
+  const showStudentType = isPlatformAdmin
+    ? (selectedInstConfig ? selectedInstConfig.track_students : true)
+    : (!isOffice && track_students)
+  const showStaffType = isPlatformAdmin
+    ? (selectedInstConfig ? selectedInstConfig.track_staff : true)
+    : track_staff
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
@@ -311,9 +323,8 @@ export function AttendanceView({
             onChange={(e) => { setTypeFilter(e.target.value); applyFilters({ type: e.target.value }) }}
           >
             <option value="">All types</option>
-            {!isOffice && <option value="student">Student</option>}
-            {track_staff && <option value="staff">{labels.label_staff}</option>}
-            <option value="member">Member</option>
+            {showStudentType && <option value="student">Student</option>}
+            {showStaffType && <option value="staff">{labels.label_staff}</option>}
           </NativeSelect>
         </div>
 
@@ -328,8 +339,8 @@ export function AttendanceView({
             </div>
           )}
 
-          {/* Student member filter — hidden for office institutions */}
-          {!isOffice && track_students && (
+          {/* Student member filter */}
+          {showStudentType && (
             <div className="flex flex-col gap-1">
               <Label className="text-xs">{labels.label_members}</Label>
               <MultiSelect
@@ -345,7 +356,7 @@ export function AttendanceView({
           )}
 
           {/* Staff member filter */}
-          {track_staff && (
+          {showStaffType && (
             <div className="flex flex-col gap-1">
               <Label className="text-xs">{labels.label_staff_plural}</Label>
               <MultiSelect

@@ -36,7 +36,7 @@ type Props = {
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
-type TypeFilter = 'all' | 'student' | 'staff' | 'member'
+type TypeFilter = 'all' | 'student' | 'staff'
 
 export function MembersView({ members, devices, role, labels, institutionType }: Props) {
   const isOffice = institutionType === 'office'
@@ -132,7 +132,6 @@ export function MembersView({ members, devices, role, labels, institutionType }:
           <option value="all">All types</option>
           {!isOffice && <option value="student">Student</option>}
           <option value="staff">Staff</option>
-          <option value="member">Member</option>
         </NativeSelect>
 
         {hasFilters && (
