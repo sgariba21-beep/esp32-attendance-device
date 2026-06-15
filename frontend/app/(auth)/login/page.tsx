@@ -6,6 +6,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
+// L1: this lockout is a UX nicety ONLY — it lives in localStorage and is trivially
+// bypassed (clear storage / call /api/signin directly). The real brute-force
+// protection is Supabase Auth's server-side rate limit (see
+// [auth.rate_limit] sign_in_sign_ups in backend/supabase/config.toml). Do not
+// rely on the values below for security.
 const MAX_ATTEMPTS = 3
 const LOCKOUT_MS = 5 * 60 * 1000
 const KEY_ATTEMPTS = 'login_attempts'

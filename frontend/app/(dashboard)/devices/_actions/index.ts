@@ -3,23 +3,25 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { ownsRecord } from '@/lib/supabase/ownership'
 
 export type DeviceFormData = {
   group_name: string
   unit_name: string
-  mode?: 'present_absent' | 'time_in_out'
 }
 
 export async function updateDevice(id: string, data: DeviceFormData) {
-  await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2): only edit devices in your own institution.
+  if (!(await ownsRecord('devices', id, session))) return { error: 'Not found.' }
 
   const { error } = await supabase
     .from('devices')
     .update({
       group_name: data.group_name.trim(),
       unit_name: data.unit_name.trim(),
-      mode: data.mode ?? 'present_absent',
     })
     .eq('id', id)
 
@@ -33,8 +35,13 @@ export async function updateDevice(id: string, data: DeviceFormData) {
 }
 
 export async function deleteDevice(id: string) {
-  await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C3): only delete devices in your own institution. This is the
+  // destructive path (deactivates members + queues a SPIFFS factory wipe), so the
+  // ownership check is critical.
+  if (!(await ownsRecord('devices', id, session))) return { error: 'Not found.' }
 
   // Deactivate any members still assigned to this device BEFORE deleting it.
   // The device's FK is ON DELETE SET NULL, so after the delete their device_id

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { ownsRecord } from '@/lib/supabase/ownership'
 
 export type MemberFormData = {
   sid: string
@@ -14,7 +15,8 @@ export type MemberFormData = {
 }
 
 export async function createMember(data: MemberFormData) {
-  const { institutionId } = await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
+  const { institutionId } = session
   const supabase = createAdminClient()
 
   const device = await supabase
@@ -24,6 +26,12 @@ export async function createMember(data: MemberFormData) {
     .single()
 
   if (!device.data) return { error: 'Device not found.', id: null }
+
+  // Tenant guard (C2): a non-platform admin may only attach members to devices
+  // that belong to their own institution.
+  if (session.role !== 'platform_admin' && device.data.institution_id !== institutionId) {
+    return { error: 'Device not found.', id: null }
+  }
 
   const { data: newMember, error } = await supabase
     .from('members')
@@ -52,16 +60,24 @@ export async function createMember(data: MemberFormData) {
 }
 
 export async function updateMember(id: string, data: MemberFormData) {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2): only edit members in your own institution.
+  if (!(await ownsRecord('members', id, session))) return { error: 'Not found.' }
 
   const device = await supabase
     .from('devices')
-    .select('group_name')
+    .select('group_name, institution_id')
     .eq('id', data.device_id)
     .single()
 
   if (!device.data) return { error: 'Device not found.' }
+
+  // Tenant guard (C2): the target device must also be in your institution.
+  if (session.role !== 'platform_admin' && device.data.institution_id !== session.institutionId) {
+    return { error: 'Device not found.' }
+  }
 
   const { error } = await supabase
     .from('members')
@@ -85,8 +101,11 @@ export async function updateMember(id: string, data: MemberFormData) {
 }
 
 export async function setMemberStatus(id: string, status: 'active' | 'inactive') {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2)
+  if (!(await ownsRecord('members', id, session))) return { error: 'Not found.' }
 
   const { error } = await supabase
     .from('members')

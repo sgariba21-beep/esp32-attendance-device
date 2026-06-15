@@ -8,20 +8,28 @@ export async function applyPromotion() {
   const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
-  let studentsQ = supabase
+  // H6: promotion MUST be scoped to a single institution. A platform_admin has
+  // no institution_id, and running unscoped would promote/deactivate members
+  // across every tenant at once (mixing year groups). Refuse.
+  if (!institutionId) {
+    return {
+      error: 'Promotion must be run by an institution admin within a single institution.',
+      promoted: 0,
+      deactivated: 0,
+    }
+  }
+
+  const studentsQ = supabase
     .from('members')
     .select('id, group_name, device_id, device:device_id(group_name, unit_name)')
     .eq('status', 'active')
     .neq('member_type', 'staff')
+    .eq('institution_id', institutionId)
 
-  let devicesQ = supabase
+  const devicesQ = supabase
     .from('devices')
     .select('id, group_name, unit_name')
-
-  if (institutionId) {
-    studentsQ = studentsQ.eq('institution_id', institutionId)
-    devicesQ = devicesQ.eq('institution_id', institutionId)
-  }
+    .eq('institution_id', institutionId)
 
   const [studentsRes, devicesRes] = await Promise.all([studentsQ, devicesQ])
 

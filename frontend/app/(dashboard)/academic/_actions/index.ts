@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { ownsRecord } from '@/lib/supabase/ownership'
 
 // ── Holidays ─────────────────────────────────────────────────────────────────
 
@@ -28,8 +29,11 @@ export async function createHoliday(data: { start_date: string; end_date: string
 }
 
 export async function deleteHoliday(id: string) {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2)
+  if (!(await ownsRecord('holidays', id, session))) return { error: 'Not found.' }
 
   const { error } = await supabase.from('holidays').delete().eq('id', id)
   if (error) return { error: error.message }
@@ -68,8 +72,11 @@ export async function createAcademicTerm(data: AcademicFormData) {
 }
 
 export async function updateAcademicTerm(id: string, data: AcademicFormData) {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2)
+  if (!(await ownsRecord('periods', id, session))) return { error: 'Not found.' }
 
   const { error } = await supabase
     .from('periods')
@@ -91,8 +98,12 @@ export async function updateAcademicTerm(id: string, data: AcademicFormData) {
 }
 
 export async function setActiveTerm(id: string) {
-  const { institutionId } = await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
+  const { institutionId } = session
   const supabase = createAdminClient()
+
+  // Tenant guard (C2/M6): only activate a period in your own institution.
+  if (!(await ownsRecord('periods', id, session))) return { error: 'Not found.' }
 
   let deactivateQ = supabase.from('periods').update({ status: 'inactive' }).neq('id', id)
   if (institutionId) deactivateQ = deactivateQ.eq('institution_id', institutionId)
@@ -100,10 +111,11 @@ export async function setActiveTerm(id: string) {
 
   if (deactivateError) return { error: deactivateError.message }
 
-  const { error: activateError } = await supabase
-    .from('periods')
-    .update({ status: 'active' })
-    .eq('id', id)
+  // M6: scope the activate to the same institution so a stray id can never flip
+  // another tenant's period active.
+  let activateQ = supabase.from('periods').update({ status: 'active' }).eq('id', id)
+  if (institutionId) activateQ = activateQ.eq('institution_id', institutionId)
+  const { error: activateError } = await activateQ
 
   if (activateError) return { error: activateError.message }
 
@@ -112,8 +124,11 @@ export async function setActiveTerm(id: string) {
 }
 
 export async function deleteAcademicTerm(id: string) {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2)
+  if (!(await ownsRecord('periods', id, session))) return { error: 'Not found.' }
 
   const { error } = await supabase.from('periods').delete().eq('id', id)
 

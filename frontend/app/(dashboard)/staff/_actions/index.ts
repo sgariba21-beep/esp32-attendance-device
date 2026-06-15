@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { ownsRecord } from '@/lib/supabase/ownership'
 
 export type StaffFormData = {
   sid: string
@@ -13,7 +14,8 @@ export type StaffFormData = {
 }
 
 export async function createStaffMember(data: StaffFormData) {
-  const { institutionId } = await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
+  const { institutionId } = session
   const supabase = createAdminClient()
 
   const device = await supabase
@@ -23,6 +25,11 @@ export async function createStaffMember(data: StaffFormData) {
     .single()
 
   if (!device.data) return { error: 'Device not found.', id: null }
+
+  // Tenant guard (C2)
+  if (session.role !== 'platform_admin' && device.data.institution_id !== institutionId) {
+    return { error: 'Device not found.', id: null }
+  }
 
   const { data: newMember, error } = await supabase
     .from('members')
@@ -51,16 +58,23 @@ export async function createStaffMember(data: StaffFormData) {
 }
 
 export async function updateStaffMember(id: string, data: StaffFormData) {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2)
+  if (!(await ownsRecord('members', id, session))) return { error: 'Not found.' }
 
   const device = await supabase
     .from('devices')
-    .select('group_name')
+    .select('group_name, institution_id')
     .eq('id', data.device_id)
     .single()
 
   if (!device.data) return { error: 'Device not found.' }
+
+  if (session.role !== 'platform_admin' && device.data.institution_id !== session.institutionId) {
+    return { error: 'Device not found.' }
+  }
 
   const { error } = await supabase
     .from('members')
@@ -84,8 +98,11 @@ export async function updateStaffMember(id: string, data: StaffFormData) {
 }
 
 export async function setStaffMemberStatus(id: string, status: 'active' | 'inactive') {
-  await requireRole('super_admin', 'admin')
+  const session = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
+
+  // Tenant guard (C2)
+  if (!(await ownsRecord('members', id, session))) return { error: 'Not found.' }
 
   const { error } = await supabase
     .from('members')

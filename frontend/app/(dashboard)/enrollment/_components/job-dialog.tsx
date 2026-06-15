@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SingleSelect } from '@/components/ui/single-select'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
 import type { StudentOption } from '../_actions'
 import type { Device } from '@/lib/types'
@@ -56,11 +57,17 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   const [loading, setLoading] = useState(false)
   const [deviceStudents, setDeviceStudents] = useState<StudentOption[]>([])
   const [loadingStudents, setLoadingStudents] = useState(false)
+  // M8: overwrite warning state (second confirmation before clobbering a slot).
+  const [overwriteMsg, setOverwriteMsg] = useState<string | null>(null)
+  const [pendingJob, setPendingJob] = useState<Parameters<typeof createEnrollmentJob>[0] | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     if (open) {
       setError(null)
       setDeviceStudents([])
+      setOverwriteMsg(null)
+      setPendingJob(null)
       setForm({ ...empty, device_id: devices[0]?.id ?? '' })
     }
   }, [open, devices])
@@ -128,11 +135,31 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
 
     const result = await createEnrollmentJob(jobData)
     setLoading(false)
+    // M8: the slot is already in use by another member — warn and require a
+    // second, explicit confirmation before overwriting their fingerprint.
+    if (result.needsConfirm) {
+      setPendingJob(jobData)
+      setOverwriteMsg(result.conflict ?? 'This will overwrite an existing fingerprint on this device.')
+      return
+    }
+    if (result.error) { setError(result.error); return }
+    onOpenChange(false)
+  }
+
+  async function confirmOverwrite() {
+    if (!pendingJob || pendingJob.command !== 'register') return
+    setConfirming(true)
+    setError(null)
+    const result = await createEnrollmentJob({ ...pendingJob, confirmOverwrite: true })
+    setConfirming(false)
+    setPendingJob(null)
+    setOverwriteMsg(null)
     if (result.error) { setError(result.error); return }
     onOpenChange(false)
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -275,5 +302,16 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
         </form>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      open={!!overwriteMsg}
+      onOpenChange={(o) => { if (!o) { setOverwriteMsg(null); setPendingJob(null) } }}
+      title="Overwrite existing fingerprint?"
+      description={`${overwriteMsg ?? ''} This permanently replaces the existing template in that slot and cannot be undone. Confirm again to proceed.`}
+      confirmLabel="Overwrite anyway"
+      loading={confirming}
+      onConfirm={confirmOverwrite}
+    />
+    </>
   )
 }

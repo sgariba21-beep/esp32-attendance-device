@@ -1,0 +1,2 @@
+# Local device secret — never commit (H7/H8). Use secrets.example.h as the template.
+secrets.h

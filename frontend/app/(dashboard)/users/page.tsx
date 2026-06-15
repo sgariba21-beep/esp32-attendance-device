@@ -19,8 +19,22 @@ export default async function UsersPage() {
     ? admin.from('institutions').select('id, name').order('name')
     : Promise.resolve({ data: [] as { id: string; name: string }[] })
 
-  const [{ data: authData }, { data: profiles }, { data: devices }, { data: institutionsData }] = await Promise.all([
-    admin.auth.admin.listUsers(),
+  // M12: listUsers() returns only the first page (default 50). Page through all
+  // of them so accounts beyond the first page are not silently missing.
+  async function listAllAuthUsers() {
+    const perPage = 1000
+    const all: Awaited<ReturnType<typeof admin.auth.admin.listUsers>>['data']['users'][number][] = []
+    for (let page = 1; ; page++) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage })
+      if (error || !data?.users?.length) break
+      all.push(...data.users)
+      if (data.users.length < perPage) break
+    }
+    return all
+  }
+
+  const [authUsers, { data: profiles }, { data: devices }, { data: institutionsData }] = await Promise.all([
+    listAllAuthUsers(),
     profilesQ,
     admin.from('devices').select('id, group_name, unit_name, institution_id').order('group_name').order('unit_name'),
     institutionsP,
@@ -35,7 +49,7 @@ export default async function UsersPage() {
 
   const institutionUserIds = new Set(profileMap.keys())
 
-  const users = (authData?.users ?? [])
+  const users = authUsers
     .filter((u) => !institutionId || institutionUserIds.has(u.id))
     .map((u) => {
       const instId = profileMap.get(u.id)?.institution_id ?? null

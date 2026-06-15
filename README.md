@@ -94,20 +94,24 @@ institutions    (id, name, type, logo_url, label_member, label_members, label_gr
                  skip_weekends, device_secret, timezone)
 
 -- Members (students, staff, etc.) — scoped to institution
--- member_type: 'student' | 'staff'
+-- member_type: 'student' | 'staff'  (default 'student')
+-- sid is UNIQUE PER INSTITUTION (institution_id, sid), not globally
 -- device_id FK is ON DELETE SET NULL (device deletion preserves member records)
-members         (id, sid, fullname, group_name, fin1, fin2, status, member_type,
+members         (id, sid, fullname, group_name, unit_name, fin1, fin2, status, member_type,
                  device_id→devices SET NULL, institution_id, created_at)
 
 -- One ESP32 per unit — scoped to institution
--- mode: 'present_absent' | 'time_in_out'
-devices         (id, group_name, unit_name, display_name, mac, mode, institution_id)
+-- scan behaviour is governed by the institution's student_scan_mode/staff_scan_mode
+-- provisioning_token: issued by /register, required by /assignment-poll (H7)
+devices         (id, group_name, unit_name, display_name, mac, provisioning_token, institution_id)
 
 -- Academic periods — scoped to institution (nullable for office-type institutions)
 periods         (id, term, year, status, start_date, end_date, institution_id)
 
 -- Attendance records — scoped to institution
 -- scan_type: 'present' | 'absent' | 'time_in' | 'time_out'
+-- date/time are stored in the INSTITUTION's timezone (log-attendance + mark-absent agree)
+-- scan_id is UNIQUE PER INSTITUTION (institution_id, scan_id); dedup also on (member_id, date, scan_type)
 -- device_id FK is ON DELETE SET NULL
 attendance      (id, member_id→members, period_id→periods, device_id→devices SET NULL,
                  date, time, status, scan_type, scan_id, institution_id)
@@ -153,8 +157,10 @@ Authentication uses Supabase Auth (server-side only — all Supabase calls go th
 - `frontend/lib/supabase/dal.ts` exports `verifySession()` and `requireRole(...roles)`.
 - `verifySession()` is `cache()`-wrapped — one DB hit per render cycle regardless of how many pages call it.
 - `requireRole()` calls `verifySession()` and redirects to `/unauthorized` if the role doesn't match. `platform_admin` bypasses all role checks.
+- **Fail-closed:** an authenticated user with no `profiles` row (or no role) is redirected to `/unauthorized` — it does **not** default to any role. Public sign-up is disabled in Supabase Auth; accounts are created only via `/users` and `/onboarding`.
+- **Tenant ownership:** because the dashboard uses the service role (RLS bypassed), every mutating server action verifies the target record belongs to the caller's institution via `lib/supabase/ownership.ts` (`ownsRecord`). `platform_admin` is cross-tenant by design.
 - The dashboard layout calls `verifySession()` and passes `role` to the sidebar and mobile nav, which filter nav items by role.
-- `teacher` and `staff` have an `assigned_unit` in their profile. Attendance and member data is filtered server-side to that unit before rendering.
+- `teacher` and `staff` have an `assigned_unit` in their profile. Attendance and member data is filtered server-side to that unit before rendering — including the CSV export (`/api/attendance/export`) and the realtime/enrollment SSE streams, which are scoped to the caller's institution.
 
 ### Creating the first super_admin (per institution)
 
@@ -195,11 +201,18 @@ Additional accounts are managed through the `/users` page in the dashboard.
 
 1. Device boots with no `device_identity.json` in SPIFFS.
 2. Calls `POST /register` with its MAC address (`x-bootstrap-secret` header).
-3. Receives a `device_id` and `status: "pending"`.
-4. Shows yellow breathing LED and polls `POST /assignment-poll` every 5 s.
+3. Receives a `device_id`, a `provisioning_token`, and `status: "pending"`. The
+   device persists both to `provisioning.json` so a reboot keeps the token (H7).
+4. Shows yellow breathing LED and polls `POST /assignment-poll` every 5 s, sending
+   `{ device_id, provisioning_token }`.
 5. An admin assigns the device from the dashboard `/devices` page.
-6. Poll returns `status: "assigned"` with `institution_id`, `device_secret`, `display_name`.
-7. Device writes `device_identity.json` to SPIFFS and begins normal operation.
+6. Poll returns `status: "assigned"` with `institution_id`, `device_secret`,
+   `display_name` — **only if the provisioning_token matches** (otherwise 401).
+7. Device writes `device_identity.json` to SPIFFS, deletes `provisioning.json`,
+   and begins normal operation.
+
+> **TLS:** the firmware validates server certificates (`certs.h` → `ROOT_CA_BUNDLE`).
+> The bootstrap secret lives in `secrets.h` (gitignored), not in source.
 
 ### Normal operation
 

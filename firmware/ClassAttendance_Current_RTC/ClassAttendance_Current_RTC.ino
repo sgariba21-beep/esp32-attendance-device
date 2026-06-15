@@ -17,15 +17,23 @@ const char* ENROLL_UPD_URL      = "https://lxpemewonievaazboyez.supabase.co/func
 const char* REGISTER_URL        = "https://lxpemewonievaazboyez.supabase.co/functions/v1/register";
 const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/functions/v1/assignment-poll";
 
-// Bootstrap secret — sent as x-bootstrap-secret on /register and /assignment-poll only.
-// Once the device has an institution device_secret (from assignment), this is no longer used.
-const char* BOOTSTRAP_SECRET = "cfa56727b30040fe92f512c63c425f2c0682b6bcd65a7f8982e182b13bb32185";
+// Bootstrap secret (x-bootstrap-secret, used only on /register + /assignment-poll)
+// and the TLS root CA bundle now live in separate per-deployment headers kept OUT
+// of source control / filled before flashing:
+//   secrets.h → #define BOOTSTRAP_SECRET "..."      (rotated; matches Supabase env)
+//   certs.h   → const char* ROOT_CA_BUNDLE = "..."  (TLS certificate validation, C4)
+// See secrets.example.h and certs.h for setup instructions.
+#include "secrets.h"
+#include "certs.h"
 
 // SPIFFS file written by NetworkTask after dashboard assignment
 #define DEVICE_IDENTITY_FILE "/device_identity.json"
+// SPIFFS file holding device_id + provisioning_token while awaiting assignment (H7),
+// so a reboot during the pending window does not lose the token.
+#define PROVISIONING_FILE "/provisioning.json"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.1.5"         // increment on each flash
+#define FIRMWARE_VERSION  "1.2.0"         // increment on each flash (1.2.0: TLS validation, provisioning token, JSON escaping)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -111,6 +119,7 @@ String deviceId      = "";
 String institutionId = "";
 String deviceSecret  = "";
 String displayName   = "";
+String provisioningToken = "";            // H7: required by /assignment-poll before secret release
 volatile bool pendingAssignment = false;  // true until dashboard assigns this device
 
 TaskHandle_t hFingerprint = NULL;
@@ -175,6 +184,10 @@ bool loadDeviceIdentity();
 void saveDeviceIdentity();
 bool registerDevice();
 bool pollAssignment();
+String jsonEscape(const String &s);
+bool loadProvisioning();
+void saveProvisioning();
+void clearProvisioning();
 
 /* ---------------- LED helpers ---------------- */
 
@@ -251,15 +264,79 @@ bool loadDeviceIdentity() {
   return deviceId.length() > 0 && institutionId.length() > 0;
 }
 
+// M9: escape a string for safe inclusion inside a JSON string literal. Without
+// this, a display_name / member sid containing a " or \ corrupts the JSON we
+// write to SPIFFS or POST to the server.
+String jsonEscape(const String &s) {
+  String out;
+  out.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); ++i) {
+    char c = s[i];
+    switch (c) {
+      case '"':  out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n";  break;
+      case '\r': out += "\\r";  break;
+      case '\t': out += "\\t";  break;
+      default:
+        if ((unsigned char)c < 0x20) {
+          char buf[7];
+          sprintf(buf, "\\u%04x", c);
+          out += buf;
+        } else {
+          out += c;
+        }
+    }
+  }
+  return out;
+}
+
 void saveDeviceIdentity() {
   File f = SPIFFS.open(DEVICE_IDENTITY_FILE, FILE_WRITE);
   if (!f) { Serial.println("Failed to write device identity"); return; }
-  f.print("{\"device_id\":\"" + deviceId +
-          "\",\"institution_id\":\"" + institutionId +
-          "\",\"device_secret\":\"" + deviceSecret +
-          "\",\"display_name\":\"" + displayName + "\"}");
+  f.print("{\"device_id\":\"" + jsonEscape(deviceId) +
+          "\",\"institution_id\":\"" + jsonEscape(institutionId) +
+          "\",\"device_secret\":\"" + jsonEscape(deviceSecret) +
+          "\",\"display_name\":\"" + jsonEscape(displayName) + "\"}");
   f.close();
   Serial.println("Device identity saved: " + deviceId + " / " + displayName);
+}
+
+// H7: persist device_id + provisioning_token while the device is pending so a
+// reboot before assignment doesn't lose the token (the token is required by
+// /assignment-poll to retrieve the institution device_secret).
+void saveProvisioning() {
+  File f = SPIFFS.open(PROVISIONING_FILE, FILE_WRITE);
+  if (!f) { Serial.println("Failed to write provisioning file"); return; }
+  f.print("{\"device_id\":\"" + jsonEscape(deviceId) +
+          "\",\"provisioning_token\":\"" + jsonEscape(provisioningToken) + "\"}");
+  f.close();
+}
+
+bool loadProvisioning() {
+  if (!SPIFFS.exists(PROVISIONING_FILE)) return false;
+  File f = SPIFFS.open(PROVISIONING_FILE, FILE_READ);
+  if (!f) return false;
+  String json = f.readString();
+  f.close();
+
+  auto extractStr = [&](const String &key) -> String {
+    String search = "\"" + key + "\":\"";
+    int p = json.indexOf(search);
+    if (p < 0) return "";
+    int start = p + search.length();
+    int end = json.indexOf('"', start);
+    if (end < 0) return "";
+    return json.substring(start, end);
+  };
+
+  deviceId          = extractStr("device_id");
+  provisioningToken = extractStr("provisioning_token");
+  return deviceId.length() > 0 && provisioningToken.length() > 0;
+}
+
+void clearProvisioning() {
+  if (SPIFFS.exists(PROVISIONING_FILE)) SPIFFS.remove(PROVISIONING_FILE);
 }
 
 /* ================== Captive Portal ================== */
@@ -499,7 +576,7 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
 
   for (int attempt = 1; attempt <= POST_MAX_RETRIES; ++attempt) {
     WiFiClientSecure client;
-    client.setInsecure();
+    client.setCACert(ROOT_CA_BUNDLE);  // C4: validate the server certificate
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(20000);
@@ -543,7 +620,7 @@ bool postJSONBootstrap(const String &jsonPayload, const char* targetUrl, int &ou
 
   for (int attempt = 1; attempt <= POST_MAX_RETRIES; ++attempt) {
     WiFiClientSecure client;
-    client.setInsecure();
+    client.setCACert(ROOT_CA_BUNDLE);  // C4: validate the server certificate
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(20000);
@@ -624,8 +701,13 @@ bool registerDevice() {
     deviceSecret  = extractStr("device_secret");
     displayName   = extractStr("display_name");
     saveDeviceIdentity();
+    clearProvisioning();
     pendingAssignment = false;
   } else {
+    // H7: capture and persist the provisioning token so /assignment-poll can
+    // later prove this device's identity to retrieve the device_secret.
+    provisioningToken = extractStr("provisioning_token");
+    saveProvisioning();
     pendingAssignment = true;
   }
   return true;
@@ -637,7 +719,10 @@ bool registerDevice() {
 bool pollAssignment() {
   if (WiFi.status() != WL_CONNECTED || deviceId.length() == 0) return false;
 
-  String payload = "{\"device_id\":\"" + deviceId + "\"}";
+  // H7: send the provisioning token so the server releases the device_secret
+  // only to the device that registered.
+  String payload = "{\"device_id\":\"" + jsonEscape(deviceId) +
+                   "\",\"provisioning_token\":\"" + jsonEscape(provisioningToken) + "\"}";
   int code = 0; String body = "";
 
   if (!postJSONBootstrap(payload, ASSIGNMENT_POLL_URL, code, body)) return false;
@@ -665,6 +750,7 @@ bool pollAssignment() {
   }
 
   saveDeviceIdentity();
+  clearProvisioning();
   pendingAssignment = false;
   Serial.printf("Assigned! institution_id=%s display_name=%s\n",
                 institutionId.c_str(), displayName.c_str());
@@ -676,12 +762,13 @@ void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
                         const String &note, const String &fingerSlot, const String &studentId) {
   if (jobId.length() == 0) return;
 
-  String payload = "{\"id\":\"" + jobId + "\",\"institution_id\":\"" + institutionId +
-                   "\",\"status\":\"" + status + "\"";
+  // M9: escape every interpolated value (note especially can contain free text).
+  String payload = "{\"id\":\"" + jsonEscape(jobId) + "\",\"institution_id\":\"" + jsonEscape(institutionId) +
+                   "\",\"status\":\"" + jsonEscape(status) + "\"";
   if (fingerId > 0)        payload += ",\"fid\":"            + String(fingerId);
-  if (note.length())       payload += ",\"note\":\""         + note          + "\"";
-  if (fingerSlot.length()) payload += ",\"finger_slot\":\"" + fingerSlot    + "\"";
-  if (studentId.length())  payload += ",\"student_id\":\""  + studentId     + "\"";
+  if (note.length())       payload += ",\"note\":\""         + jsonEscape(note)       + "\"";
+  if (fingerSlot.length()) payload += ",\"finger_slot\":\"" + jsonEscape(fingerSlot) + "\"";
+  if (studentId.length())  payload += ",\"student_id\":\""  + jsonEscape(studentId)  + "\"";
   payload += "}";
 
   Serial.printf("reportEnrollUpdate: jobId=%s status=%s fid=%d\n",
@@ -1058,6 +1145,20 @@ void flushQueue() {
 }
 
 /* =================== OTA Update =================== */
+// L8: parse "MAJOR.MINOR.PATCH" and return true only if `latest` is strictly
+// newer than `current`, so a mistagged "latest" can't silently DOWNGRADE the
+// fleet. If either string can't be parsed, fall back to "differs" (string
+// inequality) so a legitimate update is never blocked by a parsing quirk.
+bool otaIsNewer(const String &latest, const String &current) {
+  int lM = 0, lm = 0, lp = 0, cM = 0, cm = 0, cp = 0;
+  int ln = sscanf(latest.c_str(), "%d.%d.%d", &lM, &lm, &lp);
+  int cn = sscanf(current.c_str(), "%d.%d.%d", &cM, &cm, &cp);
+  if (ln < 1 || cn < 1) return latest != current;
+  if (lM != cM) return lM > cM;
+  if (lm != cm) return lm > cm;
+  return lp > cp;
+}
+
 void checkAndApplyOTA() {
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -1066,7 +1167,7 @@ void checkAndApplyOTA() {
 
   {
     WiFiClientSecure apiClient;
-    apiClient.setInsecure();
+    apiClient.setCACert(ROOT_CA_BUNDLE);  // C4: validate the GitHub API certificate
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(15000);
@@ -1092,7 +1193,11 @@ void checkAndApplyOTA() {
 
     String latestVersion = latestTag.substring(strlen(OTA_TAG_PREFIX));
     Serial.printf("OTA: Current=%s  Latest=%s\n", FIRMWARE_VERSION, latestVersion.c_str());
-    if (latestVersion == FIRMWARE_VERSION) { Serial.println("OTA: Firmware is up to date."); return; }
+    // L8: only flash a strictly newer version (no downgrades / no re-flash of equal).
+    if (!otaIsNewer(latestVersion, FIRMWARE_VERSION)) {
+      Serial.println("OTA: No newer firmware available.");
+      return;
+    }
 
     int searchFrom = 0;
     while (true) {
@@ -1116,7 +1221,7 @@ void checkAndApplyOTA() {
 
   {
     WiFiClientSecure redirectClient;
-    redirectClient.setInsecure();
+    redirectClient.setCACert(ROOT_CA_BUNDLE);  // C4: validate the redirect host certificate
     HTTPClient redirectHttp;
     redirectHttp.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
     redirectHttp.setTimeout(15000);
@@ -1133,7 +1238,7 @@ void checkAndApplyOTA() {
 
   {
     WiFiClientSecure binClient;
-    binClient.setInsecure();
+    binClient.setCACert(ROOT_CA_BUNDLE);  // C4: validate the firmware-asset host certificate
     HTTPClient binHttp;
     binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     binHttp.setTimeout(60000);
@@ -1275,7 +1380,7 @@ void EnrollmentTask(void *pvParameters) {
   for (;;) {
     if (WiFi.status() == WL_CONNECTED && deviceId.length() > 0 && !pendingAssignment) {
       Serial.println("EnrollmentTask: polling for enrollment job...");
-      String payload = "{\"device_id\":\"" + deviceId + "\"}";
+      String payload = "{\"device_id\":\"" + jsonEscape(deviceId) + "\"}";
       int code = 0; String body = "";
       postJSONToUrl(payload, ENROLL_GET_URL, code, body);
       Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
@@ -1285,6 +1390,7 @@ void EnrollmentTask(void *pvParameters) {
       if (code >= 200 && code < 300 && body.indexOf("\"decommissioned\":true") >= 0) {
         Serial.println("EnrollmentTask: device decommissioned — wiping identity and rebooting");
         SPIFFS.remove(DEVICE_IDENTITY_FILE);
+        clearProvisioning();
         ESP.restart();
       }
 
@@ -1439,10 +1545,11 @@ void FingerprintTask(void *pvParameters) {
         setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
         String scanId = makeScanId(mapped);
         String ts = getRTCTimestamp();
-        String payload = "{\"institution_id\":\"" + institutionId +
-                         "\",\"sid\":\"" + mapped +
-                         "\",\"scan_id\":\"" + scanId +
-                         "\",\"timestamp\":\"" + ts + "\"}";
+        // M9: escape interpolated values (member sid is admin-entered text).
+        String payload = "{\"institution_id\":\"" + jsonEscape(institutionId) +
+                         "\",\"sid\":\"" + jsonEscape(mapped) +
+                         "\",\"scan_id\":\"" + jsonEscape(scanId) +
+                         "\",\"timestamp\":\"" + jsonEscape(ts) + "\"}";
         vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
         showReadyState();
         sendOrQueuePayload(payload);
@@ -1497,6 +1604,13 @@ void setup() {
   // Load device identity (device_id, institution_id, device_secret, display_name)
   if (!loadDeviceIdentity()) {
     Serial.println("No device identity found — will provision via /register + /assignment-poll.");
+    // H7: if we registered before but haven't been assigned yet, restore the
+    // saved device_id + provisioning_token so we resume polling (with the token)
+    // instead of re-registering as a brand-new device.
+    if (loadProvisioning()) {
+      Serial.printf("Restored pending provisioning: device_id=%s\n", deviceId.c_str());
+      pendingAssignment = true;
+    }
   } else {
     Serial.printf("Device identity loaded: device_id=%s institution=%s display=%s\n",
                   deviceId.c_str(), institutionId.c_str(), displayName.c_str());

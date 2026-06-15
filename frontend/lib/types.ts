@@ -85,7 +85,6 @@ export type Device = {
   group_name: string
   unit_name: string
   display_name: string | null
-  mode: 'present_absent' | 'time_in_out'
   institution_id?: string | null
   institution?: { id: string; name: string } | null
 }

@@ -10,12 +10,13 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('role, institution_id')
+    .select('role, institution_id, assigned_unit')
     .eq('id', user.id)
     .single()
 
   const role = profile?.role as string | undefined
   const institutionId = profile?.institution_id as string | null ?? null
+  const assignedUnit = profile?.assigned_unit as string | null ?? null
 
   const allowedRoles = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin']
   if (!role || !allowedRoles.includes(role)) return new Response('Forbidden', { status: 403 })
@@ -31,6 +32,23 @@ export async function GET(req: NextRequest) {
   const institutionParam = p.get('institution') ?? undefined
 
   const effectiveInstitutionId = institutionId ?? institutionParam ?? null
+
+  // H1: teacher/staff are restricted to their single assigned unit, exactly like
+  // the Attendance page. Without this, the export leaked the whole institution's
+  // attendance regardless of the requester's unit. Resolve assigned_unit → device.
+  let effectiveDeviceIds = deviceIds
+  let teacherNoMatch = false
+  if (role === 'teacher' || role === 'staff') {
+    let devQ = admin.from('devices').select('id, group_name, unit_name')
+    if (effectiveInstitutionId) devQ = devQ.eq('institution_id', effectiveInstitutionId)
+    const { data: devs } = await devQ
+    const match = assignedUnit
+      ? (devs ?? []).find((d: { id: string; group_name: string; unit_name: string }) =>
+          `${d.group_name} ${d.unit_name}` === assignedUnit)
+      : null
+    if (match) effectiveDeviceIds = [match.id]
+    else teacherNoMatch = true
+  }
 
   // Resolve member IDs for type filter
   let typeMemberIds: string[] | null = null
@@ -60,10 +78,11 @@ export async function GET(req: NextRequest) {
   if (termId) query = query.eq('period_id', termId)
   const allMemberIds = [...studentIds, ...staffIds]
   if (allMemberIds.length) query = query.in('member_id', allMemberIds)
-  if (deviceIds.length) query = query.in('device_id', deviceIds)
+  if (effectiveDeviceIds.length) query = query.in('device_id', effectiveDeviceIds)
   if (typeMemberIds !== null) query = query.in('member_id', typeMemberIds)
 
-  const { data: records } = await query
+  // A teacher/staff whose assigned unit matches no device sees nothing (fail-closed).
+  const { data: records } = teacherNoMatch ? { data: [] } : await query
 
   const isPlatformAdmin = role === 'platform_admin'
   const headers = ['Date', 'Name', 'ID', 'Unit', 'Period', 'Time', 'Status', 'Scan Type']

@@ -22,12 +22,26 @@ export const verifySession = cache(async () => {
     .eq('id', user!.id)
     .single()
 
-  const role = (profile?.role ?? 'super_admin') as UserRole
-  const assignedUnit = profile?.assigned_unit as string | null ?? null
-  const institutionId = profile?.institution_id as string | null ?? null
+  // FAIL CLOSED (C1): an authenticated user without a profile row — or with no
+  // role — has NO access. Never default to a privileged role. /unauthorized
+  // lives outside the (dashboard) group so it does not re-enter verifySession.
+  if (!profile || !profile.role) {
+    redirect('/unauthorized')
+  }
+
+  const role = profile.role as UserRole
+  const assignedUnit = (profile.assigned_unit as string | null) ?? null
+  const institutionId = (profile.institution_id as string | null) ?? null
 
   return { user: user!, role, assignedUnit, institutionId }
 })
+
+export type Session = {
+  user: { id: string }
+  role: UserRole
+  assignedUnit: string | null
+  institutionId: string | null
+}
 
 export async function requireRole(...roles: UserRole[]) {
   const session = await verifySession()

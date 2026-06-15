@@ -7,6 +7,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { createEnrollmentJob } from '../../enrollment/_actions'
 import type { MemberWithDevice } from '../page'
 
@@ -22,11 +23,15 @@ export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFi
   const [fid, setFid] = useState(String(defaultFid))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // M8: overwrite warning state.
+  const [overwriteMsg, setOverwriteMsg] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     if (open) {
       setFid(String(defaultFid))
       setError(null)
+      setOverwriteMsg(null)
     }
   }, [open, defaultFid])
 
@@ -38,15 +43,14 @@ export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFi
     ? `${member.device.group_name} ${member.device.unit_name}`
     : 'Unknown unit'
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function submit(confirmOverwrite: boolean) {
     const fidNum = parseInt(fid, 10)
     if (!fidNum || fidNum < 1 || fidNum > 127) {
       setError('Sensor slot must be between 1 and 127.')
       return
     }
 
-    setLoading(true)
+    if (confirmOverwrite) setConfirming(true); else setLoading(true)
     setError(null)
 
     const result = await createEnrollmentJob({
@@ -55,14 +59,28 @@ export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFi
       student_id: member!.id,
       finger_slot: slot!,
       fid: fidNum,
+      confirmOverwrite,
     })
 
     setLoading(false)
+    setConfirming(false)
+    // M8: another member already uses this slot — require a second confirmation.
+    if (result?.needsConfirm) {
+      setOverwriteMsg(result.conflict ?? 'This will overwrite an existing fingerprint on this device.')
+      return
+    }
     if (result?.error) { setError(result.error); return }
+    setOverwriteMsg(null)
     onOpenChange(false)
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await submit(false)
+  }
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
@@ -103,5 +121,16 @@ export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFi
         </form>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      open={!!overwriteMsg}
+      onOpenChange={(o) => { if (!o) setOverwriteMsg(null) }}
+      title="Overwrite existing fingerprint?"
+      description={`${overwriteMsg ?? ''} This permanently replaces the existing template in that slot and cannot be undone. Confirm again to proceed.`}
+      confirmLabel="Overwrite anyway"
+      loading={confirming}
+      onConfirm={() => submit(true)}
+    />
+    </>
   )
 }

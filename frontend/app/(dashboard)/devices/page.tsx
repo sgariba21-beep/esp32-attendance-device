@@ -11,7 +11,7 @@ export default async function DevicesPage() {
 
   let devicesQ = supabase
     .from('devices')
-    .select('id, mac, group_name, unit_name, display_name, mode, institution:institution_id(id, name)')
+    .select('id, mac, group_name, unit_name, display_name, institution:institution_id(id, name)')
     .not('institution_id', 'is', null)
     .order('group_name')
     .order('unit_name')

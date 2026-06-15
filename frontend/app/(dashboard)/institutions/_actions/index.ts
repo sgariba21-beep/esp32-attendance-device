@@ -43,12 +43,23 @@ export async function deleteInstitution(id: string): Promise<{ error: string | n
     return { error: error.message }
   }
 
-  // Delete Supabase Auth users for all profiles that belonged to this institution
+  // Delete Supabase Auth users for all profiles that belonged to this institution.
+  // L7: don't swallow per-user failures silently — a failed delete leaves an
+  // orphaned auth user (no profile) which, after the C1 fix, simply lands on
+  // /unauthorized, but we still surface it so the admin can clean up.
+  const failedDeletions: string[] = []
   for (const profile of profiles ?? []) {
-    await supabase.auth.admin.deleteUser(profile.id)
+    const { error: delErr } = await supabase.auth.admin.deleteUser(profile.id)
+    if (delErr) {
+      console.error(`deleteInstitution: failed to delete auth user ${profile.id}: ${delErr.message}`)
+      failedDeletions.push(profile.id)
+    }
   }
 
   revalidatePath('/institutions')
+  if (failedDeletions.length > 0) {
+    return { error: `Institution deleted, but ${failedDeletions.length} login account(s) could not be removed and may need manual cleanup.` }
+  }
   return { error: null }
 }
 

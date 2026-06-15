@@ -18,6 +18,12 @@ export type OnboardingFormData = {
 
 export async function createInstitutionWithAdmin(data: OnboardingFormData) {
   await requireRole('platform_admin')
+
+  // L2: match the platform-wide minimum password length.
+  if (data.admin_password.length < 8) {
+    return { error: 'Password must be at least 8 characters.', institutionId: null }
+  }
+
   const supabase = createAdminClient()
 
   const { data: institution, error: instError } = await supabase

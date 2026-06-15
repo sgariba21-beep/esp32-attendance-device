@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { ownsRecord } from '@/lib/supabase/ownership'
 import type { UserRole } from '@/lib/supabase/dal'
 
 const ROLE_RANK: Record<string, number> = {
@@ -13,6 +14,8 @@ const ROLE_RANK: Record<string, number> = {
   staff: 1,
 }
 
+const MIN_PASSWORD_LENGTH = 8
+
 export async function createUser(data: {
   email: string
   password: string
@@ -21,6 +24,11 @@ export async function createUser(data: {
   institution_id?: string | null
 }) {
   const session = await requireRole('super_admin')
+
+  // L2: enforce the same minimum the rest of the app uses.
+  if (data.password.length < MIN_PASSWORD_LENGTH) {
+    return { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` }
+  }
 
   // Only a platform admin may grant the platform-admin role.
   if (data.role === 'platform_admin' && session.role !== 'platform_admin') {
@@ -67,12 +75,17 @@ export async function createUser(data: {
   return { error: null }
 }
 
-async function superAdminCount() {
+// H4: count super_admins WITHIN a single institution. The "at least one
+// super_admin must always exist" invariant is per-institution, not global —
+// otherwise an institution could be left with zero administrators.
+async function superAdminCount(institutionId: string | null) {
   const admin = createAdminClient()
-  const { count } = await admin
+  let q = admin
     .from('profiles')
     .select('*', { count: 'exact', head: true })
     .eq('role', 'super_admin')
+  if (institutionId) q = q.eq('institution_id', institutionId)
+  const { count } = await q
   return count ?? 0
 }
 
@@ -84,12 +97,22 @@ export async function updateUserRole(id: string, role: UserRole, assigned_unit: 
     return { error: 'You are not allowed to assign the platform admin role.' }
   }
 
+  // Tenant guard (C2): only manage accounts in your own institution.
+  if (!(await ownsRecord('profiles', id, session))) return { error: 'Not found.' }
+
   const admin = createAdminClient()
 
-  if (role !== 'super_admin') {
-    const { data: current } = await admin.from('profiles').select('role').eq('id', id).single()
-    if (current?.role === 'super_admin' && (await superAdminCount()) <= 1) {
-      return { error: 'Cannot demote the last super admin account.' }
+  const { data: current } = await admin
+    .from('profiles')
+    .select('role, institution_id')
+    .eq('id', id)
+    .single()
+  if (!current) return { error: 'Not found.' }
+
+  // H4: don't strand an institution with no super_admin.
+  if (current.role === 'super_admin' && role !== 'super_admin') {
+    if ((await superAdminCount(current.institution_id)) <= 1) {
+      return { error: 'Cannot demote the last super admin in this institution.' }
     }
   }
 
@@ -105,15 +128,25 @@ export async function updateUserRole(id: string, role: UserRole, assigned_unit: 
 }
 
 export async function deleteUser(id: string) {
-  const { user } = await requireRole('super_admin')
+  const session = await requireRole('super_admin')
+  const { user } = session
 
   if (id === user.id) return { error: 'You cannot delete your own account.' }
 
+  // Tenant guard (C2)
+  if (!(await ownsRecord('profiles', id, session))) return { error: 'Not found.' }
+
   const admin = createAdminClient()
 
-  const { data: profile } = await admin.from('profiles').select('role').eq('id', id).single()
-  if (profile?.role === 'super_admin' && (await superAdminCount()) <= 1) {
-    return { error: 'Cannot delete the last super admin account.' }
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('role, institution_id')
+    .eq('id', id)
+    .single()
+
+  // H4: per-institution last-super-admin guard.
+  if (profile?.role === 'super_admin' && (await superAdminCount(profile.institution_id)) <= 1) {
+    return { error: 'Cannot delete the last super admin in this institution.' }
   }
 
   const { error } = await admin.auth.admin.deleteUser(id)
@@ -125,14 +158,27 @@ export async function deleteUser(id: string) {
 }
 
 export async function changeUserPassword(id: string, password: string) {
-  const { user: currentUser, role: currentRole } = await requireRole('super_admin', 'admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
+  const { user: currentUser, role: currentRole } = session
 
-  if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` }
+  }
 
   const admin = createAdminClient()
   const isSelf = id === currentUser.id
 
   if (!isSelf) {
+    // H5: an admin may change ONLY their own password.
+    if (currentRole === 'admin') {
+      return { error: 'Admins can only change their own password.' }
+    }
+
+    // Tenant guard (C2): super_admin may only act within their own institution.
+    if (!(await ownsRecord('profiles', id, session))) {
+      return { error: 'Not found.' }
+    }
+
     const { data: target } = await admin.from('profiles').select('role').eq('id', id).single()
     const targetRank = ROLE_RANK[target?.role ?? ''] ?? 0
     const currentRank = ROLE_RANK[currentRole] ?? 0
