@@ -1,13 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { ShieldCheck, Pencil, Trash2, KeyRound } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -85,6 +89,18 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
   const [pwDialogOpen, setPwDialogOpen] = useState(false)
   const [pwTarget, setPwTarget]         = useState<UserRow | null>(null)
 
+  const [query, setQuery]         = useState('')
+  const [roleFilter, setRoleFilter] = useState<string>('all')
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return users.filter((u) => {
+      if (q && !u.email.toLowerCase().includes(q)) return false
+      if (roleFilter !== 'all' && u.role !== roleFilter) return false
+      return true
+    })
+  }, [users, query, roleFilter])
+
   function openAdd() { setEditing(null); setDialogOpen(true) }
   function openEdit(u: UserRow) { setEditing(u); setDialogOpen(true) }
   function openChangePassword(u: UserRow) { setPwTarget(u); setPwDialogOpen(true) }
@@ -107,9 +123,35 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
     <div className="space-y-4">
       <PageHeader
         title="Accounts"
-        subtitle={`${users.length} account${users.length !== 1 ? 's' : ''}`}
+        subtitle={
+          filtered.length === users.length
+            ? `${users.length} account${users.length !== 1 ? 's' : ''}`
+            : `${filtered.length} of ${users.length} account${users.length !== 1 ? 's' : ''}`
+        }
         actions={currentUserRole !== 'admin' ? <Button onClick={openAdd}>Add account</Button> : undefined}
       />
+
+      <div className="flex gap-2">
+        <Input
+          placeholder="Search by email..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="max-w-xs"
+        />
+        <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v ?? 'all')}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All roles" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All roles</SelectItem>
+            <SelectItem value="platform_admin">Platform Admin</SelectItem>
+            <SelectItem value="super_admin">Super Admin</SelectItem>
+            <SelectItem value="admin">Admin</SelectItem>
+            <SelectItem value="teacher">{labelStaff}</SelectItem>
+            <SelectItem value="staff">Staff</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {users.length === 0 ? (
         <EmptyState
@@ -131,7 +173,13 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((u) => (
+                {filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={isPlatformAdmin ? 5 : 4} className="text-center text-muted-foreground py-8">
+                      No accounts match your filters.
+                    </TableCell>
+                  </TableRow>
+                ) : filtered.map((u) => (
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">
                       {u.email}
