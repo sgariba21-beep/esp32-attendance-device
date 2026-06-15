@@ -87,6 +87,55 @@ function formatTime(time: string) {
   return `${h12}:${m} ${ampm}`
 }
 
+type PairedRow = {
+  id: string
+  date: string
+  institution: AttendanceRecord['institution']
+  student: AttendanceRecord['student']
+  device: AttendanceRecord['device']
+  academic: AttendanceRecord['academic']
+  timeIn: string | null
+  timeOut: string | null
+  isAbsent: boolean
+}
+
+// Collapses time_in / time_out siblings into one row per (member, date, device, period).
+// Records arrive date desc, time desc so time_out always precedes time_in for the same session.
+// Absent records are kept as individual rows (no times to pair).
+function pairRecords(records: AttendanceRecord[]): PairedRow[] {
+  const map = new Map<string, PairedRow>()
+  const order: string[] = []
+
+  for (const r of records) {
+    if (r.status === 'absent') {
+      const k = `absent-${r.id}`
+      map.set(k, {
+        id: r.id, date: r.date, institution: r.institution,
+        student: r.student, device: r.device, academic: r.academic,
+        timeIn: null, timeOut: null, isAbsent: true,
+      })
+      order.push(k)
+      continue
+    }
+
+    const k = `${r.student?.id ?? r.id}||${r.date}||${r.device?.id ?? ''}||${r.academic?.id ?? ''}`
+    if (!map.has(k)) {
+      map.set(k, {
+        id: r.id, date: r.date, institution: r.institution,
+        student: r.student, device: r.device, academic: r.academic,
+        timeIn: null, timeOut: null, isAbsent: false,
+      })
+      order.push(k)
+    }
+    const row = map.get(k)!
+    if (r.scan_type === 'time_in') row.timeIn = r.time
+    else if (r.scan_type === 'time_out') row.timeOut = r.time
+    else row.timeIn = r.time  // present_absent record in a mixed dataset
+  }
+
+  return order.map((k) => map.get(k)!)
+}
+
 type SummaryRow = {
   key: string
   classLabel: string
@@ -219,6 +268,9 @@ export function AttendanceView({
   const summary = buildSummary(records)
   const totalPages = Math.ceil(totalCount / pageSize)
   const showInstitutionColumn = isPlatformAdmin
+
+  const hasTimeInOut = records.some((r) => r.scan_type === 'time_in' || r.scan_type === 'time_out')
+  const pairedRows = hasTimeInOut ? pairRecords(records) : []
 
   const studentOptions = useMemo(() => {
     const base = deviceIds.length > 0
@@ -414,6 +466,53 @@ export function AttendanceView({
           <TabsContent value="records" className="mt-4 space-y-3">
             {records.length === 0 ? (
               <EmptyState icon={CalendarDays} message="No attendance records match your filters." />
+            ) : hasTimeInOut ? (
+              <div className="rounded-xl border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      {showInstitutionColumn && <TableHead>Institution</TableHead>}
+                      <TableHead>{labels.label_member}</TableHead>
+                      <TableHead>ID</TableHead>
+                      <TableHead>{labels.label_unit}</TableHead>
+                      <TableHead>{labels.label_period}</TableHead>
+                      <TableHead>Time In</TableHead>
+                      <TableHead>Time Out</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pairedRows.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="whitespace-nowrap">{formatDate(r.date)}</TableCell>
+                        {showInstitutionColumn && (
+                          <TableCell className="text-muted-foreground text-xs">{r.institution?.name ?? '—'}</TableCell>
+                        )}
+                        <TableCell>{r.student?.fullname ?? '—'}</TableCell>
+                        <TableCell className="font-mono tabular-nums text-muted-foreground text-xs">
+                          {r.student?.sid ?? '—'}
+                        </TableCell>
+                        <TableCell>{r.device ? formatClass(r.device) : '—'}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
+                          {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          {r.timeIn ? formatTime(r.timeIn) : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          {r.timeOut ? formatTime(r.timeOut) : <span className="text-muted-foreground">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          {r.isAbsent
+                            ? <Badge variant="destructive">Absent</Badge>
+                            : <Badge variant="success">Present</Badge>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             ) : (
               <div className="rounded-xl border overflow-x-auto">
                 <Table>
@@ -446,15 +545,7 @@ export function AttendanceView({
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
                         <TableCell>
-                          {r.status === 'absent' ? (
-                            <Badge variant="destructive">Absent</Badge>
-                          ) : r.scan_type === 'time_in' ? (
-                            <Badge variant="secondary">Time In</Badge>
-                          ) : r.scan_type === 'time_out' ? (
-                            <Badge variant="secondary">Time Out</Badge>
-                          ) : (
-                            <Badge variant="success">Present</Badge>
-                          )}
+                          <Badge variant="success">Present</Badge>
                         </TableCell>
                       </TableRow>
                     ))}
