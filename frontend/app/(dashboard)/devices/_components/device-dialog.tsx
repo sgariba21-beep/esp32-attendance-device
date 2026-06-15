@@ -20,13 +20,12 @@ type Props = {
   title?: string
 }
 
-const empty = { group_name: '', unit_name: '', display_name: '' }
+const empty = { group_name: '', unit_name: '' }
 
 export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit, institutionType, title }: Props) {
   const isOffice = institutionType === 'office'
   const groupPlaceholder = isOffice ? 'e.g. Sales, Operations' : 'e.g. Form 1, Year 2'
   const unitPlaceholder = isOffice ? 'e.g. East Wing, Floor 2' : 'e.g. Science 1'
-  const displayPlaceholder = isOffice ? 'e.g. Sales — East Wing (shown on device)' : 'e.g. Form 1 Blue (shown on device)'
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -36,7 +35,7 @@ export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit
       setError(null)
       setForm(
         device
-          ? { group_name: device.group_name, unit_name: device.unit_name, display_name: device.display_name ?? '' }
+          ? { group_name: device.group_name, unit_name: device.unit_name }
           : empty
       )
     }
@@ -90,19 +89,9 @@ export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="display_name">Display name</Label>
-            <Input
-              id="display_name"
-              value={form.display_name}
-              onChange={(e) => set('display_name', e.target.value)}
-              placeholder={displayPlaceholder}
-            />
-          </div>
-
           <p className="text-xs text-muted-foreground">
             Displays as: <span className="font-medium text-foreground">
-              {form.group_name || '?'} {form.unit_name || '?'}
+              {form.group_name || '?'} — {form.unit_name || '?'}
             </span>
           </p>
 

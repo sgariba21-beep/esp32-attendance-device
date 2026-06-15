@@ -7,7 +7,6 @@ import { requireRole } from '@/lib/supabase/dal'
 export type DeviceFormData = {
   group_name: string
   unit_name: string
-  display_name?: string
   mode?: 'present_absent' | 'time_in_out'
 }
 
@@ -18,7 +17,6 @@ export async function createDevice(data: DeviceFormData) {
   const { error } = await supabase.from('devices').insert({
     group_name: data.group_name.trim(),
     unit_name: data.unit_name.trim(),
-    display_name: data.display_name?.trim() ?? null,
     mode: data.mode ?? 'present_absent',
     institution_id: institutionId,
   })
@@ -41,7 +39,6 @@ export async function updateDevice(id: string, data: DeviceFormData) {
     .update({
       group_name: data.group_name.trim(),
       unit_name: data.unit_name.trim(),
-      display_name: data.display_name?.trim() ?? null,
       mode: data.mode ?? 'present_absent',
     })
     .eq('id', id)
