@@ -89,31 +89,43 @@ All dashboard data access uses `createAdminClient()` (service role — bypasses 
 ```sql
 -- Institution registry (one row per tenant)
 institutions    (id, name, type, logo_url, label_member, label_members, label_group,
-                 label_unit, label_period, skip_weekends, device_secret, timezone)
+                 label_unit, label_period, label_staff, label_staff_plural,
+                 track_students, track_staff, student_scan_mode, staff_scan_mode,
+                 skip_weekends, device_secret, timezone)
 
 -- Members (students, staff, etc.) — scoped to institution
-members         (id, sid, fullname, group_name, fin1, fin2, status, device_id,
-                 institution_id, created_at)
+-- member_type: 'student' | 'staff'
+-- device_id FK is ON DELETE SET NULL (device deletion preserves member records)
+members         (id, sid, fullname, group_name, fin1, fin2, status, member_type,
+                 device_id→devices SET NULL, institution_id, created_at)
 
 -- One ESP32 per unit — scoped to institution
-devices         (id, group_name, unit_name, display_name, mac, institution_id)
+-- mode: 'present_absent' | 'time_in_out'
+devices         (id, group_name, unit_name, display_name, mac, mode, institution_id)
 
 -- Academic periods — scoped to institution (nullable for office-type institutions)
 periods         (id, term, year, status, start_date, end_date, institution_id)
 
 -- Attendance records — scoped to institution
-attendance      (id, member_id→members, period_id→periods, device_id→devices,
-                 date, time, status, scan_id, institution_id)
+-- scan_type: 'present' | 'absent' | 'time_in' | 'time_out'
+-- device_id FK is ON DELETE SET NULL
+attendance      (id, member_id→members, period_id→periods, device_id→devices SET NULL,
+                 date, time, status, scan_type, scan_id, institution_id)
 
 -- Remote fingerprint enrollment queue
-enrollment_jobs (id, device_id→devices, student_id→members, finger_slot, command,
-                 status, fid, note, institution_id, created_at)
+-- device_id FK is ON DELETE SET NULL
+enrollment_jobs (id, device_id→devices SET NULL, student_id→members, finger_slot,
+                 command, status, fid, note, institution_id, created_at)
 
 -- Holidays (date ranges) — scoped to institution
-holidays        (id, label, start_date, end_date, institution_id)
+-- recurring: true = matched by month/day every year (year-wrap ranges supported)
+holidays        (id, label, start_date, end_date, recurring, institution_id)
 
 -- Dashboard user roles — scoped to institution (platform_admin has null institution_id)
 profiles        (id→auth.users, role, assigned_unit, institution_id)
+
+-- Deferred SPIFFS-wipe queue — no FK, survives device row deletion
+device_resets   (device_id UUID, created_at)
 ```
 
 ### Migrations
@@ -161,13 +173,18 @@ Additional accounts are managed through the `/users` page in the dashboard.
 
 | Route | Access | Description |
 |---|---|---|
-| `/attendance` | All roles | Attendance records with date, period, member, unit filters. `teacher`/`staff` see only their unit. |
-| `/students` | All roles | Member roster. `teacher`/`staff` see only their unit, no edit controls. |
-| `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, set display names. |
-| `/academic` | super_admin, admin, platform_admin | Academic periods and school holidays. |
-| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. |
-| `/promotion` | super_admin, admin, platform_admin | Bulk year-end promotion — moves members to the next group, resets finger slots, deactivates final-year members. |
-| `/users` | super_admin, platform_admin | Dashboard account management — create/edit/delete accounts, assign roles. At least one super_admin must always exist. |
+| `/attendance` | All roles | Attendance records with date, period, member, unit filters. `teacher`/`staff` see only their unit. Time-in/time-out scan pairs shown on a single row. |
+| `/members` | All roles | Member roster (non-staff). `teacher`/`staff` see only their unit, no edit controls. platform_admin can filter by institution. |
+| `/staff` | All roles | Staff member roster. Visible only when `track_staff = true`. Same access rules as `/members`. |
+| `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, set display names. Search + institution filter for platform_admin. Devices only enter via physical provisioning (no manual create). |
+| `/academic` | super_admin, admin, platform_admin | Academic periods and holidays. Labeled "Periods & Holidays" for office institutions. Supports recurring (yearly) holidays matched by month/day. |
+| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. Institution column for platform_admin. |
+| `/promotion` | super_admin, admin, platform_admin | Bulk year-end promotion — moves members to the next group, resets finger slots, deactivates final-year members. School-type institutions only. |
+| `/settings` | super_admin, platform_admin | Institution config — name, logo, type, label overrides, scan modes, skip_weekends, timezone. |
+| `/institutions` | platform_admin | All institutions with member/device counts. Edit or delete any institution (deletion fans out SPIFFS wipe to all assigned devices). |
+| `/institutions/[id]` | platform_admin | Edit a specific institution's settings. |
+| `/onboarding` | platform_admin | Create a new institution and its first super_admin account. |
+| `/users` | super_admin, admin, platform_admin | Dashboard account management. `admin` can view the list and change their own password only. `super_admin`/`platform_admin` can create, edit, and delete accounts. At least one super_admin must always exist per institution. |
 | `/unauthorized` | — | Shown when a user navigates to a page their role cannot access. |
 
 ---
@@ -204,35 +221,41 @@ esp32-attendance-device/
 ├── README.md
 ├── firmware/
 │   └── ClassAttendance_Current_RTC/
-│       └── ClassAttendance_Current_RTC.ino   ← ESP32 firmware (Phase 3)
+│       └── ClassAttendance_Current_RTC.ino   ← ESP32 firmware
 ├── backend/
 │   └── supabase/
 │       ├── config.toml                        ← edge function config (verify_jwt = false for all)
-│       ├── migrations/                        ← Migrations A–I applied to cloud
+│       ├── migrations/                        ← all migrations applied to cloud
 │       └── functions/
 │           ├── log-attendance/
-│           ├── mark-absent/
+│           ├── mark-absent/                   ← recurring holiday support; iterates all institutions
 │           ├── get-enrollment-job/
 │           ├── update-enrollment-job/
-│           ├── register/                      ← new in Phase 2
-│           └── assignment-poll/               ← new in Phase 2
+│           ├── register/
+│           └── assignment-poll/
 └── frontend/
     ├── proxy.ts                               ← Next.js middleware (NOT middleware.ts)
     ├── AGENTS.md                              ← read before writing any Next.js code
     ├── app/
     │   ├── (auth)/login/
     │   ├── (dashboard)/
-    │   │   ├── layout.tsx                     ← verifySession, passes role to nav
+    │   │   ├── layout.tsx                     ← verifySession, generateMetadata (dynamic tab title)
     │   │   ├── attendance/
-    │   │   ├── students/                      ← to be renamed members/ in Phase 4
+    │   │   ├── members/
+    │   │   ├── staff/
     │   │   ├── devices/
     │   │   ├── academic/
     │   │   ├── enrollment/
     │   │   ├── promotion/
+    │   │   ├── settings/
+    │   │   ├── institutions/
+    │   │   │   └── [id]/
+    │   │   ├── onboarding/
     │   │   └── users/
     │   ├── api/
     │   │   ├── signin/
-    │   │   └── signout/
+    │   │   ├── signout/
+    │   │   └── enrollment-stream/             ← SSE stream for enrollment job updates
     │   └── unauthorized/
     ├── lib/
     │   └── supabase/
@@ -241,7 +264,9 @@ esp32-attendance-device/
     └── components/
         ├── sidebar.tsx
         ├── mobile-bottom-nav.tsx
-        └── session-manager.tsx                ← inactivity timeout + sessionStorage guard
+        ├── session-manager.tsx                ← inactivity timeout + sessionStorage guard
+        └── ui/
+            └── single-select.tsx              ← searchable dropdown (used across devices, users, enrollment, members)
 ```
 
 ---
@@ -253,5 +278,5 @@ esp32-attendance-device/
 | 1 | Cloud deployment (single-tenant) | ✅ Complete |
 | 2 | Multi-tenant schema + edge functions | ✅ Complete |
 | 3 | Firmware provisioning flow | ✅ Complete |
-| 4 | Frontend — de-brand, institution config, devices page, settings | 🔲 Not started |
-| 5 | Captive portal — WiFi-only, remove class fields | ✅ Done (completed in Phase 3) |
+| 4 | Frontend — de-brand, institution config, devices page, settings | ✅ Complete |
+| 5 | Captive portal — WiFi-only, remove class fields | ✅ Complete (done in Phase 3) |
