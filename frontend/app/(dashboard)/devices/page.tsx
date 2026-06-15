@@ -11,7 +11,7 @@ export default async function DevicesPage() {
 
   let devicesQ = supabase
     .from('devices')
-    .select('id, mac, group_name, unit_name, display_name, mode')
+    .select('id, mac, group_name, unit_name, display_name, mode, institution:institution_id(id, name)')
     .not('institution_id', 'is', null)
     .order('group_name')
     .order('unit_name')
@@ -22,7 +22,7 @@ export default async function DevicesPage() {
 
   const { data: assignedData } = await devicesQ
   // Normalize nulls so the Device type contract is satisfied downstream
-  const allAssigned = ((assignedData ?? []) as Device[]).map((d) => ({
+  const allAssigned = ((assignedData ?? []) as unknown as Device[]).map((d) => ({
     ...d,
     group_name: d.group_name ?? '',
     unit_name: d.unit_name ?? '',

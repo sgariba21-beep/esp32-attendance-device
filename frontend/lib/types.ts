@@ -86,6 +86,7 @@ export type Device = {
   unit_name: string
   display_name: string | null
   mode: 'present_absent' | 'time_in_out'
+  institution?: { id: string; name: string } | null
 }
 
 export type UnassignedDevice = {

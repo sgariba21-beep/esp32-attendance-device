@@ -23,6 +23,24 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Check for a pending decommission signal BEFORE looking up the device row.
+  // The device_resets record is keyed by device_id and has no FK constraint,
+  // so it survives the deletion of the devices row. This handles both online
+  // devices (immediate next poll) and offline devices (whenever they return).
+  const { data: resetRecord } = await supabase
+    .from("device_resets")
+    .select("device_id")
+    .eq("device_id", device_id)
+    .maybeSingle();
+
+  if (resetRecord) {
+    await supabase.from("device_resets").delete().eq("device_id", device_id);
+    return new Response(
+      JSON.stringify({ decommissioned: true }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
   const { data: device, error: deviceError } = await supabase
     .from("devices")
     .select("id, institution_id, display_name")

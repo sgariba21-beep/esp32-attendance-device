@@ -56,9 +56,18 @@ export async function deleteDevice(id: string) {
   await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
 
+  // Queue a decommission signal keyed by device_id (no FK — must outlive the row).
+  // The next time the physical device polls /get-enrollment-job it will receive
+  // { decommissioned: true } and clear its SPIFFS identity, returning to factory state.
+  // Devices with no mac (virtual/manual records) have no physical hardware to reset,
+  // but we insert regardless — the record is harmless if never claimed.
+  await supabase.from('device_resets').upsert({ device_id: id }, { onConflict: 'device_id' })
+
   const { error } = await supabase.from('devices').delete().eq('id', id)
 
   if (error) {
+    // Roll back the reset record if the delete failed so we don't have a dangling entry.
+    await supabase.from('device_resets').delete().eq('device_id', id)
     if (error.code === '23503') return { error: 'Cannot delete: members or attendance records are linked to this device.' }
     return { error: error.message }
   }
