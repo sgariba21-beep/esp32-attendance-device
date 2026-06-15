@@ -122,6 +122,7 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
                     <th className="px-4 py-2.5 text-left font-medium">Unit</th>
                     <th className="px-4 py-2.5 text-left font-medium">MAC</th>
                     <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -145,6 +146,24 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
                           {isConfigured
                             ? <Badge variant="success">Configured</Badge>
                             : <Badge variant="secondary">Not configured</Badge>}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => openEdit(d)}
+                              title="Edit"
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setConfirmTarget(d)}
+                              title="Delete"
+                              className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -176,6 +195,18 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
           onOpenChange={setAssignOpen}
           device={assignTarget}
           institutions={allInstitutions}
+        />
+
+        <ConfirmDialog
+          open={confirmTarget !== null}
+          onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
+          title="Delete device?"
+          description={confirmTarget
+            ? `This will permanently delete this device${confirmTarget.institution?.name ? ` from ${confirmTarget.institution.name}` : ''}. The physical device will be signalled to reset on its next connection.`
+            : ''}
+          confirmLabel="Delete device"
+          loading={deleting}
+          onConfirm={handleDelete}
         />
       </div>
     )

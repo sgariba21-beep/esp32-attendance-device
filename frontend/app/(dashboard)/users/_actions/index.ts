@@ -5,6 +5,14 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 import type { UserRole } from '@/lib/supabase/dal'
 
+const ROLE_RANK: Record<string, number> = {
+  platform_admin: 4,
+  super_admin: 3,
+  admin: 2,
+  teacher: 1,
+  staff: 1,
+}
+
 export async function createUser(data: {
   email: string
   password: string
@@ -100,5 +108,28 @@ export async function deleteUser(id: string) {
   if (error) return { error: error.message }
 
   revalidatePath('/users')
+  return { error: null }
+}
+
+export async function changeUserPassword(id: string, password: string) {
+  const { user: currentUser, role: currentRole } = await requireRole('super_admin', 'admin', 'platform_admin')
+
+  if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
+
+  const admin = createAdminClient()
+  const isSelf = id === currentUser.id
+
+  if (!isSelf) {
+    const { data: target } = await admin.from('profiles').select('role').eq('id', id).single()
+    const targetRank = ROLE_RANK[target?.role ?? ''] ?? 0
+    const currentRank = ROLE_RANK[currentRole] ?? 0
+    if (currentRank <= targetRank) {
+      return { error: 'You do not have permission to change this account\'s password.' }
+    }
+  }
+
+  const { error } = await admin.auth.admin.updateUserById(id, { password })
+  if (error) return { error: error.message }
+
   return { error: null }
 }

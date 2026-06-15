@@ -52,7 +52,7 @@ function buildMoreNav(institution: InstitutionConfig): NavItem[] {
     items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
   }
   items.push(
-    { href: '/users',        label: 'Accounts',           icon: ShieldCheck,  roles: ['super_admin', 'platform_admin'] },
+    { href: '/users',        label: 'Accounts',           icon: ShieldCheck,  roles: ['super_admin', 'admin', 'platform_admin'] },
     { href: '/settings',     label: 'Settings',           icon: Settings2,    roles: ['super_admin', 'platform_admin'] },
     { href: '/institutions', label: 'Institutions',       icon: BuildingList, roles: ['platform_admin'] },
     { href: '/onboarding',   label: 'Create institution', icon: Plus,         roles: ['platform_admin'] },

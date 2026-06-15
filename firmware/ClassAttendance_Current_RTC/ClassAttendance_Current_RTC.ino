@@ -1280,6 +1280,14 @@ void EnrollmentTask(void *pvParameters) {
       postJSONToUrl(payload, ENROLL_GET_URL, code, body);
       Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
 
+      // Decommission signal: the platform deleted this device. Wipe identity and reboot
+      // so the device returns to the provisioning flow on next power-on.
+      if (code >= 200 && code < 300 && body.indexOf("\"decommissioned\":true") >= 0) {
+        Serial.println("EnrollmentTask: device decommissioned — wiping identity and rebooting");
+        SPIFFS.remove(DEVICE_IDENTITY_FILE);
+        ESP.restart();
+      }
+
       if (code >= 200 && code < 300 && body.length() && body.indexOf("\"job\":null") < 0) {
         auto extractStr = [&](const String &key) -> String {
           int p = body.indexOf("\"" + key + "\"");

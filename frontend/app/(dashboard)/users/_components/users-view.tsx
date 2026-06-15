@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ShieldCheck, Pencil, Trash2 } from 'lucide-react'
+import { ShieldCheck, Pencil, Trash2, KeyRound } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,8 +12,28 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { UserDialog } from './user-dialog'
+import { PasswordDialog } from './password-dialog'
 import { deleteUser } from '../_actions'
 import type { UserRole } from '@/lib/supabase/dal'
+
+const ROLE_RANK: Record<UserRole, number> = {
+  platform_admin: 4,
+  super_admin: 3,
+  admin: 2,
+  teacher: 1,
+  staff: 1,
+}
+
+function canChangePassword(actorRole: UserRole, actorId: string, targetRole: UserRole, targetId: string): boolean {
+  if (actorId === targetId) return ['platform_admin', 'super_admin', 'admin'].includes(actorRole)
+  return ROLE_RANK[actorRole] > ROLE_RANK[targetRole]
+}
+
+function canManageUser(actorRole: UserRole, actorId: string, targetRole: UserRole, targetId: string): boolean {
+  if (actorId === targetId) return false
+  if (actorRole === 'admin') return false
+  return ROLE_RANK[actorRole] > ROLE_RANK[targetRole]
+}
 
 export type UserRow = {
   id: string
@@ -52,14 +72,18 @@ type Props = {
 }
 
 export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff, institutionType, currentUserRole }: Props) {
-  const [dialogOpen, setDialogOpen]     = useState(false)
-  const [editing, setEditing]           = useState<UserRow | null>(null)
+  const [dialogOpen, setDialogOpen]       = useState(false)
+  const [editing, setEditing]             = useState<UserRow | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<UserRow | null>(null)
-  const [deleting, setDeleting]         = useState(false)
-  const [deleteError, setDeleteError]   = useState<string | null>(null)
+  const [deleting, setDeleting]           = useState(false)
+  const [deleteError, setDeleteError]     = useState<string | null>(null)
+
+  const [pwDialogOpen, setPwDialogOpen] = useState(false)
+  const [pwTarget, setPwTarget]         = useState<UserRow | null>(null)
 
   function openAdd() { setEditing(null); setDialogOpen(true) }
   function openEdit(u: UserRow) { setEditing(u); setDialogOpen(true) }
+  function openChangePassword(u: UserRow) { setPwTarget(u); setPwDialogOpen(true) }
 
   async function handleDelete() {
     if (!confirmTarget) return
@@ -80,7 +104,7 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
       <PageHeader
         title="Accounts"
         subtitle={`${users.length} account${users.length !== 1 ? 's' : ''}`}
-        actions={<Button onClick={openAdd}>Add account</Button>}
+        actions={currentUserRole !== 'admin' ? <Button onClick={openAdd}>Add account</Button> : undefined}
       />
 
       {users.length === 0 ? (
@@ -120,21 +144,33 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => openEdit(u)}
-                          title="Edit role"
-                          className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setConfirmTarget(u)}
-                          title="Delete account"
-                          disabled={u.id === currentUserId}
-                          className="text-muted-foreground hover:text-destructive transition-colors p-1.5 disabled:opacity-30 disabled:pointer-events-none"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {canChangePassword(currentUserRole, currentUserId, u.role, u.id) && (
+                          <button
+                            onClick={() => openChangePassword(u)}
+                            title={u.id === currentUserId ? 'Change your password' : 'Change password'}
+                            className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {canManageUser(currentUserRole, currentUserId, u.role, u.id) && (
+                          <button
+                            onClick={() => openEdit(u)}
+                            title="Edit role"
+                            className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {canManageUser(currentUserRole, currentUserId, u.role, u.id) && (
+                          <button
+                            onClick={() => setConfirmTarget(u)}
+                            title="Delete account"
+                            className="text-muted-foreground hover:text-destructive transition-colors p-1.5"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -160,6 +196,14 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
         labelStaff={labelStaff}
         institutionType={institutionType}
         currentUserRole={currentUserRole}
+      />
+
+      <PasswordDialog
+        open={pwDialogOpen}
+        onOpenChange={setPwDialogOpen}
+        userId={pwTarget?.id ?? null}
+        userEmail={pwTarget?.email ?? ''}
+        isSelf={pwTarget?.id === currentUserId}
       />
 
       <ConfirmDialog
