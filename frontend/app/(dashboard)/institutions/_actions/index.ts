@@ -9,18 +9,39 @@ export async function deleteInstitution(id: string): Promise<{ error: string | n
   await requireRole('platform_admin')
   const supabase = createAdminClient()
 
-  // Collect profile IDs before cascade deletion — auth.users won't be cascade-deleted
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('institution_id', id)
+  // Collect profile IDs and device IDs BEFORE cascade deletion — both are
+  // removed by the cascade and won't be available after the institution row is gone.
+  const [{ data: profiles }, { data: devices }] = await Promise.all([
+    supabase.from('profiles').select('id').eq('institution_id', id),
+    supabase.from('devices').select('id').eq('institution_id', id),
+  ])
+
+  // Queue a decommission signal for every physical device that belongs to this
+  // institution. Each device will receive { decommissioned: true } on its next
+  // /get-enrollment-job poll and wipe its SPIFFS identity, exactly as individual
+  // device deletion does. Must happen before the cascade removes the device rows.
+  const deviceIds = (devices ?? []).map((d: { id: string }) => d.id)
+  if (deviceIds.length > 0) {
+    await supabase
+      .from('device_resets')
+      .upsert(
+        deviceIds.map((device_id: string) => ({ device_id })),
+        { onConflict: 'device_id' }
+      )
+  }
 
   const { error } = await supabase
     .from('institutions')
     .delete()
     .eq('id', id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    // Roll back the reset records if the institution delete failed.
+    if (deviceIds.length > 0) {
+      await supabase.from('device_resets').delete().in('device_id', deviceIds)
+    }
+    return { error: error.message }
+  }
 
   // Delete Supabase Auth users for all profiles that belonged to this institution
   for (const profile of profiles ?? []) {
