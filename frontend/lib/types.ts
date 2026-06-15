@@ -86,6 +86,7 @@ export type Device = {
   unit_name: string
   display_name: string | null
   mode: 'present_absent' | 'time_in_out'
+  institution_id?: string | null
   institution?: { id: string; name: string } | null
 }
 
@@ -109,4 +110,5 @@ export type Holiday = {
   label: string
   start_date: string
   end_date: string
+  recurring: boolean
 }

@@ -30,7 +30,8 @@ export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFi
     }
   }, [open, defaultFid])
 
-  if (!member || !slot) return null
+  // An unassigned member (device deleted) has no unit to enroll against.
+  if (!member || !slot || !member.device_id) return null
 
   const fingerLabel = slot === 'fin1' ? 'Finger 1' : 'Finger 2'
   const deviceName = member.device
@@ -50,7 +51,7 @@ export function EnrollFingerDialog({ open, onOpenChange, member, slot, defaultFi
 
     const result = await createEnrollmentJob({
       command: 'register',
-      device_id: member!.device_id,
+      device_id: member!.device_id!,
       student_id: member!.id,
       finger_slot: slot!,
       fid: fidNum,

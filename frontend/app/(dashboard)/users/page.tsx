@@ -6,43 +6,61 @@ import type { UserRole } from '@/lib/supabase/dal'
 export default async function UsersPage() {
   const { user: currentUser, role: currentUserRole, institutionId } = await requireRole('super_admin', 'admin', 'platform_admin')
   const institution = await getInstitution(institutionId)
+  const isPlatformAdmin = currentUserRole === 'platform_admin'
   const admin = createAdminClient()
 
   let profilesQ = admin.from('profiles').select('id, role, assigned_unit, institution_id')
   if (institutionId) profilesQ = profilesQ.eq('institution_id', institutionId)
 
-  const [{ data: authData }, { data: profiles }, { data: devices }] = await Promise.all([
+  // Platform admins manage accounts across every institution, so they must
+  // choose one when creating an account, and the table shows which institution
+  // each account belongs to.
+  const institutionsP = isPlatformAdmin
+    ? admin.from('institutions').select('id, name').order('name')
+    : Promise.resolve({ data: [] as { id: string; name: string }[] })
+
+  const [{ data: authData }, { data: profiles }, { data: devices }, { data: institutionsData }] = await Promise.all([
     admin.auth.admin.listUsers(),
     profilesQ,
-    admin.from('devices').select('id, group_name, unit_name').order('group_name').order('unit_name'),
+    admin.from('devices').select('id, group_name, unit_name, institution_id').order('group_name').order('unit_name'),
+    institutionsP,
   ])
 
   const profileMap = new Map(
     (profiles ?? []).map((p) => [p.id, p])
   )
 
+  const institutions = (institutionsData ?? []) as { id: string; name: string }[]
+  const institutionNames = new Map(institutions.map((i) => [i.id, i.name]))
+
   const institutionUserIds = new Set(profileMap.keys())
 
   const users = (authData?.users ?? [])
     .filter((u) => !institutionId || institutionUserIds.has(u.id))
-    .map((u) => ({
-      id:            u.id,
-      email:         u.email ?? '',
-      created_at:    u.created_at,
-      role:          (profileMap.get(u.id)?.role ?? 'super_admin') as UserRole,
-      assigned_unit: profileMap.get(u.id)?.assigned_unit ?? null,
-    }))
+    .map((u) => {
+      const instId = profileMap.get(u.id)?.institution_id ?? null
+      return {
+        id:               u.id,
+        email:            u.email ?? '',
+        created_at:       u.created_at,
+        role:             (profileMap.get(u.id)?.role ?? 'super_admin') as UserRole,
+        assigned_unit:    profileMap.get(u.id)?.assigned_unit ?? null,
+        institution_id:   instId,
+        institution_name: instId ? (institutionNames.get(instId) ?? null) : null,
+      }
+    })
     .sort((a, b) => a.email.localeCompare(b.email))
 
   return (
     <UsersView
       users={users}
       currentUserId={currentUser.id}
-      devices={(devices ?? []) as { id: string; group_name: string; unit_name: string }[]}
+      devices={(devices ?? []) as { id: string; group_name: string; unit_name: string; institution_id: string | null }[]}
       labelUnit={institution.label_unit}
       labelStaff={institution.label_staff}
       institutionType={institution.type}
       currentUserRole={currentUserRole}
+      institutions={institutions}
     />
   )
 }

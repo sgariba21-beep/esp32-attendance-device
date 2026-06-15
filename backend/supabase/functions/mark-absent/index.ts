@@ -55,13 +55,28 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const { data: holiday } = await supabase
+    // Fetch all holidays for this institution and match in code: non-recurring
+    // holidays match by full date range; recurring holidays match by month/day
+    // (year ignored), so "25 Dec" entered once applies every year.
+    const { data: holidays } = await supabase
       .from("holidays")
-      .select("label")
-      .eq("institution_id", inst.id)
-      .lte("start_date", todayInTz)
-      .gte("end_date", todayInTz)
-      .maybeSingle();
+      .select("label, start_date, end_date, recurring")
+      .eq("institution_id", inst.id);
+
+    const todayMMDD = todayInTz.slice(5); // "MM-DD"
+    const holiday = (holidays || []).find((h) => {
+      if (!h.recurring) {
+        return h.start_date <= todayInTz && todayInTz <= h.end_date;
+      }
+      const startMMDD = h.start_date.slice(5);
+      const endMMDD = h.end_date.slice(5);
+      // Same-year range (e.g. 24-12 .. 26-12) vs. wrap across year-end
+      // (e.g. 30-12 .. 02-01): handle both.
+      if (startMMDD <= endMMDD) {
+        return startMMDD <= todayMMDD && todayMMDD <= endMMDD;
+      }
+      return todayMMDD >= startMMDD || todayMMDD <= endMMDD;
+    });
 
     if (holiday) {
       results.push(`${inst.id}: holiday (${holiday.label}) — skipped`);

@@ -19,6 +19,7 @@ type Props = {
   labelUnit: string
   labelMember: string
   labelMembers: string
+  showInstitution?: boolean
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -64,7 +65,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
   )
 }
 
-export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, labelMembers }: Props) {
+export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution }: Props) {
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
@@ -98,6 +99,7 @@ export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, l
             created_at: payload.new.created_at as string,
             device: devices.find((d) => d.id === payload.new.device_id) ?? null,
             student: null,
+            institution: null,
           }
           return [newJob, ...prev]
         })
@@ -140,6 +142,7 @@ export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, l
             <TableHeader>
               <TableRow>
                 <TableHead>Created</TableHead>
+                {showInstitution && <TableHead>Institution</TableHead>}
                 <TableHead>Command</TableHead>
                 <TableHead>Device</TableHead>
                 <TableHead>{labelMember}</TableHead>
@@ -157,6 +160,9 @@ export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, l
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                       {formatTime(job.created_at)}
                     </TableCell>
+                    {showInstitution && (
+                      <TableCell className="text-sm text-muted-foreground">{job.institution?.name ?? '—'}</TableCell>
+                    )}
                     <TableCell>
                       <Badge variant={
                         job.command === 'register' ? 'success'

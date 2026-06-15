@@ -9,7 +9,7 @@ function getPageTitle(pathname: string, institution: InstitutionConfig): string 
   if (pathname.startsWith('/members'))      return institution.label_members
   if (pathname.startsWith('/attendance'))   return 'Attendance'
   if (pathname.startsWith('/devices'))      return 'Devices'
-  if (pathname.startsWith('/academic'))     return 'Academic'
+  if (pathname.startsWith('/academic'))     return institution.type === 'office' ? 'Periods & Holidays' : 'Academic'
   if (pathname.startsWith('/enrollment'))   return 'Enrollment'
   if (pathname.startsWith('/promotion'))    return 'Promotion'
   if (pathname.startsWith('/institutions')) return 'Institutions'

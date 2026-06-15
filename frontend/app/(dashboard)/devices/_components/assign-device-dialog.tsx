@@ -7,6 +7,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { SingleSelect } from '@/components/ui/single-select'
 import { assignDevice } from '../_actions'
 import type { UnassignedDevice } from '@/lib/types'
 
@@ -69,18 +70,14 @@ export function AssignDeviceDialog({ open, onOpenChange, device, institutions }:
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
             <Label htmlFor="institution_id">Institution</Label>
-            <select
+            <SingleSelect
               id="institution_id"
+              options={institutions.map((i) => ({ value: i.id, label: i.name }))}
               value={institutionId}
-              onChange={(e) => setInstitutionId(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              required
-            >
-              <option value="">Select institution…</option>
-              {institutions.map((i) => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
-            </select>
+              onChange={setInstitutionId}
+              placeholder="Select institution…"
+              searchPlaceholder="Search institutions…"
+            />
           </div>
 
           {error && <Alert variant="error"><AlertDescription>{error}</AlertDescription></Alert>}

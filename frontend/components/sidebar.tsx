@@ -39,11 +39,13 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
   items.push(
     { href: '/devices',    label: 'Devices',    icon: Cpu,          roles: ['super_admin', 'platform_admin'] },
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin'] },
+    // Periods & holidays apply to every institution type; offices get neutral wording.
+    { href: '/academic', label: institution.type === 'office' ? 'Periods & Holidays' : 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin'] },
   )
 
+  // Promotion is a school-only concept (advancing year groups).
   if (institution.type !== 'office') {
     items.push(
-      { href: '/academic',  label: 'Academic',  icon: BookOpen,      roles: ['super_admin', 'admin', 'platform_admin'] },
       { href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] },
     )
   }

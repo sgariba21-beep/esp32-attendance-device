@@ -1,8 +1,20 @@
+import type { Metadata } from 'next'
 import { verifySession, getInstitution } from '@/lib/supabase/dal'
 import { Sidebar } from '@/components/sidebar'
 import { MobileHeader } from '@/components/mobile-header'
 import { MobileBottomNav } from '@/components/mobile-bottom-nav'
 import { SessionManager } from '@/components/session-manager'
+
+// Browser tab title reflects context: the institution's name for institution
+// accounts, or a neutral system name for cross-tenant platform admins.
+// verifySession + getInstitution are cache()-wrapped, so this shares the same
+// DB lookup as the layout render below.
+export async function generateMetadata(): Promise<Metadata> {
+  const { institutionId } = await verifySession()
+  if (!institutionId) return { title: 'Attendance System' }
+  const institution = await getInstitution(institutionId)
+  return { title: `${institution.name} — Attendance` }
+}
 
 export default async function DashboardLayout({
   children,

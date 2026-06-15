@@ -20,7 +20,7 @@ export default async function AcademicPage() {
 
   let holidaysQ = supabase
     .from('holidays')
-    .select('id, label, start_date, end_date')
+    .select('id, label, start_date, end_date, recurring')
     .order('start_date', { ascending: true })
 
   if (institutionId) {
@@ -34,7 +34,7 @@ export default async function AcademicPage() {
     <>
       <RealtimeRefresh />
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold">Academic</h1>
+        <h1 className="text-2xl font-semibold">{institution.type === 'office' ? 'Periods & Holidays' : 'Academic'}</h1>
         <Tabs defaultValue="terms">
           <TabsList>
             <TabsTrigger value="terms">{pluralize(institution.label_period)}</TabsTrigger>

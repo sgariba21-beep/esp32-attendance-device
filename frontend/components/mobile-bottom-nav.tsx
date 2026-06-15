@@ -37,10 +37,8 @@ function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavIte
   }
   items.push(
     { href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] },
+    { href: '/academic', label: institution.type === 'office' ? 'Periods & Holidays' : 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin'] },
   )
-  if (institution.type !== 'office') {
-    items.push({ href: '/academic', label: 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin'] })
-  }
   return items
 }
 

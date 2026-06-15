@@ -31,13 +31,15 @@ type Props = {
   members: MemberWithDevice[]
   devices: Device[]
   role: UserRole
+  institutions: { id: string; name: string }[]
   labels: Labels
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 
-export function MembersView({ members, devices, role, labels }: Props) {
+export function MembersView({ members, devices, role, institutions, labels }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
+  const isPlatformAdmin = role === 'platform_admin'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<MemberWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
@@ -45,6 +47,7 @@ export function MembersView({ members, devices, role, labels }: Props) {
 
   const [search, setSearch] = useState('')
   const [unitFilter, setUnitFilter] = useState('')
+  const [institutionFilter, setInstitutionFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [page, setPage] = useState(1)
 
@@ -53,6 +56,7 @@ export function MembersView({ members, devices, role, labels }: Props) {
   const usedFids = useMemo(() => {
     const map: Record<string, number[]> = {}
     for (const m of members) {
+      if (!m.device_id) continue
       if (!map[m.device_id]) map[m.device_id] = []
       if (m.fin1) map[m.device_id].push(m.fin1)
       if (m.fin2) map[m.device_id].push(m.fin2)
@@ -60,17 +64,24 @@ export function MembersView({ members, devices, role, labels }: Props) {
     return map
   }, [members])
 
+  // When a platform admin filters by institution, the unit dropdown should only
+  // offer that institution's units.
+  const unitOptions = institutionFilter
+    ? devices.filter((d) => d.institution_id === institutionFilter)
+    : devices
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
     return members.filter((m) => {
       if (q && !m.fullname.toLowerCase().includes(q) && !m.sid.toLowerCase().includes(q)) return false
+      if (institutionFilter && m.institution_id !== institutionFilter) return false
       if (unitFilter && m.device_id !== unitFilter) return false
       if (statusFilter !== 'all' && m.status !== statusFilter) return false
       return true
     })
-  }, [members, search, unitFilter, statusFilter])
+  }, [members, search, unitFilter, institutionFilter, statusFilter])
 
-  const hasFilters = search || unitFilter || statusFilter !== 'all'
+  const hasFilters = search || unitFilter || institutionFilter || statusFilter !== 'all'
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -99,12 +110,24 @@ export function MembersView({ members, devices, role, labels }: Props) {
           className="w-56"
         />
 
+        {isPlatformAdmin && (
+          <NativeSelect
+            value={institutionFilter}
+            onChange={(e) => { setInstitutionFilter(e.target.value); setUnitFilter(''); setPage(1) }}
+          >
+            <option value="">All institutions</option>
+            {institutions.map((i) => (
+              <option key={i.id} value={i.id}>{i.name}</option>
+            ))}
+          </NativeSelect>
+        )}
+
         <NativeSelect
           value={unitFilter}
           onChange={(e) => { setUnitFilter(e.target.value); setPage(1) }}
         >
           <option value="">All {pluralize(labels.label_unit.toLowerCase())}</option>
-          {devices.map((d) => (
+          {unitOptions.map((d) => (
             <option key={d.id} value={d.id}>
               {d.group_name} {d.unit_name}
             </option>
@@ -124,7 +147,7 @@ export function MembersView({ members, devices, role, labels }: Props) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setSearch(''); setUnitFilter(''); setStatusFilter('all'); setPage(1) }}
+            onClick={() => { setSearch(''); setUnitFilter(''); setInstitutionFilter(''); setStatusFilter('all'); setPage(1) }}
           >
             Clear
           </Button>
@@ -224,6 +247,8 @@ export function MembersView({ members, devices, role, labels }: Props) {
         devices={devices}
         usedFids={usedFids}
         labels={labels}
+        institutions={institutions}
+        isPlatformAdmin={isPlatformAdmin}
       />
 
       <ConfirmDialog

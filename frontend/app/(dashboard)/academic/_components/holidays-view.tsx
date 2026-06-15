@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, Fragment } from 'react'
-import { Loader2, CalendarOff } from 'lucide-react'
+import { Loader2, CalendarOff, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -24,7 +25,19 @@ function formatDate(iso: string) {
   })
 }
 
+// Recurring holidays match on day + month only, so we drop the (meaningless) year.
+function formatDayMonth(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+  })
+}
+
 function formatRange(h: Holiday) {
+  if (h.recurring) {
+    if (h.start_date.slice(5) === h.end_date.slice(5)) return formatDayMonth(h.start_date)
+    return `${formatDayMonth(h.start_date)} – ${formatDayMonth(h.end_date)}`
+  }
   if (h.start_date === h.end_date) return formatDate(h.start_date)
   return `${formatDate(h.start_date)} – ${formatDate(h.end_date)}`
 }
@@ -73,14 +86,25 @@ export function HolidaysView({ holidays }: Props) {
             </TableHeader>
             <TableBody>
               {sorted.map((h) => {
-                const isPast = h.end_date < today
+                // Recurring holidays repeat yearly, so they're never "past".
+                const isPast = !h.recurring && h.end_date < today
                 return (
                   <Fragment key={h.id}>
                     <TableRow>
                       <TableCell className={`whitespace-nowrap font-medium${isPast ? ' text-muted-foreground' : ''}`}>
                         {formatRange(h)}
                       </TableCell>
-                      <TableCell className={isPast ? 'text-muted-foreground' : undefined}>{h.label}</TableCell>
+                      <TableCell className={isPast ? 'text-muted-foreground' : undefined}>
+                        <span className="inline-flex items-center gap-2">
+                          {h.label}
+                          {h.recurring && (
+                            <Badge variant="secondary" className="gap-1">
+                              <RefreshCw className="h-3 w-3" />
+                              Yearly
+                            </Badge>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"

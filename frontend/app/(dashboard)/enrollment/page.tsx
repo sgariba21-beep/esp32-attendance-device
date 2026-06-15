@@ -15,11 +15,13 @@ export type EnrollmentJob = {
   created_at: string
   device: { id: string; group_name: string; unit_name: string } | null
   student: { id: string; fullname: string; sid: string } | null
+  institution: { name: string } | null
 }
 
 export default async function EnrollmentPage() {
-  const { institutionId } = await requireRole('super_admin', 'platform_admin')
+  const { role, institutionId } = await requireRole('super_admin', 'platform_admin')
   const institution = await getInstitution(institutionId)
+  const isPlatformAdmin = role === 'platform_admin'
   const supabase = createAdminClient()
 
   let jobsQ = supabase
@@ -27,7 +29,8 @@ export default async function EnrollmentPage() {
     .select(`
       id, command, status, finger_slot, fid, note, created_at,
       device:device_id(id, group_name, unit_name),
-      student:student_id(id, fullname, sid)
+      student:student_id(id, fullname, sid),
+      institution:institution_id(name)
     `)
     .order('created_at', { ascending: false })
     .limit(100)
@@ -67,6 +70,7 @@ export default async function EnrollmentPage() {
       labelUnit={institution.label_unit}
       labelMember={labelMemberSingular}
       labelMembers={labelMemberPlural}
+      showInstitution={isPlatformAdmin}
     />
   )
 }

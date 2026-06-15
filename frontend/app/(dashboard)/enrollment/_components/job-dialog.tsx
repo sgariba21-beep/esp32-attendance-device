@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { SingleSelect } from '@/components/ui/single-select'
 import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
 import type { StudentOption } from '../_actions'
 import type { Device } from '@/lib/types'
@@ -173,17 +173,14 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
           {/* Device */}
           <div className="space-y-2">
             <Label htmlFor="device_id">Device</Label>
-            <NativeSelect
+            <SingleSelect
               id="device_id"
+              options={devices.map((d) => ({ value: d.id, label: `${d.group_name} ${d.unit_name}` }))}
               value={form.device_id}
-              onChange={(e) => { set('device_id', e.target.value); set('student_id', '') }}
-              required
-            >
-              <option value="">Select a device…</option>
-              {devices.map((d) => (
-                <option key={d.id} value={d.id}>{d.group_name} {d.unit_name}</option>
-              ))}
-            </NativeSelect>
+              onChange={(v) => { set('device_id', v); set('student_id', '') }}
+              placeholder="Select a device…"
+              searchPlaceholder="Search devices…"
+            />
           </div>
 
           {/* Master name */}
@@ -207,18 +204,15 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
           {needsStudent && (
             <div className="space-y-2">
               <Label htmlFor="student_id">{labelMember}</Label>
-              <NativeSelect
+              <SingleSelect
                 id="student_id"
+                options={deviceStudents.map((s) => ({ value: s.id, label: `${s.fullname} (${s.sid})` }))}
                 value={form.student_id}
-                onChange={(e) => set('student_id', e.target.value)}
-                required
-                disabled={loadingStudents}
-              >
-                <option value="">{loadingStudents ? 'Loading…' : `Select ${article} ${member}…`}</option>
-                {deviceStudents.map((s) => (
-                  <option key={s.id} value={s.id}>{s.fullname} ({s.sid})</option>
-                ))}
-              </NativeSelect>
+                onChange={(v) => set('student_id', v)}
+                placeholder={loadingStudents ? 'Loading…' : `Select ${article} ${member}…`}
+                searchPlaceholder={`Search ${labelMembers.toLowerCase()}…`}
+                disabled={loadingStudents || !form.device_id}
+              />
               {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
                 <p className="text-xs text-muted-foreground">No active {labelMembers.toLowerCase()} in this {labelUnit.toLowerCase()}.</p>
               )}

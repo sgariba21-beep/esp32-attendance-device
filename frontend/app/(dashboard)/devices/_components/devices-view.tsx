@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Cpu, Pencil, Settings, Trash2, Wifi } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { DeviceDialog } from './device-dialog'
 import { AssignDeviceDialog } from './assign-device-dialog'
@@ -37,7 +39,10 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
   const [assignOpen, setAssignOpen] = useState(false)
   const [assignTarget, setAssignTarget] = useState<UnassignedDevice | null>(null)
 
-  function openAdd() { setEditing(null); setDialogTitle(undefined); setDialogOpen(true) }
+  // Filters
+  const [search, setSearch] = useState('')
+  const [institutionFilter, setInstitutionFilter] = useState('')
+
   function openEdit(device: Device) { setEditing(device); setDialogTitle(undefined); setDialogOpen(true) }
   function openConfigure(device: Device) { setEditing(device); setDialogTitle('Configure device'); setDialogOpen(true) }
 
@@ -57,7 +62,7 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
 
   // ── Platform admin: unified fleet table ──────────────────────────────────
   if (isPlatformAdmin) {
-    const allAssigned = [...devices, ...pendingSetupDevices].sort((a, b) => {
+    const sortedAssigned = [...devices, ...pendingSetupDevices].sort((a, b) => {
       const ia = a.institution?.name ?? ''
       const ib = b.institution?.name ?? ''
       if (ia !== ib) return ia.localeCompare(ib)
@@ -65,13 +70,48 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
       return a.unit_name.localeCompare(b.unit_name)
     })
 
+    const q = search.toLowerCase().trim()
+    const allAssigned = sortedAssigned.filter((d) => {
+      if (institutionFilter && d.institution?.id !== institutionFilter) return false
+      if (q) {
+        const haystack = `${d.institution?.name ?? ''} ${d.group_name} ${d.unit_name} ${d.mac ?? ''}`.toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
+      return true
+    })
+    const hasFilters = !!(search || institutionFilter)
+
     return (
       <div className="space-y-6">
         <PageHeader
           title="Devices"
-          subtitle={`${allAssigned.length + unassignedDevices.length} device${allAssigned.length + unassignedDevices.length !== 1 ? 's' : ''} total`}
-          actions={<Button onClick={openAdd}>Add device</Button>}
+          subtitle={`${sortedAssigned.length + unassignedDevices.length} device${sortedAssigned.length + unassignedDevices.length !== 1 ? 's' : ''} total`}
         />
+
+        {/* Filter bar */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            placeholder="Search institution, group, unit, MAC…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-72"
+          />
+          <NativeSelect
+            value={institutionFilter}
+            onChange={(e) => setInstitutionFilter(e.target.value)}
+            className="w-56"
+          >
+            <option value="">All institutions</option>
+            {allInstitutions.map((i) => (
+              <option key={i.id} value={i.id}>{i.name}</option>
+            ))}
+          </NativeSelect>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setInstitutionFilter('') }}>
+              Clear
+            </Button>
+          )}
+        </div>
 
         {/* Pending assignment */}
         {unassignedDevices.length > 0 && (
@@ -109,7 +149,7 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
 
         {/* All assigned devices — fleet table */}
         {allAssigned.length === 0 ? (
-          <EmptyState icon={Cpu} message="No assigned devices yet." />
+          <EmptyState icon={Cpu} message={hasFilters ? 'No devices match your filters.' : 'No assigned devices yet.'} />
         ) : (
           <div className="space-y-2">
             <h2 className="text-sm font-semibold">Assigned devices ({allAssigned.length})</h2>
@@ -213,8 +253,13 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
   }
 
   // ── Institution admin: card grid ─────────────────────────────────────────
+  const q = search.toLowerCase().trim()
+  const filteredDevices = q
+    ? devices.filter((d) => `${d.group_name} ${d.unit_name}`.toLowerCase().includes(q))
+    : devices
+
   const grouped = Object.entries(
-    devices.reduce((acc, d) => {
+    filteredDevices.reduce((acc, d) => {
       if (!acc[d.group_name]) acc[d.group_name] = []
       acc[d.group_name].push(d)
       return acc
@@ -227,6 +272,20 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
         title="Devices"
         subtitle={`${devices.length} device${devices.length !== 1 ? 's' : ''}`}
       />
+
+      {devices.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            placeholder={`Search ${institution.label_group.toLowerCase()} or ${institution.label_unit.toLowerCase()}…`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-72"
+          />
+          {search && (
+            <Button variant="ghost" size="sm" onClick={() => setSearch('')}>Clear</Button>
+          )}
+        </div>
+      )}
 
       {/* Pending setup */}
       {pendingSetupDevices.length > 0 && (
@@ -267,6 +326,8 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
               : 'No devices yet.'
           }
         />
+      ) : filteredDevices.length === 0 ? (
+        <EmptyState icon={Cpu} message="No devices match your search." />
       ) : (
         <div className="space-y-3">
           {grouped.map(([group_name, group]) => (

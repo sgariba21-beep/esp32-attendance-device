@@ -7,12 +7,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createDevice, updateDevice } from '../_actions'
+import { updateDevice } from '../_actions'
 import type { Device } from '@/lib/types'
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  // Devices are only ever created through physical provisioning, so this dialog
+  // is edit/configure-only — `device` is always present when open.
   device: Device | null
   labelGroup: string
   labelUnit: string
@@ -47,12 +49,11 @@ export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!device) return
     setLoading(true)
     setError(null)
 
-    const result = device
-      ? await updateDevice(device.id, form)
-      : await createDevice(form)
+    const result = await updateDevice(device.id, form)
 
     setLoading(false)
     if (result.error) { setError(result.error); return }
@@ -63,7 +64,7 @@ export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>{title ?? (device ? 'Edit device' : 'Add device')}</DialogTitle>
+          <DialogTitle>{title ?? 'Edit device'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
@@ -101,7 +102,7 @@ export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={loading}>
-              {loading ? 'Saving…' : device ? 'Save changes' : 'Add device'}
+              {loading ? 'Saving…' : 'Save changes'}
             </Button>
           </DialogFooter>
         </form>

@@ -12,9 +12,11 @@ type Props = {
   onChange: (value: string) => void
   placeholder: string
   searchPlaceholder?: string
+  disabled?: boolean
+  id?: string
 }
 
-export function SingleSelect({ options, value, onChange, placeholder, searchPlaceholder = 'Search…' }: Props) {
+export function SingleSelect({ options, value, onChange, placeholder, searchPlaceholder = 'Search…', disabled, id }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -44,7 +46,7 @@ export function SingleSelect({ options, value, onChange, placeholder, searchPlac
 
   return (
     <div ref={ref} className="relative">
-      {value && (
+      {value && !disabled && (
         <button
           type="button"
           onClick={() => onChange('')}
@@ -57,10 +59,12 @@ export function SingleSelect({ options, value, onChange, placeholder, searchPlac
 
       <button
         type="button"
+        id={id}
+        disabled={disabled}
         onClick={() => setOpen(!open)}
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-background pl-2.5 text-sm transition-colors outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
-          value ? 'pr-10' : 'pr-2.5',
+          'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-background pl-2.5 text-sm transition-colors outline-none hover:bg-muted/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50',
+          value && !disabled ? 'pr-10' : 'pr-2.5',
         )}
       >
         <span className={cn('truncate', !value && 'text-muted-foreground')}>

@@ -10,26 +10,6 @@ export type DeviceFormData = {
   mode?: 'present_absent' | 'time_in_out'
 }
 
-export async function createDevice(data: DeviceFormData) {
-  const { institutionId } = await requireRole('super_admin', 'platform_admin')
-  const supabase = createAdminClient()
-
-  const { error } = await supabase.from('devices').insert({
-    group_name: data.group_name.trim(),
-    unit_name: data.unit_name.trim(),
-    mode: data.mode ?? 'present_absent',
-    institution_id: institutionId,
-  })
-
-  if (error) {
-    if (error.code === '23505') return { error: 'A device with that group and unit already exists.' }
-    return { error: error.message }
-  }
-
-  revalidatePath('/devices')
-  return { error: null }
-}
-
 export async function updateDevice(id: string, data: DeviceFormData) {
   await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
@@ -56,19 +36,28 @@ export async function deleteDevice(id: string) {
   await requireRole('super_admin', 'platform_admin')
   const supabase = createAdminClient()
 
+  // Deactivate any members still assigned to this device BEFORE deleting it.
+  // The device's FK is ON DELETE SET NULL, so after the delete their device_id
+  // becomes NULL; deactivating first means they don't linger as active members
+  // with no unit (which would otherwise be marked absent daily). They can be
+  // reactivated once reassigned to a new unit.
+  await supabase
+    .from('members')
+    .update({ status: 'inactive' })
+    .eq('device_id', id)
+
   // Queue a decommission signal keyed by device_id (no FK — must outlive the row).
   // The next time the physical device polls /get-enrollment-job it will receive
   // { decommissioned: true } and clear its SPIFFS identity, returning to factory state.
-  // Devices with no mac (virtual/manual records) have no physical hardware to reset,
-  // but we insert regardless — the record is harmless if never claimed.
   await supabase.from('device_resets').upsert({ device_id: id }, { onConflict: 'device_id' })
 
+  // ON DELETE SET NULL on attendance/enrollment_jobs/members preserves those
+  // records with a null device reference instead of blocking the delete.
   const { error } = await supabase.from('devices').delete().eq('id', id)
 
   if (error) {
     // Roll back the reset record if the delete failed so we don't have a dangling entry.
     await supabase.from('device_resets').delete().eq('device_id', id)
-    if (error.code === '23503') return { error: 'Cannot delete: members or attendance records are linked to this device.' }
     return { error: error.message }
   }
 

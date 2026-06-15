@@ -18,6 +18,7 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [label, setLabel] = useState('')
+  const [recurring, setRecurring] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -26,6 +27,7 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
       setStartDate('')
       setEndDate('')
       setLabel('')
+      setRecurring(false)
       setError(null)
     }
   }, [open])
@@ -37,7 +39,7 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
 
     setLoading(true)
     setError(null)
-    const result = await createHoliday({ start_date: startDate, end_date: endDate || startDate, label })
+    const result = await createHoliday({ start_date: startDate, end_date: endDate || startDate, label, recurring })
     setLoading(false)
 
     if (result.error) { setError(result.error); return }
@@ -81,6 +83,21 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
               required
             />
           </div>
+          <label htmlFor="recurring" className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer">
+            <input
+              id="recurring"
+              type="checkbox"
+              checked={recurring}
+              onChange={(e) => setRecurring(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">Repeats every year</span>
+              <span className="block text-xs text-muted-foreground">
+                Matches on the day and month only (e.g. 25 Dec). The year you pick is ignored.
+              </span>
+            </span>
+          </label>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

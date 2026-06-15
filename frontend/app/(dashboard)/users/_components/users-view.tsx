@@ -41,6 +41,8 @@ export type UserRow = {
   created_at: string
   role: UserRole
   assigned_unit: string | null
+  institution_id: string | null
+  institution_name: string | null
 }
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -59,7 +61,7 @@ const ROLE_BADGE: Record<UserRole, 'default' | 'secondary' | 'outline'> = {
   platform_admin: 'secondary',
 }
 
-type DeviceOption = { id: string; group_name: string; unit_name: string }
+type DeviceOption = { id: string; group_name: string; unit_name: string; institution_id?: string | null }
 
 type Props = {
   users: UserRow[]
@@ -69,9 +71,11 @@ type Props = {
   labelStaff: string
   institutionType: 'school' | 'office'
   currentUserRole: UserRole
+  institutions: { id: string; name: string }[]
 }
 
-export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff, institutionType, currentUserRole }: Props) {
+export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff, institutionType, currentUserRole, institutions }: Props) {
+  const isPlatformAdmin = currentUserRole === 'platform_admin'
   const [dialogOpen, setDialogOpen]       = useState(false)
   const [editing, setEditing]             = useState<UserRow | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<UserRow | null>(null)
@@ -121,6 +125,7 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
                 <TableRow>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
+                  {isPlatformAdmin && <TableHead>Institution</TableHead>}
                   <TableHead>{labelUnit}</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -139,6 +144,11 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
                         {u.role === 'teacher' || u.role === 'staff' ? labelStaff : ROLE_LABELS[u.role]}
                       </Badge>
                     </TableCell>
+                    {isPlatformAdmin && (
+                      <TableCell className="text-muted-foreground text-sm">
+                        {u.institution_name ?? (u.role === 'platform_admin' ? 'Platform' : '—')}
+                      </TableCell>
+                    )}
                     <TableCell className="text-muted-foreground text-sm">
                       {u.assigned_unit || '—'}
                     </TableCell>
@@ -196,6 +206,7 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
         labelStaff={labelStaff}
         institutionType={institutionType}
         currentUserRole={currentUserRole}
+        institutions={institutions}
       />
 
       <PasswordDialog

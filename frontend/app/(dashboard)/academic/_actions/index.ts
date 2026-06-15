@@ -6,7 +6,7 @@ import { requireRole } from '@/lib/supabase/dal'
 
 // ── Holidays ─────────────────────────────────────────────────────────────────
 
-export async function createHoliday(data: { start_date: string; end_date: string; label: string }) {
+export async function createHoliday(data: { start_date: string; end_date: string; label: string; recurring?: boolean }) {
   const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
@@ -14,6 +14,7 @@ export async function createHoliday(data: { start_date: string; end_date: string
     start_date: data.start_date,
     end_date: data.end_date,
     label: data.label.trim(),
+    recurring: data.recurring ?? false,
     institution_id: institutionId,
   })
 

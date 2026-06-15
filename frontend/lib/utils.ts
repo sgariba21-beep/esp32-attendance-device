@@ -22,11 +22,16 @@ export function pluralize(word: string): string {
 }
 
 /**
- * Pick "a" or "an" for a word based on its leading sound (letter heuristic).
+ * Pick "a" or "an" for a word based on its leading sound (not just its letter).
  * Used so label-driven copy reads correctly: "an Employee", "a Student",
- * "a Branch", "an Office". Falls back gracefully on combined labels like
- * "Student / Teacher" (keys off the first character).
+ * "a Branch", "an Office", "a Unit". Falls back gracefully on combined labels
+ * like "Student / Teacher" (keys off the first word).
  */
 export function indefiniteArticle(word: string): string {
-  return /^[aeiou]/i.test(word.trim()) ? 'an' : 'a'
+  const w = word.trim().toLowerCase()
+  // "yoo"-sound words take "a" despite a leading vowel: a Unit, a University, a User.
+  if (/^(uni|use|usu|uti|ubi|eu|ewe)/.test(w)) return 'a'
+  // Silent-h words take "an": an hour, an honest mistake.
+  if (/^(hour|honest|heir|honou?r)/.test(w)) return 'an'
+  return /^[aeiou]/.test(w) ? 'an' : 'a'
 }

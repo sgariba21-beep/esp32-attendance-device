@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OLAG Attendance",
+  title: "Attendance System",
   description: "Attendance management dashboard",
 };
 

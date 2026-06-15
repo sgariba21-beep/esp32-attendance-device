@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
+import { SingleSelect } from '@/components/ui/single-select'
 import { createStaffMember, updateStaffMember } from '../_actions'
 import { createEnrollmentJob } from '../../enrollment/_actions'
 import { indefiniteArticle } from '@/lib/utils'
@@ -21,7 +22,8 @@ type MemberWithDevice = {
   fullname: string
   fin1: number
   fin2: number
-  device_id: string
+  device_id: string | null
+  institution_id: string | null
   device: { id: string; group_name: string; unit_name: string } | null
 }
 
@@ -34,6 +36,8 @@ type Props = {
   devices: Device[]
   usedFids: Record<string, number[]>
   labels: Labels
+  institutions: { id: string; name: string }[]
+  isPlatformAdmin: boolean
 }
 
 function nextAvailableFid(deviceId: string, usedFids: Record<string, number[]>): number {
@@ -122,9 +126,9 @@ function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: {
 
 type EnrollStep = { memberId: string; deviceId: string; fullname: string; deviceName: string }
 
-const emptyForm = { sid: '', fullname: '', device_id: '' }
+const emptyForm = { sid: '', fullname: '', device_id: '', institution_id: '' }
 
-export function StaffDialog({ open, onOpenChange, member, devices, usedFids, labels }: Props) {
+export function StaffDialog({ open, onOpenChange, member, devices, usedFids, labels, institutions, isPlatformAdmin }: Props) {
   const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -134,17 +138,22 @@ export function StaffDialog({ open, onOpenChange, member, devices, usedFids, lab
     if (open) {
       setError(null); setEnrollStep(null)
       setForm(member
-        ? { sid: member.sid, fullname: member.fullname, device_id: member.device_id }
-        : { ...emptyForm, device_id: devices[0]?.id ?? '' }
+        ? { sid: member.sid, fullname: member.fullname, device_id: member.device_id ?? '', institution_id: member.institution_id ?? '' }
+        : { ...emptyForm, device_id: isPlatformAdmin ? '' : (devices[0]?.id ?? '') }
       )
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, member?.id])
 
+  const unitDevices = isPlatformAdmin && !member
+    ? devices.filter((d) => d.institution_id === form.institution_id)
+    : devices
+
   function set(field: string, value: string) { setForm((f) => ({ ...f, [field]: value })) }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (isPlatformAdmin && !member && !form.institution_id) { setError('Please select an institution.'); return }
     if (!form.device_id) { setError(`Please select ${indefiniteArticle(labels.label_unit)} ${labels.label_unit.toLowerCase()}.`); return }
     setLoading(true); setError(null)
 
@@ -178,7 +187,7 @@ export function StaffDialog({ open, onOpenChange, member, devices, usedFids, lab
               <FingerEnrollRow label="Finger 1" slot="fin1" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={baseFid} />
               <FingerEnrollRow label="Finger 2" slot="fin2" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
             </div>
-            <p className="text-xs text-muted-foreground">You can also enroll later from the member row.</p>
+            <p className="text-xs text-muted-foreground">You can also enroll later from the {labels.label_member.toLowerCase()} row.</p>
           </div>
           <DialogFooter><Button onClick={() => onOpenChange(false)}>Done</Button></DialogFooter>
         </DialogContent>
@@ -204,24 +213,45 @@ export function StaffDialog({ open, onOpenChange, member, devices, usedFids, lab
             <Input id="sid" value={form.sid} onChange={(e) => set('sid', e.target.value)} placeholder="e.g. T001" required />
           </div>
 
+          {isPlatformAdmin && !member && (
+            <div className="space-y-2">
+              <Label htmlFor="institution_id">Institution</Label>
+              <SingleSelect
+                id="institution_id"
+                options={institutions.map((i) => ({ value: i.id, label: i.name }))}
+                value={form.institution_id}
+                onChange={(v) => setForm((f) => ({ ...f, institution_id: v, device_id: '' }))}
+                placeholder="Select institution…"
+                searchPlaceholder="Search institutions…"
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="device_id">{labels.label_unit}</Label>
-            <NativeSelect id="device_id" value={form.device_id} onChange={(e) => set('device_id', e.target.value)} required>
+            <NativeSelect
+              id="device_id"
+              value={form.device_id}
+              onChange={(e) => set('device_id', e.target.value)}
+              required
+              disabled={isPlatformAdmin && !member && !form.institution_id}
+            >
               <option value="">Select {indefiniteArticle(labels.label_unit)} {labels.label_unit.toLowerCase()}…</option>
-              {devices.map((d) => (
+              {unitDevices.map((d) => (
                 <option key={d.id} value={d.id}>{d.group_name} {d.unit_name}</option>
               ))}
             </NativeSelect>
           </div>
 
-          {member && (() => {
-            const baseFid = nextAvailableFid(member.device_id, usedFids)
+          {member && member.device_id && (() => {
+            const deviceId = member.device_id
+            const baseFid = nextAvailableFid(deviceId, usedFids)
             return (
               <div className="space-y-2">
                 <Label>Fingerprints</Label>
                 <div className="space-y-2 rounded-lg border p-3">
-                  <FingerEditRow label="Finger 1" slot="fin1" fid={member.fin1 ?? 0} memberId={member.id} deviceId={member.device_id} defaultFid={baseFid} />
-                  <FingerEditRow label="Finger 2" slot="fin2" fid={member.fin2 ?? 0} memberId={member.id} deviceId={member.device_id} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
+                  <FingerEditRow label="Finger 1" slot="fin1" fid={member.fin1 ?? 0} memberId={member.id} deviceId={deviceId} defaultFid={baseFid} />
+                  <FingerEditRow label="Finger 2" slot="fin2" fid={member.fin2 ?? 0} memberId={member.id} deviceId={deviceId} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
                 </div>
               </div>
             )
