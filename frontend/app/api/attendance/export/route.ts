@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
   const staffIds = p.get('staff')?.split(',').filter(Boolean) ?? []
   const deviceIds = p.get('classes')?.split(',').filter(Boolean) ?? []
   const typeFilter = p.get('type') ?? undefined
+  const statusFilter = p.get('status') ?? undefined
   const institutionParam = p.get('institution') ?? undefined
 
   const effectiveInstitutionId = institutionId ?? institutionParam ?? null
@@ -80,6 +81,7 @@ export async function GET(req: NextRequest) {
   if (allMemberIds.length) query = query.in('member_id', allMemberIds)
   if (effectiveDeviceIds.length) query = query.in('device_id', effectiveDeviceIds)
   if (typeMemberIds !== null) query = query.in('member_id', typeMemberIds)
+  if (statusFilter) query = query.eq('status', statusFilter)
 
   // A teacher/staff whose assigned unit matches no device sees nothing (fail-closed).
   const { data: records } = teacherNoMatch ? { data: [] } : await query

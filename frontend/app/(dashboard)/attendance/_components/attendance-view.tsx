@@ -27,6 +27,16 @@ import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
 type MemberOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
 
+type MemberStat = {
+  id: string
+  fullname: string
+  sid: string
+  member_type: string
+  present: number
+  absent: number
+  lastSeen: string | null
+}
+
 type Labels = {
   label_member: string
   label_members: string
@@ -45,6 +55,7 @@ type Filters = {
   deviceIds: string[]
   typeFilter?: string
   institutionFilter?: string
+  statusFilter?: string
 }
 
 type Props = {
@@ -64,6 +75,7 @@ type Props = {
   track_students: boolean
   track_staff: boolean
   institutionType: 'school' | 'office'
+  memberStats: MemberStat[]
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -79,12 +91,27 @@ function formatDate(iso: string) {
   })
 }
 
+function formatShortDate(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 function formatTime(time: string) {
   const [h, m] = time.split(':')
   const hour = parseInt(h)
   const ampm = hour >= 12 ? 'PM' : 'AM'
   const h12 = hour % 12 || 12
   return `${h12}:${m} ${ampm}`
+}
+
+function memberRateColor(rate: number | null): string {
+  if (rate === null) return 'text-muted-foreground'
+  if (rate >= 80) return 'text-success-foreground'
+  if (rate >= 60) return 'text-warning-foreground'
+  return 'text-destructive'
 }
 
 type PairedRow = {
@@ -174,7 +201,7 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
 export function AttendanceView({
   records, students, staffMembers, devices, academic, filters, page, pageSize,
   totalCount, role, assignedUnit, labels, institutions,
-  track_students, track_staff, institutionType,
+  track_students, track_staff, institutionType, memberStats,
 }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
   const isPlatformAdmin = role === 'platform_admin'
@@ -191,6 +218,7 @@ export function AttendanceView({
   const [deviceIds, setDeviceIds] = useState<string[]>(filters.deviceIds)
   const [typeFilter, setTypeFilter] = useState(filters.typeFilter ?? '')
   const [institutionFilter, setInstitutionFilter] = useState(filters.institutionFilter ?? '')
+  const [statusFilter, setStatusFilter] = useState(filters.statusFilter ?? '')
 
   // For platform_admin: when an institution is selected, use its tracking flags to
   // control which type options appear. When none selected, show both.
@@ -207,16 +235,22 @@ export function AttendanceView({
   // Non-platform_admin uses their institution's custom label (e.g. "Employees").
   const studentFilterLabel = isPlatformAdmin ? 'Students' : labels.label_members
 
+  const memberTabLabel = track_students && track_staff
+    ? `${labels.label_members} / ${labels.label_staff_plural}`
+    : track_staff
+      ? labels.label_staff_plural
+      : labels.label_members
+
   const buildParams = useCallback(
     (overrides: Partial<{
       from: string; to: string; term: string
       students: string[]; staff: string[]; classes: string[]
-      type: string; institution: string; page: number
+      type: string; institution: string; status: string; page: number
     }>) => {
       const current = {
         from: fromDate, to: toDate, term: termId,
         students: studentIds, staff: staffIds, classes: deviceIds,
-        type: typeFilter, institution: institutionFilter, page: 1,
+        type: typeFilter, institution: institutionFilter, status: statusFilter, page: 1,
         ...overrides,
       }
       const p = new URLSearchParams()
@@ -228,10 +262,11 @@ export function AttendanceView({
       if (current.classes.length) p.set('classes', current.classes.join(','))
       if (current.type) p.set('type', current.type)
       if (current.institution) p.set('institution', current.institution)
+      if (current.status) p.set('status', current.status)
       if (current.page > 1) p.set('page', current.page.toString())
       return p.toString()
     },
-    [fromDate, toDate, termId, studentIds, staffIds, deviceIds, typeFilter, institutionFilter]
+    [fromDate, toDate, termId, studentIds, staffIds, deviceIds, typeFilter, institutionFilter, statusFilter]
   )
 
   const applyFilters = useCallback(
@@ -255,7 +290,7 @@ export function AttendanceView({
   function clearFilters() {
     setFromDate(''); setToDate(''); setTermId('')
     setStudentIds([]); setStaffIds([]); setDeviceIds([])
-    setTypeFilter(''); setInstitutionFilter('')
+    setTypeFilter(''); setInstitutionFilter(''); setStatusFilter('')
     startTransition(() => { router.push(pathname) })
   }
 
@@ -264,7 +299,7 @@ export function AttendanceView({
     return `/api/attendance/export${qs ? `?${qs}` : ''}`
   }
 
-  const hasFilters = !!(fromDate || toDate || termId || studentIds.length || staffIds.length || deviceIds.length || typeFilter || institutionFilter)
+  const hasFilters = !!(fromDate || toDate || termId || studentIds.length || staffIds.length || deviceIds.length || typeFilter || institutionFilter || statusFilter)
   const summary = buildSummary(records)
   const totalPages = Math.ceil(totalCount / pageSize)
   const showInstitutionColumn = isPlatformAdmin
@@ -376,6 +411,18 @@ export function AttendanceView({
           </NativeSelect>
         </ToolbarField>
 
+        <ToolbarField label="Status" htmlFor="status-filter">
+          <NativeSelect
+            id="status-filter"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); applyFilters({ status: e.target.value }) }}
+          >
+            <option value="">All</option>
+            <option value="present">Present</option>
+            <option value="absent">Absent</option>
+          </NativeSelect>
+        </ToolbarField>
+
         <ToolbarSeparator />
 
         {isTeacher && assignedUnit && (
@@ -447,6 +494,7 @@ export function AttendanceView({
           <TabsList>
             <TabsTrigger value="records">Records ({totalCount.toLocaleString()})</TabsTrigger>
             <TabsTrigger value="summary">Summary</TabsTrigger>
+            <TabsTrigger value="by-member">By {memberTabLabel} ({memberStats.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="records" className="mt-4 space-y-3">
@@ -585,6 +633,58 @@ export function AttendanceView({
                         <TableCell className="text-right tabular-nums">{row.total}</TableCell>
                       </TableRow>
                     ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="by-member" className="mt-4">
+            {memberStats.length === 0 ? (
+              <EmptyState icon={CalendarDays} message="No attendance records match your filters." />
+            ) : (
+              <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{labels.label_member}</TableHead>
+                      <TableHead className="text-right">Present</TableHead>
+                      <TableHead className="text-right">Absent</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Rate %</TableHead>
+                      <TableHead>Last Seen</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {memberStats.map((m) => {
+                      const total = m.present + m.absent
+                      const rate = total > 0 ? Math.round((m.present / total) * 100) : null
+                      return (
+                        <TableRow key={m.id}>
+                          <TableCell>
+                            <div>{m.fullname}</div>
+                            <div className="font-mono text-xs text-muted-foreground tabular-nums">{m.sid}</div>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-success-foreground font-medium">
+                            {m.present}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-destructive font-medium">
+                            {m.absent}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {total}
+                          </TableCell>
+                          <TableCell className={`text-right tabular-nums font-bold ${memberRateColor(rate)}`}>
+                            {rate !== null ? `${rate}%` : '—'}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-sm">
+                            {m.lastSeen
+                              ? formatShortDate(m.lastSeen)
+                              : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>

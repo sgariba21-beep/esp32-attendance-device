@@ -28,6 +28,7 @@ export default async function AttendancePage({
     ? params.classes.split(',').filter(Boolean)
     : []
   const typeFilter = typeof params.type === 'string' ? params.type : undefined
+  const statusFilter = typeof params.status === 'string' ? params.status : undefined
   const institutionFilter = typeof params.institution === 'string' ? params.institution : undefined
   const page = typeof params.page === 'string' ? Math.max(1, parseInt(params.page, 10)) : 1
   const offset = (page - 1) * PAGE_SIZE
@@ -131,7 +132,40 @@ export default async function AttendancePage({
   if (effectiveDeviceIds.length > 0) query = query.in('device_id', effectiveDeviceIds)
   if (typeMemberIds !== null) query = query.in('member_id', typeMemberIds)
 
-  const { data: records, count } = await query
+  let memberStatsQ = supabase
+    .from('attendance')
+    .select('member_id, status, date')
+
+  if (effectiveInstitutionId) memberStatsQ = memberStatsQ.eq('institution_id', effectiveInstitutionId)
+  if (fromDate) memberStatsQ = memberStatsQ.gte('date', fromDate)
+  if (toDate) memberStatsQ = memberStatsQ.lte('date', toDate)
+  if (termId) memberStatsQ = memberStatsQ.eq('period_id', termId)
+  if (combinedMemberIds.length > 0) memberStatsQ = memberStatsQ.in('member_id', combinedMemberIds)
+  if (effectiveDeviceIds.length > 0) memberStatsQ = memberStatsQ.in('device_id', effectiveDeviceIds)
+  if (typeMemberIds !== null) memberStatsQ = memberStatsQ.in('member_id', typeMemberIds)
+
+  if (statusFilter) query = query.eq('status', statusFilter)
+
+  const [{ data: records, count }, { data: rawStats }] = await Promise.all([query, memberStatsQ])
+
+  type RawStat = { member_id: string; status: string; date: string }
+  const statMap = new Map<string, { present: number; absent: number; lastSeen: string | null }>()
+  for (const r of (rawStats ?? []) as RawStat[]) {
+    if (!statMap.has(r.member_id)) statMap.set(r.member_id, { present: 0, absent: 0, lastSeen: null })
+    const s = statMap.get(r.member_id)!
+    if (r.status === 'present') {
+      s.present++
+      if (!s.lastSeen || r.date > s.lastSeen) s.lastSeen = r.date
+    } else {
+      s.absent++
+    }
+  }
+  const memberStats = Array.from(statMap.entries())
+    .map(([id, s]) => {
+      const m = allMembersList.find((x) => x.id === id)
+      return { id, fullname: m?.fullname ?? '—', sid: m?.sid ?? '—', member_type: m?.member_type ?? 'student', ...s }
+    })
+    .sort((a, b) => a.fullname.localeCompare(b.fullname))
 
   // The records table spans every tracked member type, so its member-column header
   // reflects all of them (e.g. "Student / Teacher") rather than a single type.
@@ -150,7 +184,8 @@ export default async function AttendancePage({
         staffMembers={visibleStaff}
         devices={allDevices}
         academic={(periodsRes.data ?? []) as AcademicTerm[]}
-        filters={{ fromDate, toDate, termId, studentIds, staffIds: staffFilterIds, deviceIds, typeFilter, institutionFilter }}
+        filters={{ fromDate, toDate, termId, studentIds, staffIds: staffFilterIds, deviceIds, typeFilter, institutionFilter, statusFilter }}
+        memberStats={memberStats}
         page={page}
         pageSize={PAGE_SIZE}
         totalCount={count ?? 0}
