@@ -190,7 +190,7 @@ Additional accounts are managed through the `/users` page in the dashboard.
 | `/institutions` | platform_admin | All institutions with member/device counts. Edit or delete any institution (deletion fans out SPIFFS wipe to all assigned devices). |
 | `/institutions/[id]` | platform_admin | Edit a specific institution's settings. |
 | `/onboarding` | platform_admin | Create a new institution and its first super_admin account. |
-| `/users` | super_admin, admin, platform_admin | Dashboard account management. `admin` can view the list and change their own password only. `super_admin`/`platform_admin` can create, edit, and delete accounts. At least one super_admin must always exist per institution. |
+| `/users` | super_admin, admin, platform_admin | Dashboard account management. `admin` can view the list and change their own password only. `super_admin`/`platform_admin` can create, edit, and delete accounts. At least one super_admin must always exist per institution. Email search and role filter available. |
 | `/unauthorized` | — | Shown when a user navigates to a page their role cannot access. |
 
 ---
@@ -219,7 +219,7 @@ Additional accounts are managed through the `/users` page in the dashboard.
 - Every scan: `POST /log-attendance` with `x-device-secret: <per-institution secret>`.
 - Enrollment polling: `POST /get-enrollment-job` with `{ device_id }`.
 - Enrollment result: `POST /update-enrollment-job` with `{ id, institution_id, status, ... }`.
-- `pg_cron` calls `POST /mark-absent` daily with `x-cron-secret` (set in Supabase Vault).
+- `pg_cron` calls `POST /mark-absent` daily with `x-cron-secret` (set in Supabase Vault). **Requires the `pg_net` extension** — enable it in the Supabase dashboard under Database → Extensions before creating the cron job.
 
 ### OTA
 
