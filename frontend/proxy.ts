@@ -31,7 +31,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (user && path.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/attendance', request.url))
+    return NextResponse.redirect(new URL('/', request.url))
   }
 
   return supabaseResponse
