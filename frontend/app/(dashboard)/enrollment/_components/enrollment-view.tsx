@@ -137,7 +137,7 @@ export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, l
           action={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
         />
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
+        <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

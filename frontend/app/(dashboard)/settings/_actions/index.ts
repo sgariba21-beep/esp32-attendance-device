@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { brandColumns } from '@/lib/theme'
 
 export type SettingsFormData = {
   name: string
@@ -21,6 +22,8 @@ export type SettingsFormData = {
   track_staff: boolean
   student_scan_mode: 'present_absent' | 'time_in_out'
   staff_scan_mode: 'present_absent' | 'time_in_out'
+  theme_primary: string
+  theme_preset: string
 }
 
 export async function updateInstitutionSettings(data: SettingsFormData) {
@@ -48,6 +51,7 @@ export async function updateInstitutionSettings(data: SettingsFormData) {
       track_staff: data.track_staff,
       student_scan_mode: data.student_scan_mode,
       staff_scan_mode: data.staff_scan_mode,
+      ...brandColumns(data),
     })
     .eq('id', institutionId)
 

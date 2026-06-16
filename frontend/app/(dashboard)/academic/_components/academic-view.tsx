@@ -89,7 +89,7 @@ export function AcademicView({ terms, labelPeriod }: Props) {
           action={<Button onClick={openAdd}>Add {labelPeriod.toLowerCase()}</Button>}
         />
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
+        <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

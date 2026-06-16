@@ -149,7 +149,7 @@ export function PromotionView({ groups, totalActive, labelUnit, labelGroup }: Pr
       {/* Summary cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => (
-          <div key={g.fromForm} className="rounded-xl border bg-muted/30 p-4 space-y-2">
+          <div key={g.fromForm} className="rounded-xl border border-border bg-card shadow-xs p-4 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">{g.fromForm}</span>
               <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />

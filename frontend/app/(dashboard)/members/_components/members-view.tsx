@@ -164,7 +164,7 @@ export function MembersView({ members, devices, role, institutions, labels }: Pr
         <EmptyState icon={Users} message={`No ${labels.label_members.toLowerCase()} match your filters.`} />
       ) : (
         <div className="space-y-3">
-          <div className="rounded-xl border overflow-x-auto">
+          <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

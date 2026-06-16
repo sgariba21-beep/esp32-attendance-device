@@ -75,7 +75,7 @@ export function HolidaysView({ holidays }: Props) {
           action={<Button onClick={() => setDialogOpen(true)}>Add holiday</Button>}
         />
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
+        <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

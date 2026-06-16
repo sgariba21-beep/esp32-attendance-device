@@ -16,6 +16,10 @@ export type InstitutionConfig = {
   track_staff: boolean
   student_scan_mode: 'present_absent' | 'time_in_out'
   staff_scan_mode: 'present_absent' | 'time_in_out'
+  /** Per-institution brand colour (hex). Null → platform default accent. */
+  theme_primary: string | null
+  /** Curated preset key, or 'custom'. Null → default. */
+  theme_preset: string | null
 }
 
 export const DEFAULT_INSTITUTION: InstitutionConfig = {
@@ -36,6 +40,8 @@ export const DEFAULT_INSTITUTION: InstitutionConfig = {
   track_staff: false,
   student_scan_mode: 'present_absent',
   staff_scan_mode: 'present_absent',
+  theme_primary: null,
+  theme_preset: null,
 }
 
 export type AttendanceRecord = {

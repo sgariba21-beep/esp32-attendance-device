@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { InstitutionConfig } from '@/lib/types'
 import {
+  LayoutDashboard,
   CalendarDays,
   Users,
   UserCog,
@@ -25,27 +26,38 @@ import {
 
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
+const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin']
+
+function isActive(pathname: string, href: string): boolean {
+  return href === '/' ? pathname === '/' : pathname.startsWith(href)
+}
+
+// Mobile keeps the bottom bar to four tabs: Overview, Attendance, the primary
+// roster, and a "More" sheet holding everything else.
 function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavItem[] {
   const items: NavItem[] = [
-    { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/', label: 'Overview', icon: LayoutDashboard, roles: ALL_ROLES },
+    { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ALL_ROLES },
   ]
   if (institution.track_students) {
-    items.push({ href: '/members', label: institution.label_members, icon: Users, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+    items.push({ href: '/members', label: institution.label_members, icon: Users, roles: ALL_ROLES })
+  } else if (institution.track_staff || role === 'platform_admin') {
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ALL_ROLES })
   }
-  if (institution.track_staff || role === 'platform_admin') {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+  return items
+}
+
+function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[] {
+  const items: NavItem[] = []
+  // The roster not already shown in the primary bar.
+  if (institution.track_students && (institution.track_staff || role === 'platform_admin')) {
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ALL_ROLES })
   }
   items.push(
     { href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] },
     { href: '/academic', label: institution.type === 'office' ? 'Periods & Holidays' : 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin'] },
-  )
-  return items
-}
-
-function buildMoreNav(institution: InstitutionConfig): NavItem[] {
-  const items: NavItem[] = [
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin'] },
-  ]
+  )
   if (institution.type !== 'office') {
     items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
   }
@@ -63,11 +75,11 @@ export function MobileBottomNav({ role, institution }: { role: UserRole; institu
   const [open, setOpen] = useState(false)
 
   const primaryNav = buildPrimaryNav(institution, role)
-  const moreNav = buildMoreNav(institution)
+  const moreNav = buildMoreNav(institution, role)
 
   const visiblePrimary = primaryNav.filter((item) => (item.roles as UserRole[]).includes(role))
   const visibleMore = moreNav.filter((item) => (item.roles as UserRole[]).includes(role))
-  const isMoreActive = visibleMore.some((item) => pathname.startsWith(item.href))
+  const isMoreActive = visibleMore.some((item) => isActive(pathname, item.href))
 
   async function handleSignOut() {
     setOpen(false)
@@ -89,43 +101,46 @@ export function MobileBottomNav({ role, institution }: { role: UserRole; institu
 
       {/* "More" panel */}
       {open && visibleMore.length > 0 && (
-        <div className="md:hidden fixed bottom-14 left-0 right-0 z-50 bg-sidebar border-t border-sidebar-border rounded-t-xl px-3 py-3 space-y-0.5 animate-in slide-in-from-bottom-4 duration-200">
-          <div className="flex items-center justify-between px-3 pb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+        <div className="md:hidden fixed bottom-16 left-0 right-0 z-50 bg-popover border-t border-border rounded-t-2xl px-3 py-3 space-y-0.5 shadow-lg animate-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center justify-between px-2.5 pb-2">
+            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               More
             </span>
             <button
               onClick={() => setOpen(false)}
               aria-label="Close menu"
-              className="text-sidebar-foreground/50 hover:text-sidebar-foreground"
+              className="text-muted-foreground hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          {visibleMore.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              onClick={() => setOpen(false)}
-              className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
-                pathname.startsWith(href)
-                  ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                  : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </Link>
-          ))}
+          {visibleMore.map(({ href, label, icon: Icon }) => {
+            const active = isActive(pathname, href)
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setOpen(false)}
+                className={cn(
+                  'flex items-center gap-3 rounded-md px-2.5 py-2.5 text-sm font-medium transition-colors',
+                  active
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-foreground hover:bg-accent'
+                )}
+              >
+                <Icon className={cn('h-[18px] w-[18px]', active ? 'text-primary' : 'text-muted-foreground')} />
+                {label}
+              </Link>
+            )
+          })}
 
-          <div className="pt-1 border-t border-sidebar-border mt-1">
+          <div className="pt-1 border-t border-border mt-1">
             <button
               onClick={handleSignOut}
-              className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+              className="flex w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
             >
-              <LogOut className="h-4 w-4" />
+              <LogOut className="h-[18px] w-[18px]" />
               Sign out
             </button>
           </div>
@@ -133,21 +148,19 @@ export function MobileBottomNav({ role, institution }: { role: UserRole; institu
       )}
 
       {/* Bottom nav bar */}
-      <nav className="md:hidden flex items-stretch bg-sidebar border-t border-sidebar-border shrink-0 z-30 h-14">
+      <nav className="md:hidden flex items-stretch bg-background border-t border-border shrink-0 z-30 h-16">
         {visiblePrimary.map(({ href, label, icon: Icon }) => {
-          const active = pathname.startsWith(href)
+          const active = isActive(pathname, href)
           return (
             <Link
               key={href}
               href={href}
               className={cn(
-                'flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors',
-                active
-                  ? 'text-sidebar-foreground'
-                  : 'text-sidebar-foreground/45 hover:text-sidebar-foreground/75'
+                'flex flex-1 flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors',
+                active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              <Icon className={cn('h-5 w-5', active ? 'text-sidebar-primary' : '')} />
+              <Icon className="h-[22px] w-[22px]" />
               <span>{label}</span>
             </Link>
           )
@@ -159,13 +172,11 @@ export function MobileBottomNav({ role, institution }: { role: UserRole; institu
             aria-expanded={open}
             aria-label="More navigation"
             className={cn(
-              'flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors',
-              isMoreActive || open
-                ? 'text-sidebar-foreground'
-                : 'text-sidebar-foreground/45 hover:text-sidebar-foreground/75'
+              'flex flex-1 flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors',
+              isMoreActive || open ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            <MoreHorizontal className={cn('h-5 w-5', (isMoreActive || open) ? 'text-sidebar-primary' : '')} />
+            <MoreHorizontal className="h-[22px] w-[22px]" />
             <span>More</span>
           </button>
         )}

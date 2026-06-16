@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
+import { brandColumns } from '@/lib/theme'
 import type { SettingsFormData } from '../../settings/_actions'
 
 export async function deleteInstitution(id: string): Promise<{ error: string | null }> {
@@ -89,6 +90,7 @@ export async function updateInstitutionSettingsById(
       track_staff: data.track_staff,
       student_scan_mode: data.student_scan_mode,
       staff_scan_mode: data.staff_scan_mode,
+      ...brandColumns(data),
     })
     .eq('id', id)
 

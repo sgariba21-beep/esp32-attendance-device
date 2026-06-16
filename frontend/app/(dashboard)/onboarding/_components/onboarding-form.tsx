@@ -5,19 +5,35 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { createInstitutionWithAdmin } from '../_actions'
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-card shadow-xs">
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+      </div>
+      <div className="space-y-4 p-5">{children}</div>
+    </section>
+  )
+}
 
 function ScanModeSelect({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
   return (
-    <select
-      id={id}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-    >
+    <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="present_absent">Present / Absent</option>
       <option value="time_in_out">Time In / Time Out</option>
-    </select>
+    </NativeSelect>
   )
 }
 
@@ -70,7 +86,7 @@ export function OnboardingForm() {
 
   if (created) {
     return (
-      <div className="space-y-4 max-w-lg">
+      <div className="space-y-4 max-w-2xl">
         <Alert variant="success">
           <AlertDescription>
             Institution created successfully. The admin account is ready to log in.
@@ -84,10 +100,8 @@ export function OnboardingForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8 max-w-lg">
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Institution</h2>
-
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+      <Section title="Institution">
         <div className="space-y-2">
           <Label htmlFor="institution_name">Name</Label>
           <Input
@@ -101,25 +115,22 @@ export function OnboardingForm() {
 
         <div className="space-y-2">
           <Label htmlFor="institution_type">Type</Label>
-          <select
+          <NativeSelect
             id="institution_type"
             value={form.institution_type}
             onChange={(e) => set('institution_type', e.target.value)}
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="school">School</option>
             <option value="office">Office</option>
-          </select>
+          </NativeSelect>
         </div>
-      </section>
+      </Section>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Attendance tracking</h2>
-        <p className="text-xs text-muted-foreground">
-          Choose which member types to track and what scan mode each uses. All of this can be changed later in Settings.
-        </p>
-
-        <div className="space-y-4 rounded-lg border p-4">
+      <Section
+        title="Attendance tracking"
+        description="Choose which member types to track and what scan mode each uses. All of this can be changed later in Settings."
+      >
+        <div className="space-y-4 rounded-lg border border-border p-4">
           {form.institution_type !== 'office' && (
             <>
               <div className="flex items-start gap-3">
@@ -133,7 +144,7 @@ export function OnboardingForm() {
                 <div className="flex-1 space-y-2">
                   <Label htmlFor="track_students" className="cursor-pointer font-medium">Track students</Label>
                   {form.track_students && (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <Label htmlFor="student_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
                       <ScanModeSelect
                         id="student_scan_mode"
@@ -145,7 +156,7 @@ export function OnboardingForm() {
                 </div>
               </div>
 
-              <div className="border-t" />
+              <div className="border-t border-border" />
             </>
           )}
 
@@ -160,7 +171,7 @@ export function OnboardingForm() {
             <div className="flex-1 space-y-2">
               <Label htmlFor="track_staff" className="cursor-pointer font-medium">Track staff</Label>
               {form.track_staff && (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   <Label htmlFor="staff_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
                   <ScanModeSelect
                     id="staff_scan_mode"
@@ -172,11 +183,9 @@ export function OnboardingForm() {
             </div>
           </div>
         </div>
-      </section>
+      </Section>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">First admin account</h2>
-
+      <Section title="First admin account">
         <div className="space-y-2">
           <Label htmlFor="admin_name">Full name</Label>
           <Input
@@ -213,7 +222,7 @@ export function OnboardingForm() {
           />
           <p className="text-xs text-muted-foreground">The admin should change this after first login.</p>
         </div>
-      </section>
+      </Section>
 
       {error && <Alert variant="error"><AlertDescription>{error}</AlertDescription></Alert>}
 

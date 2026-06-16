@@ -6,7 +6,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Table,
   TableBody,
@@ -21,6 +20,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import { Pagination } from '@/components/ui/pagination'
+import { Toolbar, ToolbarField, ToolbarSeparator } from '@/components/ui/toolbar'
 import { MultiSelect } from './multi-select'
 import { pluralize } from '@/lib/utils'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
@@ -309,55 +309,49 @@ export function AttendanceView({
         }
       />
 
-      {/* Institution filter — platform_admin only */}
-      {isPlatformAdmin && institutions.length > 0 && (
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="institution-filter" className="text-xs">Institution</Label>
-          <NativeSelect
-            id="institution-filter"
-            value={institutionFilter}
-            onChange={(e) => {
-              setInstitutionFilter(e.target.value)
-              setStudentIds([]); setStaffIds([]); setDeviceIds([]); setTypeFilter('')
-              applyFilters({ institution: e.target.value, students: [], staff: [], classes: [], type: '' })
-            }}
-            className="w-64"
-          >
-            <option value="">All institutions</option>
-            {institutions.map((inst) => (
-              <option key={inst.id} value={inst.id}>{inst.name}</option>
-            ))}
-          </NativeSelect>
-        </div>
-      )}
-
       {/* Filter bar */}
-      <div className="flex flex-wrap gap-3 items-end">
-        {/* Date range */}
-        <div className="flex items-end gap-2">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="from-date" className="text-xs">From</Label>
-            <Input
-              id="from-date"
-              type="date"
-              value={fromDate}
-              onChange={(e) => { setFromDate(e.target.value); applyFilters({ from: e.target.value }) }}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="to-date" className="text-xs">To</Label>
-            <Input
-              id="to-date"
-              type="date"
-              value={toDate}
-              onChange={(e) => { setToDate(e.target.value); applyFilters({ to: e.target.value }) }}
-            />
-          </div>
-        </div>
+      <Toolbar>
+        {/* Institution filter — platform_admin only */}
+        {isPlatformAdmin && institutions.length > 0 && (
+          <ToolbarField label="Institution" htmlFor="institution-filter">
+            <NativeSelect
+              id="institution-filter"
+              value={institutionFilter}
+              onChange={(e) => {
+                setInstitutionFilter(e.target.value)
+                setStudentIds([]); setStaffIds([]); setDeviceIds([]); setTypeFilter('')
+                applyFilters({ institution: e.target.value, students: [], staff: [], classes: [], type: '' })
+              }}
+              className="w-56"
+            >
+              <option value="">All institutions</option>
+              {institutions.map((inst) => (
+                <option key={inst.id} value={inst.id}>{inst.name}</option>
+              ))}
+            </NativeSelect>
+          </ToolbarField>
+        )}
 
-        {/* Period filter */}
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="term-filter" className="text-xs">{labels.label_period}</Label>
+        <ToolbarField label="From" htmlFor="from-date">
+          <Input
+            id="from-date"
+            type="date"
+            className="w-40"
+            value={fromDate}
+            onChange={(e) => { setFromDate(e.target.value); applyFilters({ from: e.target.value }) }}
+          />
+        </ToolbarField>
+        <ToolbarField label="To" htmlFor="to-date">
+          <Input
+            id="to-date"
+            type="date"
+            className="w-40"
+            value={toDate}
+            onChange={(e) => { setToDate(e.target.value); applyFilters({ to: e.target.value }) }}
+          />
+        </ToolbarField>
+
+        <ToolbarField label={labels.label_period} htmlFor="term-filter">
           <NativeSelect
             id="term-filter"
             value={termId}
@@ -368,11 +362,9 @@ export function AttendanceView({
               <option key={a.id} value={a.id}>{a.term} {a.year}</option>
             ))}
           </NativeSelect>
-        </div>
+        </ToolbarField>
 
-        {/* Member type filter */}
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="type-filter" className="text-xs">Member type</Label>
+        <ToolbarField label="Member type" htmlFor="type-filter">
           <NativeSelect
             id="type-filter"
             value={typeFilter}
@@ -382,79 +374,73 @@ export function AttendanceView({
             {showStudentType && <option value="student">Student</option>}
             {showStaffType && <option value="staff">{labels.label_staff}</option>}
           </NativeSelect>
-        </div>
+        </ToolbarField>
 
-        <div className="w-px self-stretch bg-border mx-1" />
+        <ToolbarSeparator />
 
-        {/* Member-level filters */}
-        <div className="flex items-end gap-2">
-          {isTeacher && assignedUnit && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground self-end h-8">
-              <Lock className="h-3 w-3 shrink-0" />
-              {assignedUnit}
-            </div>
-          )}
+        {isTeacher && assignedUnit && (
+          <div className="flex h-8 items-center gap-1.5 self-end rounded-lg border border-border bg-muted/40 px-3 text-sm text-muted-foreground">
+            <Lock className="h-3 w-3 shrink-0" />
+            {assignedUnit}
+          </div>
+        )}
 
-          {/* Student member filter */}
-          {showStudentType && (
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">{studentFilterLabel}</Label>
-              <MultiSelect
-                options={studentOptions}
-                selected={studentIds}
-                onChange={(val) => {
-                  setStudentIds(val)
-                  applyFilters({ students: val })
-                }}
-                placeholder={`All ${studentFilterLabel.toLowerCase()}`}
-              />
-            </div>
-          )}
+        {/* Student member filter */}
+        {showStudentType && (
+          <ToolbarField label={studentFilterLabel}>
+            <MultiSelect
+              options={studentOptions}
+              selected={studentIds}
+              onChange={(val) => {
+                setStudentIds(val)
+                applyFilters({ students: val })
+              }}
+              placeholder={`All ${studentFilterLabel.toLowerCase()}`}
+            />
+          </ToolbarField>
+        )}
 
-          {/* Staff member filter */}
-          {showStaffType && (
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">{labels.label_staff_plural}</Label>
-              <MultiSelect
-                options={staffOptions}
-                selected={staffIds}
-                onChange={(val) => {
-                  setStaffIds(val)
-                  applyFilters({ staff: val })
-                }}
-                placeholder={`All ${labels.label_staff_plural.toLowerCase()}`}
-              />
-            </div>
-          )}
+        {/* Staff member filter */}
+        {showStaffType && (
+          <ToolbarField label={labels.label_staff_plural}>
+            <MultiSelect
+              options={staffOptions}
+              selected={staffIds}
+              onChange={(val) => {
+                setStaffIds(val)
+                applyFilters({ staff: val })
+              }}
+              placeholder={`All ${labels.label_staff_plural.toLowerCase()}`}
+            />
+          </ToolbarField>
+        )}
 
-          {/* Unit filter */}
-          {!isTeacher && (
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs">{pluralize(labels.label_unit)}</Label>
-              <MultiSelect
-                options={classOptions}
-                selected={deviceIds}
-                onChange={(val) => {
-                  setDeviceIds(val)
-                  // When unit filter changes, drop member selections that no longer match
-                  const validIds = val.length > 0
-                    ? new Set([
-                        ...students.filter((s) => val.includes(s.device_id)).map((s) => s.id),
-                        ...staffMembers.filter((s) => val.includes(s.device_id)).map((s) => s.id),
-                      ])
-                    : null
-                  const nextStudentIds = validIds ? studentIds.filter((id) => validIds.has(id)) : studentIds
-                  const nextStaffIds = validIds ? staffIds.filter((id) => validIds.has(id)) : staffIds
-                  if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
-                  if (nextStaffIds.length !== staffIds.length) setStaffIds(nextStaffIds)
-                  applyFilters({ classes: val, students: nextStudentIds, staff: nextStaffIds })
-                }}
-                placeholder={`All ${pluralize(labels.label_unit.toLowerCase())}`}
-              />
-            </div>
-          )}
-        </div>
-      </div>
+        {/* Unit filter */}
+        {!isTeacher && (
+          <ToolbarField label={pluralize(labels.label_unit)}>
+            <MultiSelect
+              options={classOptions}
+              selected={deviceIds}
+              onChange={(val) => {
+                setDeviceIds(val)
+                // When unit filter changes, drop member selections that no longer match
+                const validIds = val.length > 0
+                  ? new Set([
+                      ...students.filter((s) => val.includes(s.device_id)).map((s) => s.id),
+                      ...staffMembers.filter((s) => val.includes(s.device_id)).map((s) => s.id),
+                    ])
+                  : null
+                const nextStudentIds = validIds ? studentIds.filter((id) => validIds.has(id)) : studentIds
+                const nextStaffIds = validIds ? staffIds.filter((id) => validIds.has(id)) : staffIds
+                if (nextStudentIds.length !== studentIds.length) setStudentIds(nextStudentIds)
+                if (nextStaffIds.length !== staffIds.length) setStaffIds(nextStaffIds)
+                applyFilters({ classes: val, students: nextStudentIds, staff: nextStaffIds })
+              }}
+              placeholder={`All ${pluralize(labels.label_unit.toLowerCase())}`}
+            />
+          </ToolbarField>
+        )}
+      </Toolbar>
 
       <div className={`transition-opacity duration-150 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
         <Tabs defaultValue="records">
@@ -467,7 +453,7 @@ export function AttendanceView({
             {records.length === 0 ? (
               <EmptyState icon={CalendarDays} message="No attendance records match your filters." />
             ) : hasTimeInOut ? (
-              <div className="rounded-xl border overflow-x-auto">
+              <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -514,7 +500,7 @@ export function AttendanceView({
                 </Table>
               </div>
             ) : (
-              <div className="rounded-xl border overflow-x-auto">
+              <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -568,7 +554,7 @@ export function AttendanceView({
             {summary.length === 0 ? (
               <EmptyState icon={CalendarDays} message="No data to summarise. Add attendance records first." />
             ) : (
-              <div className="rounded-xl border overflow-x-auto">
+              <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>

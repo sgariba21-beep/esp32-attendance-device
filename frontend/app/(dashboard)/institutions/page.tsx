@@ -38,7 +38,7 @@ export default async function InstitutionsPage() {
       {institutions.length === 0 ? (
         <EmptyState icon={Building2} message="No institutions yet. Use the Create institution page to add one." />
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
+        <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

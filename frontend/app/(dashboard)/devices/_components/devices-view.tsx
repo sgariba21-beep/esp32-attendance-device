@@ -153,7 +153,7 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
         ) : (
           <div className="space-y-2">
             <h2 className="text-sm font-semibold">Assigned devices ({allAssigned.length})</h2>
-            <div className="rounded-xl border overflow-hidden">
+            <div className="rounded-xl border border-border shadow-xs overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-muted-foreground text-xs uppercase tracking-wide">

@@ -13,16 +13,16 @@ function PageHeader({ title, subtitle, actions, className }: PageHeaderProps) {
   return (
     <div
       data-slot="page-header"
-      className={cn("flex items-start justify-between gap-4", className)}
+      className={cn("flex flex-wrap items-start justify-between gap-x-4 gap-y-3", className)}
     >
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-semibold tracking-tight leading-tight">{title}</h1>
         {subtitle && (
-          <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         )}
       </div>
       {actions && (
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
       )}
     </div>
   )
