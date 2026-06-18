@@ -88,10 +88,12 @@ All dashboard data access uses `createAdminClient()` (service role — bypasses 
 
 ```sql
 -- Institution registry (one row per tenant)
+-- theme_primary: hex brand colour injected as CSS custom properties server-side (no FOUC)
+-- theme_preset: curated palette key (e.g. 'indigo', 'rose') or 'custom'; null → platform default
 institutions    (id, name, type, logo_url, label_member, label_members, label_group,
                  label_unit, label_period, label_staff, label_staff_plural,
                  track_students, track_staff, student_scan_mode, staff_scan_mode,
-                 skip_weekends, device_secret, timezone)
+                 skip_weekends, device_secret, timezone, theme_primary, theme_preset)
 
 -- Members (students, staff, etc.) — scoped to institution
 -- member_type: 'student' | 'staff'  (default 'student')
@@ -154,8 +156,8 @@ Authentication uses Supabase Auth (server-side only — all Supabase calls go th
 
 ### How it works
 
-- `frontend/lib/supabase/dal.ts` exports `verifySession()` and `requireRole(...roles)`.
-- `verifySession()` is `cache()`-wrapped — one DB hit per render cycle regardless of how many pages call it.
+- `frontend/lib/supabase/dal.ts` exports `verifySession()`, `requireRole(...roles)`, and `getInstitution(institutionId)`.
+- `verifySession()` and `getInstitution()` are both `cache()`-wrapped — one DB hit per render cycle regardless of how many components call them.
 - `requireRole()` calls `verifySession()` and redirects to `/unauthorized` if the role doesn't match. `platform_admin` bypasses all role checks.
 - **Fail-closed:** an authenticated user with no `profiles` row (or no role) is redirected to `/unauthorized` — it does **not** default to any role. Public sign-up is disabled in Supabase Auth; accounts are created only via `/users` and `/onboarding`.
 - **Tenant ownership:** because the dashboard uses the service role (RLS bypassed), every mutating server action verifies the target record belongs to the caller's institution via `lib/supabase/ownership.ts` (`ownsRecord`). `platform_admin` is cross-tenant by design.
@@ -179,7 +181,8 @@ Additional accounts are managed through the `/users` page in the dashboard.
 
 | Route | Access | Description |
 |---|---|---|
-| `/attendance` | All roles | Attendance records with date, period, member, unit filters. `teacher`/`staff` see only their unit. Time-in/time-out scan pairs shown on a single row. |
+| `/` | All roles | Overview — today's present/absent counts, attendance rate, and a recent-activity feed (last 8 scans). `teacher`/`staff` see only their unit. `platform_admin` sees a cross-tenant summary: institution count, active members, devices online, and total scans today. |
+| `/attendance` | All roles | Attendance records with date, period, member (multi-select), staff (multi-select), unit, status, and member-type filters. Per-member stats panel (present count, absent count, last seen date). Results paginated at 50 rows. `teacher`/`staff` see only their unit. Time-in/time-out scan pairs shown on a single row. CSV export available. |
 | `/members` | All roles | Member roster (non-staff). `teacher`/`staff` see only their unit, no edit controls. platform_admin can filter by institution. |
 | `/staff` | All roles | Staff member roster. Visible only when `track_staff = true`. Same access rules as `/members`. |
 | `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, set display names. Search + institution filter for platform_admin. Devices only enter via physical provisioning (no manual create). |
@@ -268,15 +271,23 @@ esp32-attendance-device/
     │   ├── api/
     │   │   ├── signin/
     │   │   ├── signout/
-    │   │   └── enrollment-stream/             ← SSE stream for enrollment job updates
+    │   │   ├── enrollment-stream/             ← SSE stream for enrollment job updates
+    │   │   ├── realtime-stream/               ← SSE stream watching members, devices, periods, attendance
+    │   │   │                                     institution-scoped; platform_admin watches all tenants
+    │   │   └── attendance/export/             ← CSV export with full filter parity to the attendance page
     │   └── unauthorized/
     ├── lib/
+    │   ├── types.ts                           ← shared TS types (InstitutionConfig, AttendanceRecord, Member, Device, AcademicTerm, Holiday)
+    │   ├── theme.ts                           ← per-institution brand theming (brandStyle, THEME_PRESETS, brandColumns)
     │   └── supabase/
-    │       ├── dal.ts                         ← verifySession, requireRole, UserRole
+    │       ├── dal.ts                         ← verifySession, requireRole, getInstitution, UserRole
     │       └── server.ts                      ← createAuthClient, createAdminClient
     └── components/
         ├── sidebar.tsx
+        ├── mobile-header.tsx
         ├── mobile-bottom-nav.tsx
+        ├── theme-toggle.tsx                   ← dark/light mode toggle
+        ├── realtime-refresh.tsx               ← subscribes to /api/realtime-stream; calls router.refresh() on any DB change
         ├── session-manager.tsx                ← inactivity timeout + sessionStorage guard
         └── ui/
             └── single-select.tsx              ← searchable dropdown (used across devices, users, enrollment, members)
