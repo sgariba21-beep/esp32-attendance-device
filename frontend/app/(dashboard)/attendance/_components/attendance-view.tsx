@@ -579,7 +579,9 @@ export function AttendanceView({
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
                         <TableCell>
-                          <Badge variant="success">Present</Badge>
+                          {r.status === 'absent'
+                            ? <Badge variant="destructive">Absent</Badge>
+                            : <Badge variant="success">Present</Badge>}
                         </TableCell>
                       </TableRow>
                     ))}
