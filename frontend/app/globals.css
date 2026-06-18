@@ -43,6 +43,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-soft: var(--primary-soft);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -56,62 +57,163 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ============================================================
+   LIGHT THEME — crisp neutral grayscale, single brand accent.
+   --primary (and its derived tokens) are overridden per
+   institution at the dashboard shell. Everything else is fixed.
+   ============================================================ */
 :root {
-  /* Warm cream backgrounds */
-  --background: oklch(0.968 0.012 82);
-  --foreground: oklch(0.215 0.048 40);
-  --card: oklch(0.988 0.006 78);
-  --card-foreground: oklch(0.215 0.048 40);
-  --popover: oklch(0.988 0.006 78);
-  --popover-foreground: oklch(0.215 0.048 40);
-  /* Blue as the action / interactive color */
-  --primary: oklch(0.546 0.245 264);
-  --primary-foreground: oklch(0.99 0 0);
-  /* Light tan secondary */
-  --secondary: oklch(0.918 0.022 75);
-  --secondary-foreground: oklch(0.35 0.065 44);
-  --muted: oklch(0.918 0.022 75);
-  --muted-foreground: oklch(0.525 0.042 50);
-  --accent: oklch(0.878 0.032 68);
-  --accent-foreground: oklch(0.28 0.065 42);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.878 0.022 74);
-  --input: oklch(0.878 0.022 74);
-  --ring: oklch(0.546 0.245 264);
-  --chart-1: oklch(0.546 0.245 264);
-  --chart-2: oklch(0.65 0.15 180);
-  --chart-3: oklch(0.72 0.12 140);
-  --chart-4: oklch(0.75 0.10 80);
-  --chart-5: oklch(0.577 0.245 27);
   --radius: 0.625rem;
-  /* Semantic status tokens */
-  --success: oklch(0.527 0.154 150);
-  --success-foreground: oklch(0.24 0.09 152);
-  --success-subtle: oklch(0.972 0.030 155);
-  --success-border: oklch(0.872 0.075 153);
-  --warning: oklch(0.666 0.167 55);
-  --warning-foreground: oklch(0.36 0.11 47);
-  --warning-subtle: oklch(0.977 0.038 94);
-  --warning-border: oklch(0.902 0.105 90);
-  /* Deep espresso-brown sidebar */
-  --sidebar: oklch(0.295 0.062 42);
-  --sidebar-foreground: oklch(0.935 0.014 78);
-  --sidebar-primary: oklch(0.546 0.245 264);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.385 0.068 42);
-  --sidebar-accent-foreground: oklch(0.965 0.012 78);
-  --sidebar-border: oklch(0.385 0.062 42);
-  --sidebar-ring: oklch(0.546 0.245 264);
+  /* Native controls (date pickers, the calendar popup, native selects,
+     scrollbars) follow the active scheme — fixes stark-white pickers in dark. */
+  color-scheme: light;
+
+  /* Soft off-white page; cards/popovers stay pure white so they lift off it. */
+  --background: oklch(0.978 0 0);
+  --foreground: oklch(0.21 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0 0);
+
+  /* Brand accent — default platform indigo (#4F46E5-ish). */
+  --primary: oklch(0.518 0.213 277);
+  --primary-foreground: oklch(0.985 0 0);
+  /* Soft brand tint — derives from --primary, so a per-institution
+     override of --primary cascades here automatically (active nav,
+     selected rows, focus halos). */
+  --primary-soft: color-mix(in oklab, var(--primary) 10%, transparent);
+
+  --secondary: oklch(0.955 0 0);
+  --secondary-foreground: oklch(0.27 0 0);
+  --muted: oklch(0.955 0 0);
+  --muted-foreground: oklch(0.552 0 0);
+  --accent: oklch(0.955 0 0);
+  --accent-foreground: oklch(0.27 0 0);
+
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: var(--primary);
+
+  --chart-1: var(--primary);
+  --chart-2: oklch(0.6 0.118 184);
+  --chart-3: oklch(0.398 0.07 227);
+  --chart-4: oklch(0.828 0.189 84);
+  --chart-5: oklch(0.769 0.188 70);
+
+  /* Semantic status — one definition each, used everywhere. */
+  --success: oklch(0.596 0.13 154);
+  --success-foreground: oklch(0.39 0.11 154);
+  --success-subtle: oklch(0.962 0.04 156);
+  --success-border: oklch(0.86 0.08 154);
+  --warning: oklch(0.705 0.16 70);
+  --warning-foreground: oklch(0.47 0.13 58);
+  --warning-subtle: oklch(0.972 0.05 90);
+  --warning-border: oklch(0.885 0.1 82);
+
+  /* Sidebar — slightly grayer rail to anchor against the off-white content. */
+  --sidebar: oklch(0.966 0 0);
+  --sidebar-foreground: oklch(0.45 0 0);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.935 0 0);
+  --sidebar-accent-foreground: oklch(0.21 0 0);
+  --sidebar-border: oklch(0.92 0 0);
+  --sidebar-ring: var(--primary);
+}
+
+/* ============================================================
+   DARK THEME — near-black neutrals, translucent borders.
+   ============================================================ */
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.179 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.179 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+
+  --primary: oklch(0.6 0.196 277);
+  --primary-foreground: oklch(0.985 0 0);
+  --primary-soft: color-mix(in oklab, var(--primary) 22%, transparent);
+
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.31 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: var(--primary);
+
+  --chart-1: var(--primary);
+  --chart-2: oklch(0.696 0.17 162);
+  --chart-3: oklch(0.769 0.188 70);
+  --chart-4: oklch(0.627 0.265 304);
+  --chart-5: oklch(0.645 0.246 16);
+
+  --success: oklch(0.7 0.15 156);
+  --success-foreground: oklch(0.84 0.14 158);
+  --success-subtle: oklch(0.28 0.06 158);
+  --success-border: oklch(0.42 0.09 156);
+  --warning: oklch(0.79 0.16 78);
+  --warning-foreground: oklch(0.88 0.13 86);
+  --warning-subtle: oklch(0.3 0.06 76);
+  --warning-border: oklch(0.45 0.09 72);
+
+  --sidebar: oklch(0.165 0 0);
+  --sidebar-foreground: oklch(0.68 0 0);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(0.24 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: var(--primary);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  /* Tighter optical tracking on headings for the Linear/Vercel feel. */
+  h1, h2, h3 {
+    letter-spacing: -0.011em;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 24%, transparent);
+  }
+  /* Thin, unobtrusive scrollbars. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 28%, transparent);
   }
 }

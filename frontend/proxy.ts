@@ -31,7 +31,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (user && path.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/attendance', request.url))
+    return NextResponse.redirect(new URL('/', request.url))
   }
 
   return supabaseResponse
@@ -42,5 +42,5 @@ export const config = {
   // their own auth and return JSON/status codes instead of being redirected to
   // the HTML login page. Without this, an unauthenticated POST /api/signin gets
   // 307-redirected to /login before the handler can run.
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|olag-logo.jpg).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 }

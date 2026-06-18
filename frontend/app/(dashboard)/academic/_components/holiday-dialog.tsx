@@ -15,27 +15,31 @@ type Props = {
 }
 
 export function HolidayDialog({ open, onOpenChange }: Props) {
-  const [date, setDate] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [label, setLabel] = useState('')
+  const [recurring, setRecurring] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setDate('')
+      setStartDate('')
+      setEndDate('')
       setLabel('')
+      setRecurring(false)
       setError(null)
     }
   }, [open])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!date) { setError('Please select a date.'); return }
+    if (!startDate) { setError('Please select a start date.'); return }
     if (!label.trim()) { setError('Please enter a label.'); return }
 
     setLoading(true)
     setError(null)
-    const result = await createHoliday({ date, label })
+    const result = await createHoliday({ start_date: startDate, end_date: endDate || startDate, label, recurring })
     setLoading(false)
 
     if (result.error) { setError(result.error); return }
@@ -50,13 +54,23 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="date">Date</Label>
+            <Label htmlFor="start_date">Start date</Label>
             <Input
-              id="date"
+              id="start_date"
               type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
               required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="end_date">End date <span className="text-muted-foreground">(leave blank for single day)</span></Label>
+            <Input
+              id="end_date"
+              type="date"
+              value={endDate}
+              min={startDate}
+              onChange={(e) => setEndDate(e.target.value)}
             />
           </div>
           <div className="space-y-2">
@@ -69,11 +83,24 @@ export function HolidayDialog({ open, onOpenChange }: Props) {
               required
             />
           </div>
+          <label htmlFor="recurring" className="flex items-start gap-2.5 rounded-lg border p-3 cursor-pointer">
+            <input
+              id="recurring"
+              type="checkbox"
+              checked={recurring}
+              onChange={(e) => setRecurring(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">Repeats every year</span>
+              <span className="block text-xs text-muted-foreground">
+                Matches on the day and month only (e.g. 25 Dec). The year you pick is ignored.
+              </span>
+            </span>
+          </label>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={loading}>
               {loading ? 'Adding…' : 'Add holiday'}
             </Button>

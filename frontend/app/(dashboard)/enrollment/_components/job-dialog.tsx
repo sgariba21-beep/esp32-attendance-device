@@ -8,10 +8,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { NativeSelect } from '@/components/ui/native-select'
+import { SingleSelect } from '@/components/ui/single-select'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
 import type { StudentOption } from '../_actions'
 import type { Device } from '@/lib/types'
+import { indefiniteArticle } from '@/lib/utils'
 
 type Command = 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
 type FingerSlot = 'fin1' | 'fin2'
@@ -20,15 +22,10 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   devices: Device[]
+  labelUnit: string
+  labelMember: string
+  labelMembers: string
 }
-
-const COMMANDS: { value: Command; label: string; description: string }[] = [
-  { value: 'register',        label: 'Register',      description: 'Enroll a fingerprint for a student.' },
-  { value: 'delete',          label: 'Delete',        description: "Remove a student's fingerprint from the device." },
-  { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
-  { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
-  { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
-]
 
 const FINGER_SLOTS: { value: FingerSlot; label: string }[] = [
   { value: 'fin1', label: 'Finger 1' },
@@ -44,17 +41,33 @@ const empty = {
   master_name: '',
 }
 
-export function JobDialog({ open, onOpenChange, devices }: Props) {
+export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers }: Props) {
+  const member = labelMember.toLowerCase()
+  const article = indefiniteArticle(labelMember)
+  const COMMANDS: { value: Command; label: string; description: string }[] = [
+    { value: 'register',        label: 'Register',      description: `Enroll a fingerprint for ${article} ${member}.` },
+    { value: 'delete',          label: 'Delete',        description: `Remove ${article} ${member}'s fingerprint from the device.` },
+    { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
+    { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
+    { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
+  ]
+
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [deviceStudents, setDeviceStudents] = useState<StudentOption[]>([])
   const [loadingStudents, setLoadingStudents] = useState(false)
+  // M8: overwrite warning state (second confirmation before clobbering a slot).
+  const [overwriteMsg, setOverwriteMsg] = useState<string | null>(null)
+  const [pendingJob, setPendingJob] = useState<Parameters<typeof createEnrollmentJob>[0] | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     if (open) {
       setError(null)
       setDeviceStudents([])
+      setOverwriteMsg(null)
+      setPendingJob(null)
       setForm({ ...empty, device_id: devices[0]?.id ?? '' })
     }
   }, [open, devices])
@@ -80,7 +93,7 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.device_id) { setError('Please select a device.'); return }
-    if (needsStudent && !form.student_id) { setError('Please select a student.'); return }
+    if (needsStudent && !form.student_id) { setError(`Please select ${article} ${member}.`); return }
     if (needsMasterName && !form.master_name.trim()) { setError('Please enter a name for the master.'); return }
 
     setLoading(true)
@@ -122,11 +135,31 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
 
     const result = await createEnrollmentJob(jobData)
     setLoading(false)
+    // M8: the slot is already in use by another member — warn and require a
+    // second, explicit confirmation before overwriting their fingerprint.
+    if (result.needsConfirm) {
+      setPendingJob(jobData)
+      setOverwriteMsg(result.conflict ?? 'This will overwrite an existing fingerprint on this device.')
+      return
+    }
+    if (result.error) { setError(result.error); return }
+    onOpenChange(false)
+  }
+
+  async function confirmOverwrite() {
+    if (!pendingJob || pendingJob.command !== 'register') return
+    setConfirming(true)
+    setError(null)
+    const result = await createEnrollmentJob({ ...pendingJob, confirmOverwrite: true })
+    setConfirming(false)
+    setPendingJob(null)
+    setOverwriteMsg(null)
     if (result.error) { setError(result.error); return }
     onOpenChange(false)
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -167,17 +200,14 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
           {/* Device */}
           <div className="space-y-2">
             <Label htmlFor="device_id">Device</Label>
-            <NativeSelect
+            <SingleSelect
               id="device_id"
+              options={devices.map((d) => ({ value: d.id, label: `${d.group_name} ${d.unit_name}` }))}
               value={form.device_id}
-              onChange={(e) => { set('device_id', e.target.value); set('student_id', '') }}
-              required
-            >
-              <option value="">Select a device…</option>
-              {devices.map((d) => (
-                <option key={d.id} value={d.id}>{d.group_name} {d.unit_name}</option>
-              ))}
-            </NativeSelect>
+              onChange={(v) => { set('device_id', v); set('student_id', '') }}
+              placeholder="Select a device…"
+              searchPlaceholder="Search devices…"
+            />
           </div>
 
           {/* Master name */}
@@ -197,24 +227,21 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
             </div>
           )}
 
-          {/* Student (register / delete only) */}
+          {/* Member (register / delete only) */}
           {needsStudent && (
             <div className="space-y-2">
-              <Label htmlFor="student_id">Student</Label>
-              <NativeSelect
+              <Label htmlFor="student_id">{labelMember}</Label>
+              <SingleSelect
                 id="student_id"
+                options={deviceStudents.map((s) => ({ value: s.id, label: `${s.fullname} (${s.sid})` }))}
                 value={form.student_id}
-                onChange={(e) => set('student_id', e.target.value)}
-                required
-                disabled={loadingStudents}
-              >
-                <option value="">{loadingStudents ? 'Loading…' : 'Select a student…'}</option>
-                {deviceStudents.map((s) => (
-                  <option key={s.id} value={s.id}>{s.fullname} ({s.sid})</option>
-                ))}
-              </NativeSelect>
+                onChange={(v) => set('student_id', v)}
+                placeholder={loadingStudents ? 'Loading…' : `Select ${article} ${member}…`}
+                searchPlaceholder={`Search ${labelMembers.toLowerCase()}…`}
+                disabled={loadingStudents || !form.device_id}
+              />
               {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
-                <p className="text-xs text-muted-foreground">No active students in this class.</p>
+                <p className="text-xs text-muted-foreground">No active {labelMembers.toLowerCase()} in this {labelUnit.toLowerCase()}.</p>
               )}
             </div>
           )}
@@ -275,5 +302,16 @@ export function JobDialog({ open, onOpenChange, devices }: Props) {
         </form>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      open={!!overwriteMsg}
+      onOpenChange={(o) => { if (!o) { setOverwriteMsg(null); setPendingJob(null) } }}
+      title="Overwrite existing fingerprint?"
+      description={`${overwriteMsg ?? ''} This permanently replaces the existing template in that slot and cannot be undone. Confirm again to proceed.`}
+      confirmLabel="Overwrite anyway"
+      loading={confirming}
+      onConfirm={confirmOverwrite}
+    />
+    </>
   )
 }

@@ -1,4 +1,15 @@
-
+-- =====================================================================
+-- ⚠️  STALE / HISTORICAL DUMP — DO NOT USE TO RECREATE THE DATABASE  ⚠️
+-- =====================================================================
+-- This is a PHASE-1, PRE-MULTI-TENANT schema dump. It still uses the old
+-- table/column names (students, devices.class/form, academic, profiles.
+-- assigned_class) and does NOT reflect the current multi-tenant schema.
+--
+-- The authoritative schema is the ordered migration set in
+--   backend/supabase/migrations/
+-- For real point-in-time backups, see backend/backups/README.md.
+-- Kept only for historical reference.
+-- =====================================================================
 
 
 SET statement_timeout = 0;

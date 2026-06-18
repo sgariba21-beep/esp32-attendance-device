@@ -4,28 +4,34 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 
-/**
- * Applies promotion to every active student:
- *   - Form N → Form N+1 (same class letter, matched device)
- *   - Last form → status = inactive
- *   - No matching next-form device → skipped (shown as warning in preview)
- *
- * Finger slots are reset to 0 because the student is moving to a new physical sensor.
- */
 export async function applyPromotion() {
-  await requireRole('super_admin', 'admin')
+  const { institutionId } = await requireRole('super_admin', 'admin')
   const supabase = createAdminClient()
 
-  // Fresh data — never trust client-passed lists for destructive operations
-  const [studentsRes, devicesRes] = await Promise.all([
-    supabase
-      .from('members')
-      .select('id, group_name, device_id, device:device_id(group_name, unit_name)')
-      .eq('status', 'active'),
-    supabase
-      .from('devices')
-      .select('id, group_name, unit_name'),
-  ])
+  // H6: promotion MUST be scoped to a single institution. A platform_admin has
+  // no institution_id, and running unscoped would promote/deactivate members
+  // across every tenant at once (mixing year groups). Refuse.
+  if (!institutionId) {
+    return {
+      error: 'Promotion must be run by an institution admin within a single institution.',
+      promoted: 0,
+      deactivated: 0,
+    }
+  }
+
+  const studentsQ = supabase
+    .from('members')
+    .select('id, group_name, device_id, device:device_id(group_name, unit_name)')
+    .eq('status', 'active')
+    .neq('member_type', 'staff')
+    .eq('institution_id', institutionId)
+
+  const devicesQ = supabase
+    .from('devices')
+    .select('id, group_name, unit_name')
+    .eq('institution_id', institutionId)
+
+  const [studentsRes, devicesRes] = await Promise.all([studentsQ, devicesQ])
 
   if (studentsRes.error || devicesRes.error) {
     return { error: 'Failed to load data.', promoted: 0, deactivated: 0 }
@@ -33,12 +39,10 @@ export async function applyPromotion() {
 
   const devices = devicesRes.data ?? []
 
-  // Sorted group sequence (natural numeric order: Form 1, Form 2, Form 3 …)
   const sortedForms = [...new Set(devices.map((d) => d.group_name))].sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   )
 
-  // Fast lookup: "Form 2|A" → device id
   const deviceByKey = new Map<string, string>()
   for (const d of devices) {
     deviceByKey.set(`${d.group_name}|${d.unit_name}`, d.id)
@@ -52,10 +56,9 @@ export async function applyPromotion() {
     if (!device) continue
 
     const idx = sortedForms.indexOf(s.group_name)
-    if (idx === -1) continue // unrecognised group — skip
+    if (idx === -1) continue
 
     if (idx === sortedForms.length - 1) {
-      // Final group → deactivate
       toDeactivate.push(s.id)
     } else {
       const nextForm = sortedForms[idx + 1]
@@ -63,11 +66,9 @@ export async function applyPromotion() {
       if (nextDeviceId) {
         toPromote.push({ id: s.id, nextForm, nextDeviceId })
       }
-      // No matching device → skip (admin saw this warning in preview)
     }
   }
 
-  // Batch updates (individual rows — fine for school-scale data)
   const errors: string[] = []
 
   for (const p of toPromote) {
@@ -86,7 +87,7 @@ export async function applyPromotion() {
     if (error) errors.push(error.message)
   }
 
-  revalidatePath('/students')
+  revalidatePath('/members')
   revalidatePath('/promotion')
 
   if (errors.length > 0) {

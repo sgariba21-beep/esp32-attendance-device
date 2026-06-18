@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, Fragment } from 'react'
-import { Loader2, CalendarOff } from 'lucide-react'
+import { Loader2, CalendarOff, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -11,12 +12,7 @@ import {
 } from '@/components/ui/table'
 import { HolidayDialog } from './holiday-dialog'
 import { deleteHoliday } from '../_actions'
-
-export type Holiday = {
-  id: string
-  date: string
-  label: string
-}
+import type { Holiday } from '@/lib/types'
 
 type Props = { holidays: Holiday[] }
 
@@ -27,6 +23,23 @@ function formatDate(iso: string) {
     month: 'short',
     day: 'numeric',
   })
+}
+
+// Recurring holidays match on day + month only, so we drop the (meaningless) year.
+function formatDayMonth(iso: string) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+  })
+}
+
+function formatRange(h: Holiday) {
+  if (h.recurring) {
+    if (h.start_date.slice(5) === h.end_date.slice(5)) return formatDayMonth(h.start_date)
+    return `${formatDayMonth(h.start_date)} – ${formatDayMonth(h.end_date)}`
+  }
+  if (h.start_date === h.end_date) return formatDate(h.start_date)
+  return `${formatDate(h.start_date)} – ${formatDate(h.end_date)}`
 }
 
 export function HolidaysView({ holidays }: Props) {
@@ -44,7 +57,7 @@ export function HolidaysView({ holidays }: Props) {
   }
 
   const today = new Date().toISOString().slice(0, 10)
-  const sorted = [...holidays].sort((a, b) => a.date.localeCompare(b.date))
+  const sorted = [...holidays].sort((a, b) => a.start_date.localeCompare(b.start_date))
 
   return (
     <div className="space-y-4">
@@ -62,25 +75,36 @@ export function HolidaysView({ holidays }: Props) {
           action={<Button onClick={() => setDialogOpen(true)}>Add holiday</Button>}
         />
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
+        <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Date</TableHead>
+                <TableHead>Date range</TableHead>
                 <TableHead>Label</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sorted.map((h) => {
-                const isPast = h.date < today
+                // Recurring holidays repeat yearly, so they're never "past".
+                const isPast = !h.recurring && h.end_date < today
                 return (
                   <Fragment key={h.id}>
                     <TableRow>
                       <TableCell className={`whitespace-nowrap font-medium${isPast ? ' text-muted-foreground' : ''}`}>
-                        {formatDate(h.date)}
+                        {formatRange(h)}
                       </TableCell>
-                      <TableCell className={isPast ? 'text-muted-foreground' : undefined}>{h.label}</TableCell>
+                      <TableCell className={isPast ? 'text-muted-foreground' : undefined}>
+                        <span className="inline-flex items-center gap-2">
+                          {h.label}
+                          {h.recurring && (
+                            <Badge variant="secondary" className="gap-1">
+                              <RefreshCw className="h-3 w-3" />
+                              Yearly
+                            </Badge>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
@@ -114,7 +138,7 @@ export function HolidaysView({ holidays }: Props) {
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
         title="Delete holiday?"
-        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatDate(confirmTarget.date)}) from the holiday list.` : ''}
+        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatRange(confirmTarget)}) from the holiday list.` : ''}
         confirmLabel="Delete holiday"
         loading={loadingId === confirmTarget?.id}
         onConfirm={async () => {

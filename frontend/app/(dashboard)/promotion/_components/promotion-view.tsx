@@ -17,9 +17,11 @@ const UNMATCHED_PREVIEW = 15
 type Props = {
   groups: PromotionGroup[]
   totalActive: number
+  labelUnit: string
+  labelGroup: string
 }
 
-export function PromotionView({ groups, totalActive }: Props) {
+export function PromotionView({ groups, totalActive, labelUnit, labelGroup }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ promoted: number; deactivated: number } | null>(null)
@@ -77,7 +79,7 @@ export function PromotionView({ groups, totalActive }: Props) {
         )}
       </ul>
       <p className="text-muted-foreground">
-        Fingerprint slots will be cleared for promoted students — they&apos;ll need to re-enroll on the new class device.
+        Fingerprint slots will be cleared for promoted students — they&apos;ll need to re-enroll on the new {labelUnit.toLowerCase()} device.
       </p>
       <p className="font-medium text-muted-foreground">This cannot be undone.</p>
     </div>
@@ -93,7 +95,7 @@ export function PromotionView({ groups, totalActive }: Props) {
           <AlertDescription>
             {result.promoted} student{result.promoted !== 1 ? 's' : ''} promoted
             {result.deactivated > 0 && `, ${result.deactivated} deactivated`}.
-            Fingerprint slots have been cleared — re-enroll students on their new class device.
+            Fingerprint slots have been cleared — re-enroll students on their new {labelUnit.toLowerCase()} device.
           </AlertDescription>
         </Alert>
       </div>
@@ -147,7 +149,7 @@ export function PromotionView({ groups, totalActive }: Props) {
       {/* Summary cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {groups.map((g) => (
-          <div key={g.fromForm} className="rounded-xl border bg-muted/30 p-4 space-y-2">
+          <div key={g.fromForm} className="rounded-xl border border-border bg-card shadow-xs p-4 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">{g.fromForm}</span>
               <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -183,7 +185,7 @@ export function PromotionView({ groups, totalActive }: Props) {
             </AlertTitle>
             <AlertDescription className="space-y-2">
               <p>
-                No device exists for their next form + class combination. Add the missing devices first,
+                No device exists for their next {labelGroup.toLowerCase()} + {labelUnit.toLowerCase()} combination. Add the missing devices first,
                 or they will be skipped when you apply.
               </p>
               <div className="space-y-1">

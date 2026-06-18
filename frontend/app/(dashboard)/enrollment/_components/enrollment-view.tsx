@@ -16,6 +16,10 @@ import type { Device } from '@/lib/types'
 type Props = {
   initialJobs: EnrollmentJob[]
   devices: Device[]
+  labelUnit: string
+  labelMember: string
+  labelMembers: string
+  showInstitution?: boolean
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -61,7 +65,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
   )
 }
 
-export function EnrollmentView({ initialJobs, devices }: Props) {
+export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution }: Props) {
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
@@ -95,6 +99,7 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
             created_at: payload.new.created_at as string,
             device: devices.find((d) => d.id === payload.new.device_id) ?? null,
             student: null,
+            institution: null,
           }
           return [newJob, ...prev]
         })
@@ -132,14 +137,15 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
           action={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
         />
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
+        <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Created</TableHead>
+                {showInstitution && <TableHead>Institution</TableHead>}
                 <TableHead>Command</TableHead>
                 <TableHead>Device</TableHead>
-                <TableHead>Student</TableHead>
+                <TableHead>{labelMember}</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Note</TableHead>
               </TableRow>
@@ -154,6 +160,9 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                       {formatTime(job.created_at)}
                     </TableCell>
+                    {showInstitution && (
+                      <TableCell className="text-sm text-muted-foreground">{job.institution?.name ?? '—'}</TableCell>
+                    )}
                     <TableCell>
                       <Badge variant={
                         job.command === 'register' ? 'success'
@@ -207,6 +216,9 @@ export function EnrollmentView({ initialJobs, devices }: Props) {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         devices={devices}
+        labelUnit={labelUnit}
+        labelMember={labelMember}
+        labelMembers={labelMembers}
       />
     </div>
   )

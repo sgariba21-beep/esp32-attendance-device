@@ -11,6 +11,21 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await authClient.auth.getUser()
   if (!user) return new Response('Unauthorized', { status: 401 })
 
+  // H2/M10: scope the change feed to the caller's institution so one tenant's
+  // writes don't wake (and force a full refetch on) every other tenant's
+  // dashboard. platform_admin watches everything (cross-tenant by design).
+  const admin0 = createAdminClient()
+  const { data: profile } = await admin0
+    .from('profiles')
+    .select('role, institution_id')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.role) return new Response('Forbidden', { status: 403 })
+  const isPlatform = profile.role === 'platform_admin'
+  const institutionId = (profile.institution_id as string | null) ?? null
+  if (!isPlatform && !institutionId) return new Response('Forbidden', { status: 403 })
+
   const encoder = new TextEncoder()
   let closed = false
 
@@ -27,14 +42,16 @@ export async function GET(request: NextRequest) {
         } catch {}
       }
 
-      let channel = supabase.channel('dashboard_realtime_sse')
+      let channel = supabase.channel(`dashboard_realtime_sse_${user.id}_${Date.now()}`)
 
       for (const table of WATCHED_TABLES) {
-        channel = channel.on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table },
-          () => emit(table)
-        )
+        const changeOpts: { event: '*'; schema: string; table: string; filter?: string } = {
+          event: '*',
+          schema: 'public',
+          table,
+        }
+        if (!isPlatform && institutionId) changeOpts.filter = `institution_id=eq.${institutionId}`
+        channel = channel.on('postgres_changes', changeOpts, () => emit(table))
       }
 
       channel.subscribe()
