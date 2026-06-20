@@ -1,6 +1,29 @@
 # ESP32 Fingerprint Attendance System
 
-Multi-tenant biometric attendance tracking system. ESP32 devices with R503 fingerprint sensors record attendance; a Next.js dashboard backed by Supabase provides real-time reporting, device provisioning, and management. Each institution (school, office, etc.) is isolated — one cloud Supabase project serves all tenants.
+Ghanaian schools and institutions still take attendance on paper. A teacher calls a register, marks each name by hand, then copies the totals into another book or a spreadsheet. Roll-call takes class time and the handwritten tallies are easy to miscount and slow to total across a term. This system replaces the register with a fingerprint scan.
+
+An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js dashboard backed by Supabase handles reporting and the day-to-day management of devices and members. One cloud Supabase project serves every institution, with each tenant's data isolated from the rest. The hardware and software are complete; the first institutional deployment is pending.
+
+---
+
+## Why This Exists
+
+- Ghanaian schools and small institutions track attendance on paper or not at all; the affordable end of the market has no biometric option tied to a reporting dashboard.
+- ZKTeco and similar incumbents ship standalone terminals with no multi-tenant cloud dashboard and no remote device management.
+- The system is built around term and academic-year structure, with institution type configurable as school or office.
+- Each device is built from off-the-shelf parts at about GHS 1,000.
+- The firmware and dashboard are AGPL-3.0 on GitHub; institutions can self-host or use the managed hosted service.
+
+---
+
+## Real-World Deployment
+
+- Status: hardware and software complete; first institutional deployment pending
+- Site: [institution name], [town/region]
+- Enrolled members: [N]
+- Running since: [start date]
+
+![Device installed at [institution name]](docs/images/deployment.jpg)
 
 ---
 
@@ -79,6 +102,44 @@ Multi-tenant biometric attendance tracking system. ESP32 devices with R503 finge
 | R503 RX → ESP32 TX | GPIO 17 |
 | DS3231 SDA | GPIO 21 |
 | DS3231 SCL | GPIO 22 |
+
+---
+
+## Firmware Architecture
+
+Single sketch: `firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino`. Three FreeRTOS tasks pinned across the two cores.
+
+### Tasks
+
+| Task | Core | Responsibility |
+|---|---|---|
+| `FingerprintTask` | 1 | Scan loop, match against the local fid map, LED feedback, enrollment execution, captive-portal launch on master-finger scan. |
+| `NetworkTask` | 0 | Provisioning, draining the in-memory send queue to `log-attendance`, SPIFFS queue flush, NTP→RTC sync, WiFi reconnect. |
+| `EnrollmentTask` | 0 | Polls `get-enrollment-job`, hands jobs to `FingerprintTask`, acts on the decommission signal (wipes identity and reboots into provisioning). |
+
+Inter-task communication:
+
+- `memQueue` (`std::deque`) holds outbound attendance payloads. `FingerprintTask` pushes, `NetworkTask` pops. Guarded by `memQueueMutex`; `memQueueSem` wakes `NetworkTask` when a payload arrives.
+- Enrollment jobs pass from `EnrollmentTask` to `FingerprintTask` through `currentEnrollJob`, guarded by `enrollMutex` and signalled by `enrollSem`.
+- `spiffsMutex` serialises every SPIFFS access across all three tasks.
+
+### Offline queue
+
+- Each scan is written to `/queue.txt` in SPIFFS before any network attempt, one JSON payload per line.
+- With WiFi up, the payload is also pushed to `memQueue` for immediate send. The SPIFFS copy is cleared once a POST returns 2xx.
+- With WiFi down, the payload stays in `/queue.txt`. `NetworkTask` flushes the file on reconnect and on boot.
+- On flush, 5xx/429/network errors keep a record for retry; a 4xx drops it.
+- Caps: 1000 entries, 256 KB, 7-day age. Oldest records are trimmed first.
+
+### Scan IDs
+
+Each scan gets a `scan_id` of `scan-YYYYMMDDhhmmss-<member-sid>`, with the timestamp read from the DS3231 RTC. Earlier firmware derived the ID from `millis()`, which resets to zero on every reboot, so scans after a power cycle collided with earlier IDs and the server's `(institution_id, scan_id)` dedup discarded them. The RTC clock survives reboots and power loss, so the IDs stay unique. It is synced from NTP on boot and after each reconnect.
+
+### OTA
+
+- On boot, with WiFi up and assignment not pending, the device GETs `releases/latest` from the GitHub API.
+- Release tags must be `firmware-v<major>.<minor>.<patch>`. The tag version is compared against the compiled-in `FIRMWARE_VERSION`; only a strictly newer version flashes, so a mistagged release cannot downgrade the fleet.
+- The release's `.bin` asset is streamed through the `Update` library. The sensor LED holds red while writing, and the device reboots into the new image on success.
 
 ---
 
@@ -196,6 +257,15 @@ Additional accounts are managed through the `/users` page in the dashboard.
 | `/users` | super_admin, admin, platform_admin | Dashboard account management. `admin` can view the list and change their own password only. `super_admin`/`platform_admin` can create, edit, and delete accounts. At least one super_admin must always exist per institution. Email search and role filter available. |
 | `/unauthorized` | — | Shown when a user navigates to a page their role cannot access. |
 
+### Screenshots
+
+![Overview dashboard showing today's attendance summary](docs/images/dashboard-overview.png)
+![Attendance view with filters and per-member stats panel](docs/images/dashboard-attendance.png)
+![Devices page showing provisioning workflow](docs/images/dashboard-devices.png)
+![Enrollment queue with fingerprint job management](docs/images/dashboard-enrollment.png)
+
+Screenshots pending production UI.
+
 ---
 
 ## Device Authentication & Provisioning
@@ -304,3 +374,28 @@ esp32-attendance-device/
 | 3 | Firmware provisioning flow | ✅ Complete |
 | 4 | Frontend — de-brand, institution config, devices page, settings | ✅ Complete |
 | 5 | Captive portal — WiFi-only, remove class fields | ✅ Complete (done in Phase 3) |
+
+---
+
+## Roadmap
+
+- [ ] Admin mobile app (iOS/Android)
+- [ ] GES-formatted report exports
+- [ ] SMS attendance notifications
+- [ ] Analytics dashboard with term-over-term trends
+- [ ] Offline-first mobile enrollment app
+- [ ] Multi-device per unit support
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the repo layout and local setup steps for the frontend and firmware.
+
+---
+
+## License
+
+AGPL-3.0. See [LICENSE](LICENSE).
+
+Network use of a modified version requires releasing source under the same license. Contact sgariba21@gmail.com for commercial licensing or self-hosting arrangements.
