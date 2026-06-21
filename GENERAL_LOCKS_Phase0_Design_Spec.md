@@ -485,6 +485,20 @@ draft (A-1, A-8a, A-9 — marked ⮕); the other ten ratified the spec default.
 
 ---
 
+## Reconciliation vs the implementation-plan docx (settle before **Phase 2**, not Phase 1)
+
+While confirming phase scope against `GENERAL_LOCKS_Implementation_Plan.docx`, three points came
+up where this spec and the plan's Phase-2 column list differ. **None affect Phase 1 (foundation).**
+They must be resolved before the 8-table migration set is written.
+
+| # | Delta | Resolution needed |
+|---|---|---|
+| R-1 | **`products.stock`** — the plan carries a `stock int` counter (Phase 5 decrements it; "allow negative, warn"). This spec omitted it. | Add `stock integer not null default 0` to `products`, unless inventory is explicitly out of MVP scope. |
+| R-2 | **`transactions.client_attendance_id`** — the plan links a sale to that day's visit (nullable FK→`client_attendance`; Phase 5 auto-attaches). This spec omitted it. | Add nullable `client_attendance_id uuid` FK→`client_attendance` **SET NULL**. |
+| R-3 | **Rewards model depth** — A-5 locked a simple `metric{visits,spend}` + single `threshold`. The plan's model is richer: `condition_type ∈ {service_count, product_count, visit_count, total_amount_spent}` + optional product/service scoping, a reward **payload** (`reward_kind` + reward product/service/value), and an `auto` flag. | **Owner decision:** keep the simple A-5 model, or adopt the plan's scoped/payload model before `rewards`/`rewards_log` DDL freezes. (Note: the docx still says window token `since_last_redemption`; A-4 supersedes it with `since_last_issuance`.) |
+
+---
+
 ## Ready for Phase 1? — checklist
 
 - [ ] **Six settled decisions** re-affirmed against §A (client_id NN; one-visit-per-day unique;
@@ -505,6 +519,8 @@ draft (A-1, A-8a, A-9 — marked ⮕); the other ten ratified the spec default.
 - [ ] **Locale (§D)** approved: GHS formatting helper, Accra business-day rule, E.164 phone.
 - [x] **All decisions A-1…A-13 confirmed** — 2026-06-20, "all recommended".
 
-On sign-off, Phase 1 implements §A as a single transactional migration set (following the staged
-add-column / index / RLS pattern of the existing migrations), with **no** data backfill required
-(GENERAL LOCKS is a brand-new institution row).
+On sign-off, **Phase 1** (per the implementation plan) is *platform foundation only*: widen
+`institutions.type` (+`shop`) and `profiles.role` (+`cashier`) — §A.9 — and wire the frontend
+type/role plumbing and nav gating (§C). **No retail tables in Phase 1.** **Phase 2** then implements
+§A.1–A.8 as the 8-table migration set (following the staged add-column / index / RLS pattern of the
+existing migrations), with **no** data backfill required (GENERAL LOCKS is a brand-new institution row).

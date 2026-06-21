@@ -5,7 +5,7 @@ import { createAuthClient, createAdminClient } from './server'
 import type { InstitutionConfig } from '@/lib/types'
 import { DEFAULT_INSTITUTION } from '@/lib/types'
 
-export type UserRole = 'super_admin' | 'admin' | 'teacher' | 'staff' | 'platform_admin'
+export type UserRole = 'super_admin' | 'admin' | 'teacher' | 'staff' | 'platform_admin' | 'cashier'
 
 export const verifySession = cache(async () => {
   const supabase = await createAuthClient()

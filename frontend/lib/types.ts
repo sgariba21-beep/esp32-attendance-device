@@ -1,7 +1,7 @@
 export type InstitutionConfig = {
   id: string
   name: string
-  type: 'school' | 'office'
+  type: 'school' | 'office' | 'shop'
   logo_url: string | null
   label_member: string
   label_members: string

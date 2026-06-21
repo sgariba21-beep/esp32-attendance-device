@@ -38,11 +38,12 @@ const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
   teacher: 'Teacher',
   staff: 'Staff',
+  cashier: 'Cashier',
 }
 
 function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[] {
   const items: NavItem[] = [
-    { href: '/attendance', label: 'Attendance', icon: CalendarDays, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
+    { href: '/attendance', label: 'Attendance', icon: CalendarDays, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier'] },
   ]
 
   if (institution.track_students) {
@@ -50,18 +51,25 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
   }
 
   if (institution.track_staff || role === 'platform_admin') {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier'] })
   }
 
   items.push(
     { href: '/devices',    label: 'Devices',    icon: Cpu,           group: 'manage', roles: ['super_admin', 'platform_admin'] },
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, group: 'manage', roles: ['super_admin', 'platform_admin'] },
-    // Periods & holidays apply to every institution type; offices get neutral wording.
-    { href: '/academic', label: institution.type === 'office' ? 'Periods & Holidays' : 'Academic', icon: BookOpen, group: 'manage', roles: ['super_admin', 'admin', 'platform_admin'] },
+    // Periods & holidays: schools get 'Academic', offices get 'Periods & Holidays',
+    // shops get 'Closed Days' (holidays only; feeds mark-absent for stylists — A-9).
+    {
+      href: '/academic',
+      label: institution.type === 'office' ? 'Periods & Holidays' : institution.type === 'shop' ? 'Closed Days' : 'Academic',
+      icon: BookOpen,
+      group: 'manage',
+      roles: ['super_admin', 'admin', 'platform_admin'],
+    },
   )
 
   // Promotion is a school-only concept (advancing year groups).
-  if (institution.type !== 'office') {
+  if (institution.type === 'school') {
     items.push(
       { href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, group: 'manage', roles: ['super_admin', 'admin', 'platform_admin'] },
     )

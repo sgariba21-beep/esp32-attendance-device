@@ -63,8 +63,8 @@ export function SettingsForm({ institution, saveAction }: Props) {
   function set(field: string, value: string | boolean) {
     setForm((f) => {
       const next = { ...f, [field]: value }
-      // Office institutions cannot track students
-      if (field === 'type' && value === 'office') next.track_students = false
+      // Offices and shops cannot track students
+      if (field === 'type' && (value === 'office' || value === 'shop')) next.track_students = false
       return next
     })
     setSaved(false)
@@ -83,7 +83,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
     const action = saveAction ?? updateInstitutionSettings
     const result = await action({
       ...form,
-      type: form.type as 'school' | 'office',
+      type: form.type as 'school' | 'office' | 'shop',
       student_scan_mode: form.student_scan_mode as 'present_absent' | 'time_in_out',
       staff_scan_mode: form.staff_scan_mode as 'present_absent' | 'time_in_out',
     })
@@ -106,8 +106,12 @@ export function SettingsForm({ institution, saveAction }: Props) {
           <NativeSelect id="type" value={form.type} onChange={(e) => set('type', e.target.value)}>
             <option value="school">School</option>
             <option value="office">Office</option>
+            <option value="shop">Shop</option>
           </NativeSelect>
-          <p className="text-xs text-muted-foreground">Office type tracks staff only and hides the Academic and Promotion features.</p>
+          <p className="text-xs text-muted-foreground">
+            Office type tracks staff only and hides Academic and Promotion.
+            Shop type tracks stylists, hides student and promotion features, and enables the retail module.
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -170,7 +174,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
 
       <Section title="Attendance tracking" description="Choose which member types have their attendance recorded and what scan mode each uses.">
         <div className="space-y-4 rounded-lg border border-border p-4">
-          {form.type !== 'office' && (
+          {form.type === 'school' && (
             <>
               <div className="flex items-start gap-3">
                 <input

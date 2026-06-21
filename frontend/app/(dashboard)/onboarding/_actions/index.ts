@@ -6,7 +6,7 @@ import { requireRole } from '@/lib/supabase/dal'
 
 export type OnboardingFormData = {
   institution_name: string
-  institution_type: 'school' | 'office'
+  institution_type: 'school' | 'office' | 'shop'
   track_students: boolean
   track_staff: boolean
   student_scan_mode: 'present_absent' | 'time_in_out'
@@ -31,13 +31,13 @@ export async function createInstitutionWithAdmin(data: OnboardingFormData) {
     .insert({
       name: data.institution_name.trim(),
       type: data.institution_type,
-      label_member:       data.institution_type === 'office' ? 'Employee'  : 'Student',
-      label_members:      data.institution_type === 'office' ? 'Employees' : 'Students',
-      label_group:        data.institution_type === 'office' ? 'Department': 'Form',
-      label_unit:         data.institution_type === 'office' ? 'Branch'    : 'Class',
-      label_period:       data.institution_type === 'office' ? 'Quarter'   : 'Term',
-      label_staff:        data.institution_type === 'office' ? 'Staff'     : 'Teacher',
-      label_staff_plural: data.institution_type === 'office' ? 'Staff'     : 'Teachers',
+      label_member:       data.institution_type === 'office' ? 'Employee'  : data.institution_type === 'shop' ? 'Stylist'  : 'Student',
+      label_members:      data.institution_type === 'office' ? 'Employees' : data.institution_type === 'shop' ? 'Stylists' : 'Students',
+      label_group:        data.institution_type === 'office' ? 'Department': data.institution_type === 'shop' ? 'Team'     : 'Form',
+      label_unit:         data.institution_type === 'office' ? 'Branch'    : data.institution_type === 'shop' ? 'Station'  : 'Class',
+      label_period:       data.institution_type === 'office' ? 'Quarter'   : data.institution_type === 'shop' ? 'Period'   : 'Term',
+      label_staff:        data.institution_type === 'office' ? 'Staff'     : data.institution_type === 'shop' ? 'Stylist'  : 'Teacher',
+      label_staff_plural: data.institution_type === 'office' ? 'Staff'     : data.institution_type === 'shop' ? 'Stylists' : 'Teachers',
       skip_weekends: true,
       timezone: 'UTC',
       track_students:    data.track_students,

@@ -18,7 +18,7 @@ type Props = {
   device: Device | null
   labelGroup: string
   labelUnit: string
-  institutionType: 'school' | 'office'
+  institutionType: 'school' | 'office' | 'shop'
   title?: string
 }
 

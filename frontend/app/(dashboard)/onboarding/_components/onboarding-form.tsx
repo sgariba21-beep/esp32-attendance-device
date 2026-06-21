@@ -39,7 +39,7 @@ function ScanModeSelect({ id, value, onChange }: { id: string; value: string; on
 
 const empty = {
   institution_name: '',
-  institution_type: 'school' as 'school' | 'office',
+  institution_type: 'school' as 'school' | 'office' | 'shop',
   track_students: true,
   track_staff: false,
   student_scan_mode: 'present_absent' as 'present_absent' | 'time_in_out',
@@ -58,9 +58,9 @@ export function OnboardingForm() {
   function set(field: string, value: string | boolean) {
     setForm((f) => {
       const next = { ...f, [field]: value }
-      // Offices don't track students — force the flags to a sensible state on type change.
+      // Offices and shops don't track students — force sensible flags on type change.
       if (field === 'institution_type') {
-        if (value === 'office') { next.track_students = false; next.track_staff = true }
+        if (value === 'office' || value === 'shop') { next.track_students = false; next.track_staff = true }
         else { next.track_students = true }
       }
       return next
@@ -122,6 +122,7 @@ export function OnboardingForm() {
           >
             <option value="school">School</option>
             <option value="office">Office</option>
+            <option value="shop">Shop</option>
           </NativeSelect>
         </div>
       </Section>
@@ -131,7 +132,7 @@ export function OnboardingForm() {
         description="Choose which member types to track and what scan mode each uses. All of this can be changed later in Settings."
       >
         <div className="space-y-4 rounded-lg border border-border p-4">
-          {form.institution_type !== 'office' && (
+          {form.institution_type === 'school' && (
             <>
               <div className="flex items-start gap-3">
                 <input

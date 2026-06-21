@@ -23,7 +23,7 @@ type Props = {
   devices: DeviceOption[]
   labelUnit: string
   labelStaff: string
-  institutionType: 'school' | 'office'
+  institutionType: 'school' | 'office' | 'shop'
   currentUserRole: UserRole
   institutions: { id: string; name: string }[]
 }
@@ -34,19 +34,24 @@ const ROLE_DISPLAY: Record<UserRole, string> = {
   teacher:        'Teacher',
   staff:          'Staff',
   platform_admin: 'Platform Admin',
+  cashier:        'Cashier',
 }
 
 export function UserDialog({ open, onOpenChange, user, devices, labelUnit, labelStaff, institutionType, currentUserRole, institutions }: Props) {
   const isPlatformAdmin = currentUserRole === 'platform_admin'
   // The unit-scoped viewer role is called "Teacher" in schools and "Staff" in
-  // offices — same access, institution-appropriate wording.
-  const unitScopedRole: UserRole = institutionType === 'office' ? 'staff' : 'teacher'
+  // offices/shops — same access, institution-appropriate wording.
+  const unitScopedRole: UserRole = institutionType === 'school' ? 'teacher' : 'staff'
 
   const roles: { value: UserRole; label: string }[] = [
     { value: 'super_admin', label: 'Super Admin' },
     { value: 'admin',       label: 'Admin' },
     { value: unitScopedRole, label: labelStaff },
   ]
+  // Cashier is a shop-only role, below admin in the hierarchy.
+  if (institutionType === 'shop') {
+    roles.push({ value: 'cashier', label: 'Cashier' })
+  }
   // Only a platform admin may grant the platform-admin role.
   if (currentUserRole === 'platform_admin') {
     roles.push({ value: 'platform_admin', label: 'Platform Admin' })

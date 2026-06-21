@@ -12,6 +12,7 @@ const ROLE_RANK: Record<string, number> = {
   admin: 2,
   teacher: 1,
   staff: 1,
+  cashier: 1,
 }
 
 const MIN_PASSWORD_LENGTH = 8

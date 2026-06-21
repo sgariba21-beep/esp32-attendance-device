@@ -74,7 +74,7 @@ type Props = {
   institutions: { id: string; name: string; track_students: boolean; track_staff: boolean }[]
   track_students: boolean
   track_staff: boolean
-  institutionType: 'school' | 'office'
+  institutionType: 'school' | 'office' | 'shop'
   memberStats: MemberStat[]
 }
 

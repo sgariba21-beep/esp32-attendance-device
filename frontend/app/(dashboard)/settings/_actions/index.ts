@@ -7,7 +7,7 @@ import { brandColumns } from '@/lib/theme'
 
 export type SettingsFormData = {
   name: string
-  type: 'school' | 'office'
+  type: 'school' | 'office' | 'shop'
   logo_url: string
   label_member: string
   label_members: string

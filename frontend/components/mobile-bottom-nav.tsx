@@ -26,7 +26,7 @@ import {
 
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
-const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin']
+const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier']
 
 function isActive(pathname: string, href: string): boolean {
   return href === '/' ? pathname === '/' : pathname.startsWith(href)
@@ -55,10 +55,15 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
   }
   items.push(
     { href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] },
-    { href: '/academic', label: institution.type === 'office' ? 'Periods & Holidays' : 'Academic', icon: BookOpen, roles: ['super_admin', 'admin', 'platform_admin'] },
+    {
+      href: '/academic',
+      label: institution.type === 'office' ? 'Periods & Holidays' : institution.type === 'shop' ? 'Closed Days' : 'Academic',
+      icon: BookOpen,
+      roles: ['super_admin', 'admin', 'platform_admin'],
+    },
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin'] },
   )
-  if (institution.type !== 'office') {
+  if (institution.type === 'school') {
     items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
   }
   items.push(

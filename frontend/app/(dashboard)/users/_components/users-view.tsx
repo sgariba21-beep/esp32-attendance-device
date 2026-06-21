@@ -26,6 +26,7 @@ const ROLE_RANK: Record<UserRole, number> = {
   admin: 2,
   teacher: 1,
   staff: 1,
+  cashier: 1,
 }
 
 function canChangePassword(actorRole: UserRole, actorId: string, targetRole: UserRole, targetId: string): boolean {
@@ -55,6 +56,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   teacher:       'Teacher',
   staff:         'Staff',
   platform_admin: 'Platform Admin',
+  cashier:       'Cashier',
 }
 
 const ROLE_BADGE: Record<UserRole, 'default' | 'secondary' | 'outline'> = {
@@ -63,6 +65,7 @@ const ROLE_BADGE: Record<UserRole, 'default' | 'secondary' | 'outline'> = {
   teacher:       'outline',
   staff:         'outline',
   platform_admin: 'secondary',
+  cashier:       'outline',
 }
 
 type DeviceOption = { id: string; group_name: string; unit_name: string; institution_id?: string | null }
@@ -73,7 +76,7 @@ type Props = {
   devices: DeviceOption[]
   labelUnit: string
   labelStaff: string
-  institutionType: 'school' | 'office'
+  institutionType: 'school' | 'office' | 'shop'
   currentUserRole: UserRole
   institutions: { id: string; name: string }[]
 }
@@ -149,6 +152,7 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
             <SelectItem value="admin">Admin</SelectItem>
             <SelectItem value="teacher">{labelStaff}</SelectItem>
             <SelectItem value="staff">Staff</SelectItem>
+            <SelectItem value="cashier">Cashier</SelectItem>
           </SelectContent>
         </Select>
       </div>
