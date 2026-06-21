@@ -17,21 +17,14 @@
 
 
 -- A. institutions.type: add 'shop' ----------------------------------------
--- Look up the actual constraint name defensively; the CHECK was created
--- inline (unnamed) in 20260614121000, so Postgres auto-named it
--- institutions_type_check, but we verify rather than assume.
-do $$
-declare cname text;
-begin
-  select conname into cname
-  from pg_constraint
-  where conrelid = 'public.institutions'::regclass
-    and contype = 'c'
-    and pg_get_constraintdef(oid) ilike '%type in%';
-  if cname is not null then
-    execute 'alter table public.institutions drop constraint ' || quote_ident(cname);
-  end if;
-end $$;
+-- The constraint was created as an inline unnamed CHECK in 20260614121000,
+-- so Postgres auto-named it institutions_type_check. We cannot use
+-- pg_get_constraintdef() to match on "type in ..." because Postgres
+-- normalises that internally to "= ANY (ARRAY[...])", so the text match
+-- would never fire. The name is stable, so DROP IF EXISTS is both safe
+-- and correct.
+alter table public.institutions
+  drop constraint if exists institutions_type_check;
 
 alter table public.institutions
   add constraint institutions_type_check

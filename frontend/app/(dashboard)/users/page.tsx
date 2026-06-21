@@ -33,10 +33,15 @@ export default async function UsersPage() {
     return all
   }
 
+  // Platform admins see all devices (they pick institution first, then unit).
+  // All other roles only need devices scoped to their own institution.
+  let devicesQ = admin.from('devices').select('id, group_name, unit_name, institution_id').order('group_name').order('unit_name')
+  if (!isPlatformAdmin && institutionId) devicesQ = devicesQ.eq('institution_id', institutionId)
+
   const [authUsers, { data: profiles }, { data: devices }, { data: institutionsData }] = await Promise.all([
     listAllAuthUsers(),
     profilesQ,
-    admin.from('devices').select('id, group_name, unit_name, institution_id').order('group_name').order('unit_name'),
+    devicesQ,
     institutionsP,
   ])
 
