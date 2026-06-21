@@ -27,6 +27,25 @@ export function pluralize(word: string): string {
  * "a Branch", "an Office", "a Unit". Falls back gracefully on combined labels
  * like "Student / Teacher" (keys off the first word).
  */
+/**
+ * Normalize a Ghana phone number to E.164 (+233XXXXXXXXX). §D rule.
+ * Accepts: 0XXXXXXXXX, 233XXXXXXXXX, +233XXXXXXXXX. Returns null if invalid.
+ */
+export function normalizePhone(input: string): string | null {
+  const digits = input.trim().replace(/\D/g, '')
+  const s = input.trim().startsWith('+') ? '+' + digits : digits
+  if (/^0\d{9}$/.test(s))       return '+233' + s.slice(1)
+  if (/^233\d{9}$/.test(s))     return '+' + s
+  if (/^\+233\d{9}$/.test(s))   return s
+  return null
+}
+
+/** Convert E.164 +233XXXXXXXXX to local display form 0XXXXXXXXX. §D rule. */
+export function displayPhone(e164: string): string {
+  if (/^\+233\d{9}$/.test(e164)) return '0' + e164.slice(4)
+  return e164
+}
+
 /** Format a number as GHS currency (e.g. GH₵1,234.56). §D locale rule. */
 export function formatGHS(amount: number | string): string {
   return new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(Number(amount))
