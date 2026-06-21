@@ -27,6 +27,11 @@ export function pluralize(word: string): string {
  * "a Branch", "an Office", "a Unit". Falls back gracefully on combined labels
  * like "Student / Teacher" (keys off the first word).
  */
+/** Format a number as GHS currency (e.g. GH₵1,234.56). §D locale rule. */
+export function formatGHS(amount: number | string): string {
+  return new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(Number(amount))
+}
+
 export function indefiniteArticle(word: string): string {
   const w = word.trim().toLowerCase()
   // "yoo"-sound words take "a" despite a leading vowel: a Unit, a University, a User.

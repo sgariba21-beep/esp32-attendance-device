@@ -21,6 +21,7 @@ import {
   LogOut,
   MoreHorizontal,
   X,
+  Package,
   Building2 as BuildingList,
 } from 'lucide-react'
 
@@ -53,6 +54,11 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
   if (institution.track_students && (institution.track_staff || role === 'platform_admin')) {
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ALL_ROLES })
   }
+  // Retail nav — top of More sheet so cashiers find Catalog immediately.
+  if (institution.type === 'shop') {
+    items.push({ href: '/catalog', label: 'Catalog', icon: Package, roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] })
+  }
+
   items.push(
     { href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] },
     {

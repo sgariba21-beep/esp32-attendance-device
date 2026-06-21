@@ -20,14 +20,16 @@ import {
   Settings2,
   Plus,
   LogOut,
+  Package,
   Building2 as BuildingList,
 } from 'lucide-react'
 
-type NavGroup = 'records' | 'manage' | 'platform'
+type NavGroup = 'records' | 'retail' | 'manage' | 'platform'
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[]; group: NavGroup }
 
 const GROUP_LABELS: Record<NavGroup, string> = {
   records: 'Records',
+  retail: 'Shop',
   manage: 'Manage',
   platform: 'Platform',
 }
@@ -52,6 +54,13 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
 
   if (institution.track_staff || role === 'platform_admin') {
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier'] })
+  }
+
+  // Retail nav — shop-type tenants only.
+  if (institution.type === 'shop') {
+    items.push(
+      { href: '/catalog', label: 'Catalog', icon: Package, group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+    )
   }
 
   items.push(
@@ -85,7 +94,7 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
   return items
 }
 
-const GROUP_ORDER: NavGroup[] = ['records', 'manage', 'platform']
+const GROUP_ORDER: NavGroup[] = ['records', 'retail', 'manage', 'platform']
 
 export function Sidebar({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
   const pathname = usePathname()
