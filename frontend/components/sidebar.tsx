@@ -21,6 +21,7 @@ import {
   Plus,
   LogOut,
   Package,
+  ShoppingCart,
   Building2 as BuildingList,
 } from 'lucide-react'
 
@@ -59,8 +60,9 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
   // Retail nav — shop-type tenants only.
   if (institution.type === 'shop') {
     items.push(
-      { href: '/clients', label: 'Clients',  icon: Users,   group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
-      { href: '/catalog', label: 'Catalog',  icon: Package, group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/clients', label: 'Clients',  icon: Users,         group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/sales',   label: 'Sales',    icon: ShoppingCart,  group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/catalog', label: 'Catalog',  icon: Package,       group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
     )
   }
 

@@ -22,6 +22,7 @@ import {
   MoreHorizontal,
   X,
   Package,
+  ShoppingCart,
   Building2 as BuildingList,
 } from 'lucide-react'
 
@@ -57,8 +58,9 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
   // Retail nav — top of More sheet so cashiers find Clients and Catalog immediately.
   if (institution.type === 'shop') {
     items.push(
-      { href: '/clients', label: 'Clients', icon: Users,   roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
-      { href: '/catalog', label: 'Catalog', icon: Package, roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/clients', label: 'Clients', icon: Users,        roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/sales',   label: 'Sales',   icon: ShoppingCart, roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/catalog', label: 'Catalog', icon: Package,      roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
     )
   }
 
