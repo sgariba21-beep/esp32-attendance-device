@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Trash2 } from 'lucide-react'
-import { cn, formatGHS, displayPhone } from '@/lib/utils'
+import { formatGHS, displayPhone } from '@/lib/utils'
+import { NativeSelect } from '@/components/ui/native-select'
 import { createSale } from '../_actions'
 
 export type SaleClient = { id: string; name: string; phone: string }
@@ -145,22 +146,17 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
           {/* Client */}
           <div className="space-y-2">
             <Label htmlFor="sale-client">Client *</Label>
-            <select
+            <NativeSelect
               id="sale-client"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               required
-              className={cn(
-                'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs',
-                'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                'disabled:cursor-not-allowed disabled:opacity-50',
-              )}
             >
               <option value="">Select client…</option>
               {clients.map(c => (
                 <option key={c.id} value={c.id}>{c.name} — {displayPhone(c.phone)}</option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
           {/* Stylist */}
@@ -170,21 +166,16 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
                 Stylist
                 <span className="ml-1.5 text-xs font-normal text-muted-foreground">(optional)</span>
               </Label>
-              <select
+              <NativeSelect
                 id="sale-staff"
                 value={staffId}
                 onChange={(e) => setStaffId(e.target.value)}
-                className={cn(
-                  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  'disabled:cursor-not-allowed disabled:opacity-50',
-                )}
               >
                 <option value="">None</option>
                 {staff.map(s => (
                   <option key={s.id} value={s.id}>{s.fullname}</option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           )}
 
@@ -205,14 +196,10 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
                       {idx === 0 && (
                         <p className="text-[11px] text-muted-foreground font-medium">Item</p>
                       )}
-                      <select
+                      <NativeSelect
                         value={it.entry?.id ?? ''}
                         onChange={(e) => handleCatalogChange(it.localId, e.target.value)}
                         required
-                        className={cn(
-                          'flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs',
-                          'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                        )}
                       >
                         <option value="">Select…</option>
                         {services.length > 0 && (
@@ -229,7 +216,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
                             ))}
                           </optgroup>
                         )}
-                      </select>
+                      </NativeSelect>
                     </div>
 
                     {/* Quantity */}
