@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -8,9 +8,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SingleSelect } from '@/components/ui/single-select'
 import { Trash2 } from 'lucide-react'
 import { formatGHS, displayPhone } from '@/lib/utils'
-import { NativeSelect } from '@/components/ui/native-select'
 import { createSale } from '../_actions'
 
 export type SaleClient = { id: string; name: string; phone: string }
@@ -30,7 +30,6 @@ type Props = {
   clients: SaleClient[]
   allCatalog: SaleCatalogEntry[]
   staff: SaleStaff[]
-  /** Pre-select this client when opening (e.g. from Clients page). */
   preselectedClientId?: string
 }
 
@@ -45,8 +44,6 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const initializedRef = useRef(false)
-
   useEffect(() => {
     if (open) {
       setClientId(preselectedClientId ?? '')
@@ -54,12 +51,23 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
       setNote('')
       setItems([emptyItem()])
       setError(null)
-      initializedRef.current = true
     }
   }, [open, preselectedClientId])
 
-  const services = allCatalog.filter(c => c.kind === 'service')
-  const products = allCatalog.filter(c => c.kind === 'product')
+  // Pre-build option lists once per render (props are stable between opens).
+  const clientOptions = useMemo(
+    () => clients.map(c => ({ value: c.id, label: `${c.name} — ${displayPhone(c.phone)}` })),
+    [clients],
+  )
+  const staffOptions = useMemo(
+    () => staff.map(s => ({ value: s.id, label: s.fullname })),
+    [staff],
+  )
+  // Services listed first — GENERAL LOCKS is primarily a service shop.
+  const catalogOptions = useMemo(() => [
+    ...allCatalog.filter(c => c.kind === 'service').map(c => ({ value: c.id, label: `${c.name} — ${formatGHS(c.price)}` })),
+    ...allCatalog.filter(c => c.kind === 'product').map(c => ({ value: c.id, label: `${c.name} — ${formatGHS(c.price)}` })),
+  ], [allCatalog])
 
   function handleCatalogChange(localId: string, catalogId: string) {
     const entry = allCatalog.find(c => c.id === catalogId) ?? null
@@ -86,7 +94,6 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
     setItems(prev => [...prev, emptyItem()])
   }
 
-  // Computed total — NaN-safe.
   const total = items.reduce((acc, it) => {
     const p = parseFloat(it.unitPrice)
     const q = parseInt(it.quantity, 10)
@@ -146,17 +153,14 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
           {/* Client */}
           <div className="space-y-2">
             <Label htmlFor="sale-client">Client *</Label>
-            <NativeSelect
+            <SingleSelect
               id="sale-client"
+              options={clientOptions}
               value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              required
-            >
-              <option value="">Select client…</option>
-              {clients.map(c => (
-                <option key={c.id} value={c.id}>{c.name} — {displayPhone(c.phone)}</option>
-              ))}
-            </NativeSelect>
+              onChange={setClientId}
+              placeholder="Select client…"
+              searchPlaceholder="Search by name or phone…"
+            />
           </div>
 
           {/* Stylist */}
@@ -166,16 +170,14 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
                 Stylist
                 <span className="ml-1.5 text-xs font-normal text-muted-foreground">(optional)</span>
               </Label>
-              <NativeSelect
+              <SingleSelect
                 id="sale-staff"
+                options={staffOptions}
                 value={staffId}
-                onChange={(e) => setStaffId(e.target.value)}
-              >
-                <option value="">None</option>
-                {staff.map(s => (
-                  <option key={s.id} value={s.id}>{s.fullname}</option>
-                ))}
-              </NativeSelect>
+                onChange={setStaffId}
+                placeholder="None"
+                searchPlaceholder="Search stylist…"
+              />
             </div>
           )}
 
@@ -193,30 +195,14 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
                   <div key={it.localId} className="grid grid-cols-[1fr_68px_80px_auto] gap-2 items-start">
                     {/* Catalog item */}
                     <div className="space-y-1">
-                      {idx === 0 && (
-                        <p className="text-[11px] text-muted-foreground font-medium">Item</p>
-                      )}
-                      <NativeSelect
+                      {idx === 0 && <p className="text-[11px] text-muted-foreground font-medium">Item</p>}
+                      <SingleSelect
+                        options={catalogOptions}
                         value={it.entry?.id ?? ''}
-                        onChange={(e) => handleCatalogChange(it.localId, e.target.value)}
-                        required
-                      >
-                        <option value="">Select…</option>
-                        {services.length > 0 && (
-                          <optgroup label="Services">
-                            {services.map(s => (
-                              <option key={s.id} value={s.id}>{s.name} ({formatGHS(s.price)})</option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {products.length > 0 && (
-                          <optgroup label="Products">
-                            {products.map(p => (
-                              <option key={p.id} value={p.id}>{p.name} ({formatGHS(p.price)})</option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </NativeSelect>
+                        onChange={(id) => handleCatalogChange(it.localId, id)}
+                        placeholder="Select…"
+                        searchPlaceholder="Search services & products…"
+                      />
                     </div>
 
                     {/* Quantity */}
