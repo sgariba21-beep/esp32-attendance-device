@@ -22,6 +22,7 @@ import {
   LogOut,
   Package,
   ShoppingCart,
+  Gift,
   Building2 as BuildingList,
 } from 'lucide-react'
 
@@ -63,6 +64,7 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
       { href: '/clients', label: 'Clients',  icon: Users,         group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
       { href: '/sales',   label: 'Sales',    icon: ShoppingCart,  group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
       { href: '/catalog', label: 'Catalog',  icon: Package,       group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/rewards', label: 'Loyalty',  icon: Gift,          group: 'retail', roles: ['super_admin', 'admin', 'platform_admin'] },
     )
   }
 

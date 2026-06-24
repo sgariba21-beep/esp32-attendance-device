@@ -23,6 +23,7 @@ import {
   X,
   Package,
   ShoppingCart,
+  Gift,
   Building2 as BuildingList,
 } from 'lucide-react'
 
@@ -61,6 +62,7 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
       { href: '/clients', label: 'Clients', icon: Users,        roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
       { href: '/sales',   label: 'Sales',   icon: ShoppingCart, roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
       { href: '/catalog', label: 'Catalog', icon: Package,      roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
+      { href: '/rewards', label: 'Loyalty', icon: Gift,         roles: ['super_admin', 'admin', 'platform_admin'] },
     )
   }
 
