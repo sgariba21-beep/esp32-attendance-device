@@ -7,7 +7,9 @@ import { EmptyState } from '@/components/ui/empty-state'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { CalendarDays, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight } from 'lucide-react'
+import { CalendarDays, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight, TrendingUp, Scissors, Package, ShoppingBag } from 'lucide-react'
+import { formatGHS } from '@/lib/utils'
+import { LOW_STOCK_THRESHOLD } from './reports/page'
 
 export const dynamic = 'force-dynamic'
 
@@ -76,6 +78,86 @@ export default async function OverviewPage() {
         <RecentActivity rows={recent} showInstitution />
 
         <ManageLink href="/institutions" label="Manage institutions" />
+      </div>
+    )
+  }
+
+  // ─────────────────────────────────────────── Shop overview ──
+  if (institution.type === 'shop') {
+    const tz = institution.timezone ?? 'Africa/Accra'
+    const today = todayIn(tz)
+    const nextDay = new Date(new Date(`${today}T00:00:00Z`).getTime() + 86400000)
+      .toISOString().slice(0, 10)
+
+    const [todayTxRes, recentSalesRes, visitsTodayRes, lowStockRes] = await Promise.all([
+      supabase
+        .from('transactions')
+        .select('total, transaction_items(item_name, service_id, quantity)')
+        .eq('institution_id', institutionId)
+        .gte('created_at', `${today}T00:00:00.000Z`)
+        .lt('created_at', `${nextDay}T00:00:00.000Z`),
+      supabase
+        .from('transactions')
+        .select('id, total, created_at, clients(name), members(fullname)')
+        .eq('institution_id', institutionId)
+        .order('created_at', { ascending: false })
+        .limit(8),
+      supabase
+        .from('client_attendance')
+        .select('id', { count: 'exact', head: true })
+        .eq('institution_id', institutionId)
+        .eq('date', today),
+      supabase
+        .from('products')
+        .select('id', { count: 'exact', head: true })
+        .eq('institution_id', institutionId)
+        .eq('active', true)
+        .lte('stock', LOW_STOCK_THRESHOLD),
+    ])
+
+    type TodayTx = { total: number; transaction_items: { item_name: string; service_id: string | null; quantity: number }[] }
+    type RecentSale = { id: string; total: number; created_at: string; clients: { name: string } | null; members: { fullname: string } | null }
+
+    const todayTxRows = (todayTxRes.data ?? []) as unknown as TodayTx[]
+    const recentSaleRows = (recentSalesRes.data ?? []) as unknown as RecentSale[]
+
+    const takingsToday = todayTxRows.reduce((sum, tx) => sum + Number(tx.total), 0)
+    const visitsToday = visitsTodayRes.count ?? 0
+    const lowStockCount = lowStockRes.count ?? 0
+
+    // Top service today: most-sold service line item by quantity
+    const svcQty = new Map<string, number>()
+    for (const tx of todayTxRows) {
+      for (const item of tx.transaction_items) {
+        if (item.service_id) {
+          svcQty.set(item.item_name, (svcQty.get(item.item_name) ?? 0) + item.quantity)
+        }
+      }
+    }
+    const topService = [...svcQty.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+
+    return (
+      <div className="space-y-8">
+        <div>
+          <p className="text-sm text-muted-foreground">{institution.name}</p>
+          <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Overview</h1>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatCard label="Takings today" value={formatGHS(takingsToday)} icon={TrendingUp} tone="success" />
+          <StatCard label="Visits today" value={visitsToday} icon={Users} tone="primary" />
+          <StatCard label="Top service today" value={topService} icon={Scissors} />
+          <StatCard
+            label="Low-stock products"
+            value={lowStockCount}
+            icon={Package}
+            tone={lowStockCount > 0 ? 'destructive' : 'default'}
+          />
+        </div>
+
+        <ShopRecentSales rows={recentSaleRows} timezone={tz} />
+
+        <ManageLink href="/reports" label="View reports" />
       </div>
     )
   }
@@ -211,6 +293,55 @@ function RecentActivity({
                   </TableCell>
                 </TableRow>
               ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+type ShopSaleRow = {
+  id: string
+  total: number
+  created_at: string
+  clients: { name: string } | null
+  members: { fullname: string } | null
+}
+
+function ShopRecentSales({ rows, timezone }: { rows: ShopSaleRow[]; timezone: string }) {
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold tracking-tight">Recent sales</h2>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState icon={ShoppingBag} message="No sales recorded yet." />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-border shadow-xs">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Client</TableHead>
+                <TableHead>Time</TableHead>
+                <TableHead>Stylist</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => {
+                const dt = new Date(r.created_at)
+                const time = dt.toLocaleTimeString('en-GH', { timeZone: timezone, hour: '2-digit', minute: '2-digit' })
+                const date = dt.toLocaleDateString('en-GH', { timeZone: timezone, month: 'short', day: 'numeric' })
+                return (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.clients?.name ?? '—'}</TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground">{date}, {time}</TableCell>
+                    <TableCell className="text-muted-foreground">{r.members?.fullname ?? '—'}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.total)}</TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
