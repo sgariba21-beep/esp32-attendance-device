@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState } from 'react'
 import { Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -114,6 +115,7 @@ const GROUP_ORDER: NavGroup[] = ['records', 'retail', 'manage', 'platform']
 
 export function Sidebar({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
   const pathname = usePathname()
+  const [logoError, setLogoError] = useState(false)
   const navItems = buildNavItems(institution, role)
   const visible = navItems.filter((item) => (item.roles as UserRole[]).includes(role))
 
@@ -128,9 +130,9 @@ export function Sidebar({ role, institution }: { role: UserRole; institution: In
       {/* Brand */}
       <div className="flex items-center gap-2.5 px-4 h-16 shrink-0">
         <div className="h-9 w-9 shrink-0 rounded-lg overflow-hidden bg-muted ring-1 ring-sidebar-border flex items-center justify-center">
-          {institution.logo_url ? (
+          {institution.logo_url && !logoError ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={institution.logo_url} alt={institution.name} className="h-full w-full object-cover" />
+            <img src={institution.logo_url} alt={institution.name} className="h-full w-full object-cover" onError={() => setLogoError(true)} />
           ) : (
             <Building2 className="h-[18px] w-[18px] text-muted-foreground" />
           )}

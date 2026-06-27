@@ -3,6 +3,7 @@ import { verifySession, getInstitution } from '@/lib/supabase/dal'
 import { Sidebar } from '@/components/sidebar'
 import { MobileHeader } from '@/components/mobile-header'
 import { MobileBottomNav } from '@/components/mobile-bottom-nav'
+import { NavigationLoader } from '@/components/navigation-loader'
 import { SessionManager } from '@/components/session-manager'
 import { brandStyle } from '@/lib/theme'
 
@@ -33,6 +34,7 @@ export default async function DashboardLayout({
       style={brandStyle(institution.theme_primary)}
       className="flex h-screen overflow-hidden"
     >
+      <NavigationLoader />
       <Sidebar role={role} institution={institution} />
       <div className="flex flex-1 flex-col overflow-hidden bg-background">
         <SessionManager />

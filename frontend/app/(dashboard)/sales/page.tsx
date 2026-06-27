@@ -5,9 +5,14 @@ import { SalesView } from './_components/sales-view'
 import type { Sale } from './_components/sales-view'
 import type { SaleClient, SaleCatalogEntry, SaleStaff } from './_components/sale-dialog'
 
-export default async function SalesPage() {
+export default async function SalesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ client?: string }>
+}) {
   const session = await requireRole('super_admin', 'admin', 'cashier')
   const { institutionId, role } = session
+  const { client: initialClientId } = await searchParams
   const institution = await getInstitution(institutionId)
 
   if (institution.type !== 'shop' && role !== 'platform_admin') {
@@ -75,6 +80,7 @@ export default async function SalesPage() {
       timezone={institution.timezone}
       role={role}
       currency={institution.currency}
+      initialClientId={initialClientId}
     />
   )
 }

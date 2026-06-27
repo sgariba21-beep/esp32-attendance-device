@@ -217,3 +217,9 @@
     background-color: color-mix(in oklab, var(--foreground) 28%, transparent);
   }
 }
+
+@keyframes nav-loader {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(40%); }
+  100% { transform: translateX(200%); }
+}

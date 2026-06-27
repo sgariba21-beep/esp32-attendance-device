@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Users, Loader2, Gift } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +53,7 @@ function formatDateShort(d: string): string {
 }
 
 export function ClientsView({ clients, role, loyaltyEnabled }: Props) {
+  const router = useRouter()
   const canWrite = role !== 'cashier'
 
   // List filters
@@ -117,7 +119,12 @@ export function ClientsView({ clients, role, loyaltyEnabled }: Props) {
     const result = await logVisit(clientId)
     setLoggingId(null)
     if (result.error) { showNote(clientId, result.error); return }
-    showNote(clientId, result.alreadyLogged ? 'Already logged today' : 'Visit logged!')
+    if (result.alreadyLogged) {
+      showNote(clientId, 'Already logged today')
+      return
+    }
+    // Visit logged — proceed straight to creating a sale for this client.
+    router.push(`/sales?client=${clientId}`)
   }
 
   async function handleArchiveConfirm() {

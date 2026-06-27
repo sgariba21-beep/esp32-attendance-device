@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
+import { Pagination } from '@/components/ui/pagination'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -107,9 +108,12 @@ export function describeReward(r: Reward, productNames: Record<string, string>, 
   }
 }
 
+const LOG_PAGE_SIZE = 50
+
 export function RewardsView({ rewards, products, services, clients, log, productNames, serviceNames, timezone, role, currency }: Props) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<StatusFilter>('active')
+  const [logPage, setLogPage] = useState(1)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Reward | null>(null)
@@ -264,49 +268,60 @@ export function RewardsView({ rewards, products, services, clients, log, product
 
         {/* ── History ────────────────────────────────────────────────── */}
         <TabsContent value="history">
-          <div className="pt-4">
+          <div className="pt-4 space-y-3">
             {log.length === 0 ? (
               <EmptyState icon={Gift} message="No rewards have been issued yet." />
             ) : (
-              <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date & time</TableHead>
-                      <TableHead>Client</TableHead>
-                      <TableHead>Reward</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead className="hidden md:table-cell">Issued by</TableHead>
-                      <TableHead className="hidden lg:table-cell">Note</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {log.map((e) => (
-                      <TableRow key={e.id}>
-                        <TableCell className="text-sm text-muted-foreground">{fmtDateTime(e.issued_at)}</TableCell>
-                        <TableCell>
-                          <p className="font-medium">{e.clients?.name ?? '—'}</p>
-                          {e.clients?.phone && (
-                            <p className="text-xs text-muted-foreground">{displayPhone(e.clients.phone)}</p>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm">{e.rewards?.name ?? '—'}</TableCell>
-                        <TableCell>
-                          <Badge variant={e.trigger_source === 'auto' ? 'secondary' : 'outline'}>
-                            {e.trigger_source === 'auto' ? 'Auto' : 'Manual'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                          {e.issued_by_email ?? <span className="text-muted-foreground/50">System</span>}
-                        </TableCell>
-                        <TableCell className="hidden lg:table-cell text-sm text-muted-foreground max-w-xs truncate">
-                          {e.note ?? <span className="text-muted-foreground/50">—</span>}
-                        </TableCell>
+              <>
+                <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date & time</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead>Reward</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead className="hidden md:table-cell">Issued by</TableHead>
+                        <TableHead className="hidden lg:table-cell">Note</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {log.slice((logPage - 1) * LOG_PAGE_SIZE, logPage * LOG_PAGE_SIZE).map((e) => (
+                        <TableRow key={e.id}>
+                          <TableCell className="text-sm text-muted-foreground">{fmtDateTime(e.issued_at)}</TableCell>
+                          <TableCell>
+                            <p className="font-medium">{e.clients?.name ?? '—'}</p>
+                            {e.clients?.phone && (
+                              <p className="text-xs text-muted-foreground">{displayPhone(e.clients.phone)}</p>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm">{e.rewards?.name ?? '—'}</TableCell>
+                          <TableCell>
+                            <Badge variant={e.trigger_source === 'auto' ? 'secondary' : 'outline'}>
+                              {e.trigger_source === 'auto' ? 'Auto' : 'Manual'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                            {e.issued_by_email ?? <span className="text-muted-foreground/50">System</span>}
+                          </TableCell>
+                          <TableCell className="hidden lg:table-cell text-sm text-muted-foreground max-w-xs truncate">
+                            {e.note ?? <span className="text-muted-foreground/50">—</span>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {Math.ceil(log.length / LOG_PAGE_SIZE) > 1 && (
+                  <Pagination
+                    page={logPage}
+                    totalPages={Math.ceil(log.length / LOG_PAGE_SIZE)}
+                    totalCount={log.length}
+                    pageSize={LOG_PAGE_SIZE}
+                    onPageChange={setLogPage}
+                  />
+                )}
+              </>
             )}
           </div>
         </TabsContent>

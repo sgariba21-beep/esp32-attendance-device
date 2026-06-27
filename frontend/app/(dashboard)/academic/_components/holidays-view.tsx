@@ -14,7 +14,7 @@ import { HolidayDialog } from './holiday-dialog'
 import { deleteHoliday } from '../_actions'
 import type { Holiday } from '@/lib/types'
 
-type Props = { holidays: Holiday[] }
+type Props = { holidays: Holiday[]; labelOverride?: string }
 
 function formatDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
@@ -42,7 +42,9 @@ function formatRange(h: Holiday) {
   return `${formatDate(h.start_date)} – ${formatDate(h.end_date)}`
 }
 
-export function HolidaysView({ holidays }: Props) {
+export function HolidaysView({ holidays, labelOverride }: Props) {
+  const label = labelOverride ?? 'Holiday'
+  const labelPlural = labelOverride ? labelOverride : 'Holidays'
   const [dialogOpen, setDialogOpen] = useState(false)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null)
@@ -63,16 +65,18 @@ export function HolidaysView({ holidays }: Props) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Days marked as holidays are skipped when recording absences.
+          {labelOverride
+            ? `${labelPlural} are skipped when recording absences.`
+            : 'Days marked as holidays are skipped when recording absences.'}
         </p>
-        <Button onClick={() => setDialogOpen(true)}>Add holiday</Button>
+        <Button onClick={() => setDialogOpen(true)}>Add {label.toLowerCase()}</Button>
       </div>
 
       {sorted.length === 0 ? (
         <EmptyState
           icon={CalendarOff}
-          message="No holidays added yet."
-          action={<Button onClick={() => setDialogOpen(true)}>Add holiday</Button>}
+          message={`No ${labelPlural.toLowerCase()} added yet.`}
+          action={<Button onClick={() => setDialogOpen(true)}>Add {label.toLowerCase()}</Button>}
         />
       ) : (
         <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
@@ -137,8 +141,8 @@ export function HolidaysView({ holidays }: Props) {
       <ConfirmDialog
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
-        title="Delete holiday?"
-        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatRange(confirmTarget)}) from the holiday list.` : ''}
+        title={`Delete ${label.toLowerCase()}?`}
+        description={confirmTarget ? `This will permanently remove "${confirmTarget.label}" (${formatRange(confirmTarget)}) from the list.` : ''}
         confirmLabel="Delete holiday"
         loading={loadingId === confirmTarget?.id}
         onConfirm={async () => {

@@ -30,23 +30,35 @@ export default async function AcademicPage() {
 
   const [termsRes, holidaysRes] = await Promise.all([termsQ, holidaysQ])
 
+  const pageTitle =
+    institution.type === 'shop' ? 'Closed Days'
+    : institution.type === 'office' ? 'Periods & Holidays'
+    : 'Academic'
+
+  // Shops only track closed days (holidays); they have no academic periods.
+  const isShop = institution.type === 'shop'
+
   return (
     <>
       <RealtimeRefresh />
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold">{institution.type === 'office' ? 'Periods & Holidays' : 'Academic'}</h1>
-        <Tabs defaultValue="terms">
-          <TabsList>
-            <TabsTrigger value="terms">{pluralize(institution.label_period)}</TabsTrigger>
-            <TabsTrigger value="holidays">Holidays</TabsTrigger>
-          </TabsList>
-          <TabsContent value="terms" className="mt-4">
-            <AcademicView terms={(termsRes.data ?? []) as AcademicTerm[]} labelPeriod={institution.label_period} />
-          </TabsContent>
-          <TabsContent value="holidays" className="mt-4">
-            <HolidaysView holidays={(holidaysRes.data ?? []) as Holiday[]} />
-          </TabsContent>
-        </Tabs>
+        <h1 className="text-2xl font-semibold">{pageTitle}</h1>
+        {isShop ? (
+          <HolidaysView holidays={(holidaysRes.data ?? []) as Holiday[]} labelOverride="Closed Days" />
+        ) : (
+          <Tabs defaultValue="terms">
+            <TabsList>
+              <TabsTrigger value="terms">{pluralize(institution.label_period)}</TabsTrigger>
+              <TabsTrigger value="holidays">Holidays</TabsTrigger>
+            </TabsList>
+            <TabsContent value="terms" className="mt-4">
+              <AcademicView terms={(termsRes.data ?? []) as AcademicTerm[]} labelPeriod={institution.label_period} />
+            </TabsContent>
+            <TabsContent value="holidays" className="mt-4">
+              <HolidaysView holidays={(holidaysRes.data ?? []) as Holiday[]} />
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
     </>
   )

@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
+import { useState } from 'react'
 import { Building2 } from 'lucide-react'
 import { ThemeToggle } from '@/components/theme-toggle'
 import type { InstitutionConfig } from '@/lib/types'
@@ -26,13 +27,14 @@ type Props = { institution: InstitutionConfig }
 export function MobileHeader({ institution }: Props) {
   const pathname = usePathname()
   const title = getPageTitle(pathname, institution)
+  const [logoError, setLogoError] = useState(false)
 
   return (
     <header className="md:hidden flex items-center gap-3 px-4 h-14 bg-background border-b border-border shrink-0">
       <div className="h-8 w-8 shrink-0 rounded-lg overflow-hidden ring-1 ring-border bg-muted flex items-center justify-center">
-        {institution.logo_url ? (
+        {institution.logo_url && !logoError ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={institution.logo_url} alt={institution.name} className="h-full w-full object-cover" />
+          <img src={institution.logo_url} alt={institution.name} className="h-full w-full object-cover" onError={() => setLogoError(true)} />
         ) : (
           <Building2 className="h-4 w-4 text-muted-foreground" />
         )}
