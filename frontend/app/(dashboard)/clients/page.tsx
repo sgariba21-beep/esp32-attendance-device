@@ -67,7 +67,9 @@ export default async function ClientsPage() {
     }
   })
 
+  const loyaltyEnabled = institution.type === 'shop' && institution.loyalty_enabled
+
   return (
-    <ClientsView clients={clients} role={role} />
+    <ClientsView clients={clients} role={role} loyaltyEnabled={loyaltyEnabled} />
   )
 }

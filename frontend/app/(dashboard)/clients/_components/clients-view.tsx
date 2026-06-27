@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef } from 'react'
-import { Users, Loader2 } from 'lucide-react'
+import { Users, Loader2, Gift } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -18,6 +18,7 @@ import type { UserRole } from '@/lib/supabase/dal'
 import { ClientDialog } from './client-dialog'
 import type { ClientItem } from './client-dialog'
 import { VisitHistoryDialog } from './visit-history-dialog'
+import { ClientLoyaltyDialog } from './client-loyalty-dialog'
 import { setClientActive, logVisit } from '../_actions'
 
 export type ClientWithStats = {
@@ -38,6 +39,7 @@ type StatusFilter = 'active' | 'archived' | 'all'
 type Props = {
   clients: ClientWithStats[]
   role: UserRole
+  loyaltyEnabled: boolean
 }
 
 const PAGE_SIZE = 50
@@ -49,7 +51,7 @@ function formatDateShort(d: string): string {
   })
 }
 
-export function ClientsView({ clients, role }: Props) {
+export function ClientsView({ clients, role, loyaltyEnabled }: Props) {
   const canWrite = role !== 'cashier'
 
   // List filters
@@ -63,6 +65,9 @@ export function ClientsView({ clients, role }: Props) {
 
   // Visit history dialog
   const [historyClient, setHistoryClient] = useState<{ name: string; dates: string[] } | null>(null)
+
+  // Loyalty progress dialog
+  const [loyaltyClient, setLoyaltyClient] = useState<{ id: string; name: string } | null>(null)
 
   // Archive confirm
   const [archiveTarget, setArchiveTarget] = useState<{ id: string; name: string } | null>(null)
@@ -233,6 +238,18 @@ export function ClientsView({ clients, role }: Props) {
                                     : 'Log visit'}
                                 </Button>
                               )}
+                              {c.active && loyaltyEnabled && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  onClick={() => setLoyaltyClient({ id: c.id, name: c.name })}
+                                  title="View loyalty progress"
+                                >
+                                  <Gift className="h-3.5 w-3.5" />
+                                  <span className="hidden sm:inline">Loyalty</span>
+                                </Button>
+                              )}
                               <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
                                 Edit
                               </Button>
@@ -299,6 +316,13 @@ export function ClientsView({ clients, role }: Props) {
         onOpenChange={(v) => { if (!v) setHistoryClient(null) }}
         clientName={historyClient?.name ?? ''}
         dates={historyClient?.dates ?? []}
+      />
+
+      <ClientLoyaltyDialog
+        open={loyaltyClient !== null}
+        onOpenChange={(v) => { if (!v) setLoyaltyClient(null) }}
+        client={loyaltyClient}
+        canIssue={canWrite}
       />
 
       <ConfirmDialog

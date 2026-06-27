@@ -17,12 +17,26 @@ const ROLE_RANK: Record<string, number> = {
 
 const MIN_PASSWORD_LENGTH = 8
 
+// #7: the cashier ↔ member link must stay intra-tenant — a single-column FK
+// can't express the cross-column check, so the server action enforces it
+// (mirrors rewards' catalogRefsValid).
+async function memberInInstitution(
+  admin: ReturnType<typeof createAdminClient>,
+  memberId: string,
+  institutionId: string | null,
+): Promise<boolean> {
+  if (!institutionId) return false
+  const { data } = await admin.from('members').select('institution_id').eq('id', memberId).single()
+  return !!data && data.institution_id === institutionId
+}
+
 export async function createUser(data: {
   email: string
   password: string
   role: UserRole
   assigned_unit: string | null
   institution_id?: string | null
+  member_id?: string | null
 }) {
   const session = await requireRole('super_admin')
 
@@ -52,6 +66,15 @@ export async function createUser(data: {
 
   const admin = createAdminClient()
 
+  // The employee link only applies to cashier accounts; ignore it otherwise.
+  let memberLink: string | null = null
+  if (data.role === 'cashier' && data.member_id) {
+    if (!(await memberInInstitution(admin, data.member_id, targetInstitutionId))) {
+      return { error: 'The selected employee is not in this institution.' }
+    }
+    memberLink = data.member_id
+  }
+
   const { data: authData, error } = await admin.auth.admin.createUser({
     email: data.email.trim(),
     password: data.password,
@@ -65,10 +88,14 @@ export async function createUser(data: {
     role: data.role,
     assigned_unit: data.assigned_unit || null,
     institution_id: targetInstitutionId,
+    member_id: memberLink,
   })
 
   if (profileError) {
     await admin.auth.admin.deleteUser(authData.user.id)
+    if (profileError.code === '23505') {
+      return { error: 'That employee is already linked to another account.' }
+    }
     return { error: profileError.message }
   }
 
@@ -90,7 +117,12 @@ async function superAdminCount(institutionId: string | null) {
   return count ?? 0
 }
 
-export async function updateUserRole(id: string, role: UserRole, assigned_unit: string | null) {
+export async function updateUserRole(
+  id: string,
+  role: UserRole,
+  assigned_unit: string | null,
+  member_id: string | null = null,
+) {
   const session = await requireRole('super_admin')
 
   // Only a platform admin may grant the platform-admin role.
@@ -117,12 +149,26 @@ export async function updateUserRole(id: string, role: UserRole, assigned_unit: 
     }
   }
 
+  // #7: keep the employee link only for cashiers, and only intra-tenant.
+  let memberLink: string | null = null
+  if (role === 'cashier' && member_id) {
+    if (!(await memberInInstitution(admin, member_id, current.institution_id as string | null))) {
+      return { error: 'The selected employee is not in this institution.' }
+    }
+    memberLink = member_id
+  }
+
   const { error } = await admin
     .from('profiles')
-    .update({ role, assigned_unit: assigned_unit || null })
+    .update({ role, assigned_unit: assigned_unit || null, member_id: memberLink })
     .eq('id', id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    if (error.code === '23505') {
+      return { error: 'That employee is already linked to another account.' }
+    }
+    return { error: error.message }
+  }
 
   revalidatePath('/users')
   return { error: null }

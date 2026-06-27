@@ -26,6 +26,7 @@ type Props = {
   institutionType: 'school' | 'office' | 'shop'
   currentUserRole: UserRole
   institutions: { id: string; name: string }[]
+  members: { id: string; fullname: string }[]
 }
 
 const ROLE_DISPLAY: Record<UserRole, string> = {
@@ -37,7 +38,7 @@ const ROLE_DISPLAY: Record<UserRole, string> = {
   cashier:        'Cashier',
 }
 
-export function UserDialog({ open, onOpenChange, user, devices, labelUnit, labelStaff, institutionType, currentUserRole, institutions }: Props) {
+export function UserDialog({ open, onOpenChange, user, devices, labelUnit, labelStaff, institutionType, currentUserRole, institutions, members }: Props) {
   const isPlatformAdmin = currentUserRole === 'platform_admin'
   // The unit-scoped viewer role is called "Teacher" in schools and "Staff" in
   // offices/shops — same access, institution-appropriate wording.
@@ -62,6 +63,7 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
   const [role, setRole]               = useState<UserRole>(unitScopedRole)
   const [assignedUnit, setAssignedUnit] = useState('')
   const [institutionId, setInstitutionId] = useState('')
+  const [memberId, setMemberId]       = useState('')
   const [error, setError]             = useState<string | null>(null)
   const [loading, setLoading]         = useState(false)
 
@@ -76,6 +78,9 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
   }
 
   const isUnitScoped = role === 'teacher' || role === 'staff'
+  // #7: a cashier account may optionally be linked to a staff member (the same
+  // person who clocks in). Only meaningful in a shop with staff on record.
+  const showMemberLink = institutionType === 'shop' && role === 'cashier' && members.length > 0
 
   useEffect(() => {
     if (open) {
@@ -85,6 +90,7 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
       setRole(user?.role ?? unitScopedRole)
       setAssignedUnit(user?.assigned_unit ?? '')
       setInstitutionId('')
+      setMemberId(user?.member_id ?? '')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user])
@@ -95,9 +101,10 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
     setLoading(true)
     setError(null)
 
+    const linkedMember = role === 'cashier' ? (memberId || null) : null
     const result = user
-      ? await updateUserRole(user.id, role, assignedUnit || null)
-      : await createUser({ email, password, role, assigned_unit: assignedUnit || null, institution_id: institutionId || null })
+      ? await updateUserRole(user.id, role, assignedUnit || null, linkedMember)
+      : await createUser({ email, password, role, assigned_unit: assignedUnit || null, institution_id: institutionId || null, member_id: linkedMember })
 
     setLoading(false)
     if (result.error) { setError(result.error); return }
@@ -188,6 +195,26 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
               />
               <p className="text-xs text-muted-foreground">
                 This account only sees attendance records for the assigned {labelUnit.toLowerCase()}.
+              </p>
+            </div>
+          )}
+
+          {showMemberLink && (
+            <div className="space-y-2">
+              <Label htmlFor="member_id">
+                Linked {labelStaff.toLowerCase()}
+                <span className="ml-1.5 text-xs font-normal text-muted-foreground">(optional)</span>
+              </Label>
+              <SingleSelect
+                id="member_id"
+                options={members.map((m) => ({ value: m.id, label: m.fullname }))}
+                value={memberId}
+                onChange={setMemberId}
+                placeholder={`Select ${labelStaff.toLowerCase()}…`}
+                searchPlaceholder="Search by name…"
+              />
+              <p className="text-xs text-muted-foreground">
+                Links this login to a {labelStaff.toLowerCase()} record — the same person who clocks in.
               </p>
             </div>
           )}

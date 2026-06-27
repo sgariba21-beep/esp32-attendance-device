@@ -48,6 +48,8 @@ export type UserRow = {
   assigned_unit: string | null
   institution_id: string | null
   institution_name: string | null
+  member_id: string | null
+  member_name: string | null
 }
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -79,9 +81,10 @@ type Props = {
   institutionType: 'school' | 'office' | 'shop'
   currentUserRole: UserRole
   institutions: { id: string; name: string }[]
+  members: { id: string; fullname: string }[]
 }
 
-export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff, institutionType, currentUserRole, institutions }: Props) {
+export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff, institutionType, currentUserRole, institutions, members }: Props) {
   const isPlatformAdmin = currentUserRole === 'platform_admin'
   const [dialogOpen, setDialogOpen]       = useState(false)
   const [editing, setEditing]             = useState<UserRow | null>(null)
@@ -190,6 +193,11 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
                       {u.id === currentUserId && (
                         <span className="ml-2 text-xs text-muted-foreground">(you)</span>
                       )}
+                      {u.member_name && (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          ↔ {u.member_name}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={ROLE_BADGE[u.role]}>
@@ -259,6 +267,7 @@ export function UsersView({ users, currentUserId, devices, labelUnit, labelStaff
         institutionType={institutionType}
         currentUserRole={currentUserRole}
         institutions={institutions}
+        members={members}
       />
 
       <PasswordDialog
