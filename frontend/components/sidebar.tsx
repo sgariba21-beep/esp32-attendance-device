@@ -48,7 +48,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 
 function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[] {
   const items: NavItem[] = [
-    { href: '/attendance', label: 'Attendance', icon: CalendarDays, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier'] },
+    { href: '/attendance', label: 'Attendance', icon: CalendarDays, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
   ]
 
   if (institution.track_students) {
@@ -56,7 +56,7 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
   }
 
   if (institution.track_staff || role === 'platform_admin') {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier'] })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
   }
 
   // Retail nav — shop-type tenants only. Catalog and Loyalty are further gated

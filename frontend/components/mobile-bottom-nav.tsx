@@ -31,6 +31,7 @@ import {
 type NavItem = { href: string; label: string; icon: React.ElementType; roles: UserRole[] }
 
 const ALL_ROLES: UserRole[] = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier']
+const NON_CASHIER_ROLES: UserRole[] = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin']
 
 function isActive(pathname: string, href: string): boolean {
   return href === '/' ? pathname === '/' : pathname.startsWith(href)
@@ -41,12 +42,12 @@ function isActive(pathname: string, href: string): boolean {
 function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavItem[] {
   const items: NavItem[] = [
     { href: '/', label: 'Overview', icon: LayoutDashboard, roles: ALL_ROLES },
-    { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: ALL_ROLES },
+    { href: '/attendance', label: 'Attendance', icon: CalendarDays, roles: NON_CASHIER_ROLES },
   ]
   if (institution.track_students) {
-    items.push({ href: '/members', label: institution.label_members, icon: Users, roles: ALL_ROLES })
+    items.push({ href: '/members', label: institution.label_members, icon: Users, roles: NON_CASHIER_ROLES })
   } else if (institution.track_staff || role === 'platform_admin') {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ALL_ROLES })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: NON_CASHIER_ROLES })
   }
   return items
 }
@@ -55,7 +56,7 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
   const items: NavItem[] = []
   // The roster not already shown in the primary bar.
   if (institution.track_students && (institution.track_staff || role === 'platform_admin')) {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ALL_ROLES })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: NON_CASHIER_ROLES })
   }
   // Retail nav — top of More sheet so cashiers find Clients and Catalog immediately.
   // Catalog/Loyalty gated by the offerings / loyalty toggles (platform_admin sees all).
