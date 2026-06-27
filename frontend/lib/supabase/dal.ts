@@ -33,6 +33,18 @@ export const verifySession = cache(async () => {
   const assignedUnit = (profile.assigned_unit as string | null) ?? null
   const institutionId = (profile.institution_id as string | null) ?? null
 
+  // Deactivation gate (the chokepoint): a non-platform user whose institution is
+  // not 'active' is bounced to /suspended. getInstitution is cache()-wrapped, so
+  // this shares the one institution lookup the layout/pages already do — no extra
+  // round-trip. platform_admin is exempt (must reach the dashboard to reactivate).
+  // /suspended lives OUTSIDE the (dashboard) group so it never re-enters here.
+  if (role !== 'platform_admin' && institutionId) {
+    const institution = await getInstitution(institutionId)
+    if (institution.status !== 'active') {
+      redirect('/suspended')
+    }
+  }
+
   return { user: user!, role, assignedUnit, institutionId }
 })
 
@@ -57,7 +69,7 @@ export const getInstitution = cache(async (institutionId: string | null): Promis
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('institutions')
-    .select('id, name, type, logo_url, label_member, label_members, label_group, label_unit, label_period, label_staff, label_staff_plural, skip_weekends, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode, theme_primary, theme_preset')
+    .select('id, name, type, logo_url, label_member, label_members, label_group, label_unit, label_period, label_staff, label_staff_plural, skip_weekends, timezone, currency, track_students, track_staff, student_scan_mode, staff_scan_mode, sell_products, sell_services, loyalty_enabled, status, theme_primary, theme_preset')
     .eq('id', institutionId)
     .single()
   return (data ?? DEFAULT_INSTITUTION) as InstitutionConfig

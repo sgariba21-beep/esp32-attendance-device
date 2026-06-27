@@ -19,6 +19,13 @@ export async function GET(_req: NextRequest) {
   const allowedRoles = ['super_admin', 'admin', 'platform_admin']
   if (!role || !allowedRoles.includes(role)) return new Response('Forbidden', { status: 403 })
 
+  const { data: inst } = await admin
+    .from('institutions')
+    .select('currency')
+    .eq('id', institutionId ?? '')
+    .single()
+  const currency = inst?.currency ?? 'GHS'
+
   const { data: rows } = await admin
     .from('transactions')
     .select('total, client_id, clients(name, phone)')
@@ -44,7 +51,7 @@ export async function GET(_req: NextRequest) {
   const escape = (v: string | number | null | undefined) =>
     `"${String(v ?? '').replace(/"/g, '""')}"`
 
-  const headers = ['Client', 'Phone', 'Transactions', 'Total revenue (GHS)']
+  const headers = ['Client', 'Phone', 'Transactions', `Total revenue (${currency})`]
   const csvRows = sorted.map((r) =>
     [r.name, r.phone, r.count, r.total.toFixed(2)].map(escape).join(',')
   )

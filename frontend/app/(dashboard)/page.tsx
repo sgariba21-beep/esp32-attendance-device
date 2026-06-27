@@ -8,7 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { CalendarDays, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight, TrendingUp, Scissors, Package, ShoppingBag } from 'lucide-react'
-import { formatGHS } from '@/lib/utils'
+import { formatMoney } from '@/lib/utils'
 import { LOW_STOCK_THRESHOLD } from './reports/page'
 
 export const dynamic = 'force-dynamic'
@@ -144,7 +144,7 @@ export default async function OverviewPage() {
         </div>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard label="Takings today" value={formatGHS(takingsToday)} icon={TrendingUp} tone="success" />
+          <StatCard label="Takings today" value={formatMoney(takingsToday, institution.currency)} icon={TrendingUp} tone="success" />
           <StatCard label="Visits today" value={visitsToday} icon={Users} tone="primary" />
           <StatCard label="Top service today" value={topService} icon={Scissors} />
           <StatCard
@@ -155,7 +155,7 @@ export default async function OverviewPage() {
           />
         </div>
 
-        <ShopRecentSales rows={recentSaleRows} timezone={tz} />
+        <ShopRecentSales rows={recentSaleRows} timezone={tz} currency={institution.currency} />
 
         <ManageLink href="/reports" label="View reports" />
       </div>
@@ -309,7 +309,7 @@ type ShopSaleRow = {
   members: { fullname: string } | null
 }
 
-function ShopRecentSales({ rows, timezone }: { rows: ShopSaleRow[]; timezone: string }) {
+function ShopRecentSales({ rows, timezone, currency }: { rows: ShopSaleRow[]; timezone: string; currency: string }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
@@ -338,7 +338,7 @@ function ShopRecentSales({ rows, timezone }: { rows: ShopSaleRow[]; timezone: st
                     <TableCell className="font-medium">{r.clients?.name ?? '—'}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">{date}, {time}</TableCell>
                     <TableCell className="text-muted-foreground">{r.members?.fullname ?? '—'}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.total)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">{formatMoney(r.total, currency)}</TableCell>
                   </TableRow>
                 )
               })}

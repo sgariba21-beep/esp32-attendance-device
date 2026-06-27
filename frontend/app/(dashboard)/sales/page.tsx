@@ -59,9 +59,11 @@ export default async function SalesPage() {
     salesQ, clientsQ, productsQ, servicesQ, staffQ,
   ])
 
+  // Offerings gate (#3b): only surface a category in the POS picker if the
+  // institution sells it. Disabling a category never touches historical sales.
   const allCatalog: SaleCatalogEntry[] = [
-    ...(servicesRes.data ?? []).map((s) => ({ id: s.id as string, kind: 'service' as const, name: s.name as string, price: Number(s.price) })),
-    ...(productsRes.data ?? []).map((p) => ({ id: p.id as string, kind: 'product' as const, name: p.name as string, price: Number(p.price) })),
+    ...(institution.sell_services ? (servicesRes.data ?? []) : []).map((s) => ({ id: s.id as string, kind: 'service' as const, name: s.name as string, price: Number(s.price) })),
+    ...(institution.sell_products ? (productsRes.data ?? []) : []).map((p) => ({ id: p.id as string, kind: 'product' as const, name: p.name as string, price: Number(p.price) })),
   ]
 
   return (
@@ -72,6 +74,7 @@ export default async function SalesPage() {
       staff={(staffRes.data ?? []) as unknown as SaleStaff[]}
       timezone={institution.timezone}
       role={role}
+      currency={institution.currency}
     />
   )
 }

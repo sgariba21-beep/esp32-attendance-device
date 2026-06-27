@@ -9,12 +9,21 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Building2 } from 'lucide-react'
 import { InstitutionActions } from './_components/institution-actions'
 
+type InstitutionStatus = 'active' | 'suspended' | 'deactivated'
+
 type InstitutionRow = {
   id: string
   name: string
-  type: 'school' | 'office'
+  type: 'school' | 'office' | 'shop'
+  status: InstitutionStatus
   members: [{ count: number }]
   devices: [{ count: number }]
+}
+
+const TYPE_LABELS: Record<InstitutionRow['type'], string> = {
+  school: 'School',
+  office: 'Office',
+  shop: 'Shop',
 }
 
 export default async function InstitutionsPage() {
@@ -23,7 +32,7 @@ export default async function InstitutionsPage() {
 
   const { data } = await supabase
     .from('institutions')
-    .select('id, name, type, members(count), devices(count)')
+    .select('id, name, type, status, members(count), devices(count)')
     .order('name')
 
   const institutions = (data ?? []) as unknown as InstitutionRow[]
@@ -44,6 +53,7 @@ export default async function InstitutionsPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Type</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Members</TableHead>
                 <TableHead className="text-right">Devices</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -57,13 +67,18 @@ export default async function InstitutionsPage() {
                   <TableRow key={inst.id}>
                     <TableCell className="font-medium">{inst.name}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{inst.type === 'school' ? 'School' : 'Office'}</Badge>
+                      <Badge variant="secondary">{TYPE_LABELS[inst.type]}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={inst.status === 'active' ? 'success' : 'secondary'}>
+                        {inst.status === 'active' ? 'Active' : inst.status === 'suspended' ? 'Suspended' : 'Deactivated'}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{memberCount}</TableCell>
                     <TableCell className="text-right tabular-nums">{deviceCount}</TableCell>
                     <TableCell>
                       <InstitutionActions
-                        institution={{ id: inst.id, name: inst.name, memberCount, deviceCount }}
+                        institution={{ id: inst.id, name: inst.name, status: inst.status, memberCount, deviceCount }}
                       />
                     </TableCell>
                   </TableRow>

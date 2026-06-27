@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
     const { data: institution, error: instError } = await supabase
       .from("institutions")
       .select(
-        "device_secret, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode"
+        "device_secret, status, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode"
       )
       .eq("id", institution_id)
       .single();
@@ -92,6 +92,13 @@ Deno.serve(async (req: Request) => {
 
     if (req.headers.get("x-device-secret") !== institution.device_secret) {
       return json({ error: "Unauthorized" }, 401);
+    }
+
+    // #4: a suspended/deactivated institution's hardware must stop writing
+    // attendance. Checked AFTER secret validation so status is not leaked to
+    // unauthenticated callers. 403 = authenticated device, tenant switched off.
+    if (institution.status !== "active") {
+      return json({ error: "Institution inactive" }, 403);
     }
 
     // H3: derive date/time/weekday in the institution's timezone.

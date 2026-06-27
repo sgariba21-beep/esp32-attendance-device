@@ -39,6 +39,9 @@ export default async function CatalogPage() {
       products={(productsRes.data ?? []) as unknown as Product[]}
       services={(servicesRes.data ?? []) as unknown as Service[]}
       role={role}
+      currency={institution.currency}
+      sellProducts={institution.sell_products}
+      sellServices={institution.sell_services}
     />
   )
 }

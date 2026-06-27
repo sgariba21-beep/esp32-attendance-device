@@ -59,14 +59,23 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin', 'cashier'] })
   }
 
-  // Retail nav — shop-type tenants only.
+  // Retail nav — shop-type tenants only. Catalog and Loyalty are further gated
+  // by the institution's offerings / loyalty toggles (platform_admin sees all).
   if (institution.type === 'shop') {
+    const showCatalog = institution.sell_products || institution.sell_services || role === 'platform_admin'
+    const showLoyalty = institution.loyalty_enabled || role === 'platform_admin'
     items.push(
       { href: '/clients', label: 'Clients',  icon: Users,         group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
       { href: '/sales',   label: 'Sales',    icon: ShoppingCart,  group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
-      { href: '/catalog', label: 'Catalog',  icon: Package,       group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
-      { href: '/rewards', label: 'Loyalty',  icon: Gift,          group: 'retail', roles: ['super_admin', 'admin', 'platform_admin'] },
-      { href: '/reports', label: 'Reports',  icon: BarChart3,     group: 'retail', roles: ['super_admin', 'admin', 'platform_admin'] },
+    )
+    if (showCatalog) {
+      items.push({ href: '/catalog', label: 'Catalog', icon: Package, group: 'retail', roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] })
+    }
+    if (showLoyalty) {
+      items.push({ href: '/rewards', label: 'Loyalty', icon: Gift, group: 'retail', roles: ['super_admin', 'admin', 'platform_admin'] })
+    }
+    items.push(
+      { href: '/reports', label: 'Reports', icon: BarChart3, group: 'retail', roles: ['super_admin', 'admin', 'platform_admin'] },
     )
   }
 

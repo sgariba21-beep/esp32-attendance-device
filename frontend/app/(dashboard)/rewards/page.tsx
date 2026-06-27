@@ -13,6 +13,12 @@ export default async function RewardsPage() {
     redirect('/unauthorized')
   }
 
+  // Loyalty master switch (#5): a shop with loyalty disabled has no rewards
+  // surface. platform_admin still reaches it for support/config.
+  if (institution.type === 'shop' && !institution.loyalty_enabled && role !== 'platform_admin') {
+    redirect('/unauthorized')
+  }
+
   const supabase = createAdminClient()
 
   let rewardsQ = supabase
@@ -91,6 +97,7 @@ export default async function RewardsPage() {
       serviceNames={serviceNames}
       timezone={institution.timezone}
       role={role}
+      currency={institution.currency}
     />
   )
 }

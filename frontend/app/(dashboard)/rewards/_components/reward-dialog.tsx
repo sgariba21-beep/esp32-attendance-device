@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { SingleSelect } from '@/components/ui/single-select'
-import { formatGHS } from '@/lib/utils'
+import { formatMoney } from '@/lib/utils'
 import { createReward, updateReward, type RewardInput } from '../_actions'
 import type { Reward, CatalogLite } from './rewards-view'
 
@@ -20,6 +20,7 @@ type Props = {
   reward: Reward | null
   products: CatalogLite[]   // active only
   services: CatalogLite[]   // active only
+  currency: string
 }
 
 type FormState = {
@@ -54,7 +55,7 @@ const emptyForm: FormState = {
   description: '',
 }
 
-export function RewardDialog({ open, onOpenChange, reward, products, services }: Props) {
+export function RewardDialog({ open, onOpenChange, reward, products, services, currency }: Props) {
   const [form, setForm] = useState<FormState>(emptyForm)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -93,16 +94,16 @@ export function RewardDialog({ open, onOpenChange, reward, products, services }:
   }
 
   const productOptions = useMemo(
-    () => [{ value: '', label: 'Any product' }, ...products.map(p => ({ value: p.id, label: `${p.name} — ${formatGHS(p.price)}` }))],
-    [products],
+    () => [{ value: '', label: 'Any product' }, ...products.map(p => ({ value: p.id, label: `${p.name} — ${formatMoney(p.price, currency)}` }))],
+    [products, currency],
   )
   const serviceOptions = useMemo(
-    () => [{ value: '', label: 'Any service' }, ...services.map(s => ({ value: s.id, label: `${s.name} — ${formatGHS(s.price)}` }))],
-    [services],
+    () => [{ value: '', label: 'Any service' }, ...services.map(s => ({ value: s.id, label: `${s.name} — ${formatMoney(s.price, currency)}` }))],
+    [services, currency],
   )
   // For reward payloads a specific item is required, so no "Any" entry.
-  const productPick = useMemo(() => products.map(p => ({ value: p.id, label: `${p.name} — ${formatGHS(p.price)}` })), [products])
-  const servicePick = useMemo(() => services.map(s => ({ value: s.id, label: `${s.name} — ${formatGHS(s.price)}` })), [services])
+  const productPick = useMemo(() => products.map(p => ({ value: p.id, label: `${p.name} — ${formatMoney(p.price, currency)}` })), [products, currency])
+  const servicePick = useMemo(() => services.map(s => ({ value: s.id, label: `${s.name} — ${formatMoney(s.price, currency)}` })), [services, currency])
 
   const isAmountCondition = form.condition_type === 'total_amount_spent'
 
@@ -206,7 +207,7 @@ export function RewardDialog({ open, onOpenChange, reward, products, services }:
 
             <div className="space-y-2">
               <Label htmlFor="condition-value">
-                {isAmountCondition ? 'Amount (GHS)' : 'How many?'}
+                {isAmountCondition ? `Amount (${currency})` : 'How many?'}
               </Label>
               <Input
                 id="condition-value"
@@ -273,7 +274,7 @@ export function RewardDialog({ open, onOpenChange, reward, products, services }:
               >
                 <option value="free_service">Free service</option>
                 <option value="free_product">Free product</option>
-                <option value="discount">Discount (GHS)</option>
+                <option value="discount">Discount ({currency})</option>
                 <option value="custom">Custom</option>
               </NativeSelect>
             </div>
@@ -306,7 +307,7 @@ export function RewardDialog({ open, onOpenChange, reward, products, services }:
 
             {form.reward_kind === 'discount' && (
               <div className="space-y-2">
-                <Label htmlFor="reward-value">Discount amount (GHS)</Label>
+                <Label htmlFor="reward-value">Discount amount ({currency})</Label>
                 <Input
                   id="reward-value"
                   type="number"

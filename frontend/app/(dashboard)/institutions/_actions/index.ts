@@ -64,6 +64,28 @@ export async function deleteInstitution(id: string): Promise<{ error: string | n
   return { error: null }
 }
 
+export async function setInstitutionStatus(
+  id: string,
+  status: 'active' | 'suspended' | 'deactivated',
+): Promise<{ error: string | null }> {
+  await requireRole('platform_admin')
+  const supabase = createAdminClient()
+
+  // Soft-deactivation only flips the flag — no data is touched and (unlike
+  // deletion) no device_resets are queued, so devices resume on reactivation.
+  // The verifySession() gate enforces the block on the tenant's dashboard users.
+  const { error } = await supabase
+    .from('institutions')
+    .update({ status })
+    .eq('id', id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/institutions')
+  revalidatePath('/', 'layout')
+  return { error: null }
+}
+
 export async function updateInstitutionSettingsById(
   id: string,
   data: SettingsFormData
@@ -86,10 +108,14 @@ export async function updateInstitutionSettingsById(
       label_staff_plural: data.label_staff_plural.trim() || 'Staff',
       skip_weekends: data.skip_weekends,
       timezone: data.timezone.trim() || 'UTC',
+      currency: data.currency.trim().toUpperCase() || 'GHS',
       track_students: data.track_students,
       track_staff: data.track_staff,
       student_scan_mode: data.student_scan_mode,
       staff_scan_mode: data.staff_scan_mode,
+      sell_products: data.sell_products,
+      sell_services: data.sell_services,
+      loyalty_enabled: data.loyalty_enabled,
       ...brandColumns(data),
     })
     .eq('id', id)

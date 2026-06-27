@@ -34,7 +34,7 @@ Deno.serve(async (req: Request) => {
     const { data: institutions, error: instError } = await supabase
       .from("institutions")
       .select(
-        "id, skip_weekends, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
+        "id, status, skip_weekends, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
       );
 
     if (instError || !institutions || institutions.length === 0) {
@@ -44,6 +44,13 @@ Deno.serve(async (req: Request) => {
     const results: string[] = [];
 
     for (const inst of institutions) {
+      // #4: skip suspended/deactivated tenants — no absent records generated
+      // while an institution is switched off.
+      if (inst.status !== "active") {
+        results.push(`${inst.id}: inactive — skipped`);
+        continue;
+      }
+
       const now = new Date();
 
       const todayInTz = now.toLocaleDateString("en-CA", {

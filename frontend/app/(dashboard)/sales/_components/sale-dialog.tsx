@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SingleSelect } from '@/components/ui/single-select'
 import { Trash2 } from 'lucide-react'
-import { formatGHS, displayPhone } from '@/lib/utils'
+import { formatMoney, displayPhone } from '@/lib/utils'
 import { createSale } from '../_actions'
 
 export type SaleClient = { id: string; name: string; phone: string }
@@ -30,13 +30,14 @@ type Props = {
   clients: SaleClient[]
   allCatalog: SaleCatalogEntry[]
   staff: SaleStaff[]
+  currency: string
   preselectedClientId?: string
 }
 
 const nextId = (() => { let n = 0; return () => String(++n) })()
 const emptyItem = (): LineItem => ({ localId: nextId(), entry: null, unitPrice: '', quantity: '1' })
 
-export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, preselectedClientId }: Props) {
+export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, currency, preselectedClientId }: Props) {
   const [clientId, setClientId] = useState('')
   const [staffId, setStaffId] = useState('')
   const [note, setNote] = useState('')
@@ -65,9 +66,9 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
   )
   // Services listed first — GENERAL LOCKS is primarily a service shop.
   const catalogOptions = useMemo(() => [
-    ...allCatalog.filter(c => c.kind === 'service').map(c => ({ value: c.id, label: `${c.name} — ${formatGHS(c.price)}` })),
-    ...allCatalog.filter(c => c.kind === 'product').map(c => ({ value: c.id, label: `${c.name} — ${formatGHS(c.price)}` })),
-  ], [allCatalog])
+    ...allCatalog.filter(c => c.kind === 'service').map(c => ({ value: c.id, label: `${c.name} — ${formatMoney(c.price, currency)}` })),
+    ...allCatalog.filter(c => c.kind === 'product').map(c => ({ value: c.id, label: `${c.name} — ${formatMoney(c.price, currency)}` })),
+  ], [allCatalog, currency])
 
   function handleCatalogChange(localId: string, catalogId: string) {
     const entry = allCatalog.find(c => c.id === catalogId) ?? null
@@ -104,7 +105,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
     const p = parseFloat(it.unitPrice)
     const q = parseInt(it.quantity, 10)
     if (isNaN(p) || isNaN(q) || p < 0 || q < 1) return '—'
-    return formatGHS(p * q)
+    return formatMoney(p * q, currency)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -220,7 +221,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
 
                     {/* Unit price */}
                     <div className="space-y-1">
-                      {idx === 0 && <p className="text-[11px] text-muted-foreground font-medium">Price (GHS)</p>}
+                      {idx === 0 && <p className="text-[11px] text-muted-foreground font-medium">Price ({currency})</p>}
                       <Input
                         type="number"
                         min="0"
@@ -287,7 +288,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, pre
 
           <DialogFooter className="flex items-center justify-between sm:justify-between">
             <div className="text-sm font-semibold tabular-nums">
-              Total: {formatGHS(total)}
+              Total: {formatMoney(total, currency)}
             </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

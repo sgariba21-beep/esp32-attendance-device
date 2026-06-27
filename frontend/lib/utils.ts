@@ -46,9 +46,14 @@ export function displayPhone(e164: string): string {
   return e164
 }
 
-/** Format a number as GHS currency (e.g. GH₵1,234.56). §D locale rule. */
-export function formatGHS(amount: number | string): string {
-  return new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(Number(amount))
+/**
+ * Format a number in the institution's currency (e.g. GH₵1,234.56, ₦1,234.56).
+ * `currency` is an ISO-4217 code from institutions.currency. Intl applies the
+ * correct symbol and minor-unit precision per currency (e.g. XOF → 0 decimals),
+ * so callers never hardcode "2dp". Defaults to GHS for any legacy call site.
+ */
+export function formatMoney(amount: number | string, currency: string = 'GHS'): string {
+  return new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(Number(amount))
 }
 
 export function indefiniteArticle(word: string): string {

@@ -58,13 +58,22 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ALL_ROLES })
   }
   // Retail nav — top of More sheet so cashiers find Clients and Catalog immediately.
+  // Catalog/Loyalty gated by the offerings / loyalty toggles (platform_admin sees all).
   if (institution.type === 'shop') {
+    const showCatalog = institution.sell_products || institution.sell_services || role === 'platform_admin'
+    const showLoyalty = institution.loyalty_enabled || role === 'platform_admin'
     items.push(
       { href: '/clients', label: 'Clients', icon: Users,        roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
       { href: '/sales',   label: 'Sales',   icon: ShoppingCart, roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
-      { href: '/catalog', label: 'Catalog', icon: Package,      roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] },
-      { href: '/rewards', label: 'Loyalty', icon: Gift,         roles: ['super_admin', 'admin', 'platform_admin'] },
-      { href: '/reports', label: 'Reports', icon: BarChart3,    roles: ['super_admin', 'admin', 'platform_admin'] },
+    )
+    if (showCatalog) {
+      items.push({ href: '/catalog', label: 'Catalog', icon: Package, roles: ['super_admin', 'admin', 'cashier', 'platform_admin'] })
+    }
+    if (showLoyalty) {
+      items.push({ href: '/rewards', label: 'Loyalty', icon: Gift, roles: ['super_admin', 'admin', 'platform_admin'] })
+    }
+    items.push(
+      { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['super_admin', 'admin', 'platform_admin'] },
     )
   }
 

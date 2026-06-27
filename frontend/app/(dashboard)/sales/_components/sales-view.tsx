@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { cn, formatGHS, displayPhone } from '@/lib/utils'
+import { cn, formatMoney, displayPhone } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import { SaleDialog } from './sale-dialog'
 import type { SaleClient, SaleCatalogEntry, SaleStaff } from './sale-dialog'
@@ -30,6 +30,7 @@ type Props = {
   staff: SaleStaff[]
   timezone: string
   role: UserRole
+  currency: string
 }
 
 function formatSaleDateTime(isoString: string, tz: string): string {
@@ -41,7 +42,7 @@ function formatSaleDateTime(isoString: string, tz: string): string {
   })
 }
 
-export function SalesView({ sales, clients, allCatalog, staff, timezone, role }: Props) {
+export function SalesView({ sales, clients, allCatalog, staff, timezone, role, currency }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
 
   return (
@@ -91,7 +92,7 @@ export function SalesView({ sales, clients, allCatalog, staff, timezone, role }:
                     {formatSaleDateTime(s.created_at, timezone)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-medium">
-                    {formatGHS(s.total)}
+                    {formatMoney(s.total, currency)}
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
                     {s.members?.fullname ?? <span className="text-muted-foreground/50">—</span>}
@@ -112,6 +113,7 @@ export function SalesView({ sales, clients, allCatalog, staff, timezone, role }:
         clients={clients}
         allCatalog={allCatalog}
         staff={staff}
+        currency={currency}
       />
     </div>
   )

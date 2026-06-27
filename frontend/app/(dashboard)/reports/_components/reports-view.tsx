@@ -10,7 +10,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { cn, formatGHS } from '@/lib/utils'
+import { cn, formatMoney } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 
 export type DailyTakings  = { date: string; total: number; count: number }
@@ -32,6 +32,7 @@ type Props = {
   lowStock: LowStockItem[]
   rewardsIssued: RewardIssued[]
   role: UserRole
+  currency: string
 }
 
 // Display a plain date string (YYYY-MM-DD) without UTC-shift: construct as UTC midnight.
@@ -84,6 +85,7 @@ export function ReportsView({
   visitFreq,
   lowStock,
   rewardsIssued,
+  currency,
 }: Props) {
   const [takingsView, setTakingsView] = useState<'daily' | 'weekly'>('daily')
 
@@ -147,7 +149,7 @@ export function ReportsView({
                           <TableRow key={r.date}>
                             <TableCell>{fmtDate(r.date)}</TableCell>
                             <TableCell className="text-right tabular-nums text-muted-foreground">{r.count}</TableCell>
-                            <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.total)}</TableCell>
+                            <TableCell className="text-right tabular-nums font-medium">{formatMoney(r.total, currency)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -177,7 +179,7 @@ export function ReportsView({
                           <TableRow key={r.weekStart}>
                             <TableCell>{fmtWeek(r.weekStart)}</TableCell>
                             <TableCell className="text-right tabular-nums text-muted-foreground">{r.count}</TableCell>
-                            <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.total)}</TableCell>
+                            <TableCell className="text-right tabular-nums font-medium">{formatMoney(r.total, currency)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -214,7 +216,7 @@ export function ReportsView({
                         <TableCell className="tabular-nums text-muted-foreground text-xs w-8">{i + 1}</TableCell>
                         <TableCell className="font-medium">{r.name}</TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">{r.count}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.total)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{formatMoney(r.total, currency)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -253,7 +255,7 @@ export function ReportsView({
                             : <span className="italic text-muted-foreground">{r.name}</span>}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">{r.count}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.total)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{formatMoney(r.total, currency)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -292,7 +294,7 @@ export function ReportsView({
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">{r.qty}</TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">{formatGHS(r.revenue)}</TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">{formatMoney(r.revenue, currency)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -364,7 +366,7 @@ export function ReportsView({
                           {r.stock}
                         </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">
-                          {formatGHS(r.price)}
+                          {formatMoney(r.price, currency)}
                         </TableCell>
                       </TableRow>
                     ))}

@@ -12,10 +12,19 @@ export type InstitutionConfig = {
   label_staff_plural: string
   skip_weekends: boolean
   timezone: string
+  /** ISO-4217 display currency (GHS, NGN, USD…). Formatting only; no FX. */
+  currency: string
   track_students: boolean
   track_staff: boolean
   student_scan_mode: 'present_absent' | 'time_in_out'
   staff_scan_mode: 'present_absent' | 'time_in_out'
+  /** Shop module switches — does this tenant deal in goods / services. */
+  sell_products: boolean
+  sell_services: boolean
+  /** Shop loyalty master switch — hides the Loyalty module when false. */
+  loyalty_enabled: boolean
+  /** Lifecycle. Non-active tenants are gated at verifySession → /suspended. */
+  status: 'active' | 'suspended' | 'deactivated'
   /** Per-institution brand colour (hex). Null → platform default accent. */
   theme_primary: string | null
   /** Curated preset key, or 'custom'. Null → default. */
@@ -36,10 +45,15 @@ export const DEFAULT_INSTITUTION: InstitutionConfig = {
   label_staff_plural: 'Staff',
   skip_weekends: false,
   timezone: 'UTC',
+  currency: 'GHS',
   track_students: true,
   track_staff: false,
   student_scan_mode: 'present_absent',
   staff_scan_mode: 'present_absent',
+  sell_products: true,
+  sell_services: true,
+  loyalty_enabled: true,
+  status: 'active',
   theme_primary: null,
   theme_preset: null,
 }

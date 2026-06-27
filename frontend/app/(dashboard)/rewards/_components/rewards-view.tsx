@@ -13,7 +13,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { cn, formatGHS, displayPhone } from '@/lib/utils'
+import { cn, formatMoney, displayPhone } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import { RewardDialog } from './reward-dialog'
 import { IssueDialog } from './issue-dialog'
@@ -63,11 +63,12 @@ type Props = {
   serviceNames: Record<string, string>
   timezone: string
   role: UserRole
+  currency: string
 }
 
 type StatusFilter = 'active' | 'archived' | 'all'
 
-export function describeCondition(r: Reward, productNames: Record<string, string>, serviceNames: Record<string, string>): string {
+export function describeCondition(r: Reward, productNames: Record<string, string>, serviceNames: Record<string, string>, currency: string): string {
   const n = r.condition_type === 'total_amount_spent' ? r.condition_value : Math.round(r.condition_value)
   switch (r.condition_type) {
     case 'visit_count':
@@ -81,7 +82,7 @@ export function describeCondition(r: Reward, productNames: Record<string, string
         ? `${n} × ${productNames[r.condition_product_id] ?? 'product'}`
         : `${n} product${n !== 1 ? 's' : ''}`
     case 'total_amount_spent':
-      return `Spend ${formatGHS(r.condition_value)}`
+      return `Spend ${formatMoney(r.condition_value, currency)}`
   }
 }
 
@@ -93,20 +94,20 @@ export function describeWindow(r: Reward): string {
   }
 }
 
-export function describeReward(r: Reward, productNames: Record<string, string>, serviceNames: Record<string, string>): string {
+export function describeReward(r: Reward, productNames: Record<string, string>, serviceNames: Record<string, string>, currency: string): string {
   switch (r.reward_kind) {
     case 'free_product':
       return `Free ${r.reward_product_id ? (productNames[r.reward_product_id] ?? 'product') : 'product'}`
     case 'free_service':
       return `Free ${r.reward_service_id ? (serviceNames[r.reward_service_id] ?? 'service') : 'service'}`
     case 'discount':
-      return `${formatGHS(r.reward_value ?? 0)} off`
+      return `${formatMoney(r.reward_value ?? 0, currency)} off`
     case 'custom':
       return r.description || 'Custom reward'
   }
 }
 
-export function RewardsView({ rewards, products, services, clients, log, productNames, serviceNames, timezone, role }: Props) {
+export function RewardsView({ rewards, products, services, clients, log, productNames, serviceNames, timezone, role, currency }: Props) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<StatusFilter>('active')
 
@@ -217,15 +218,15 @@ export function RewardsView({ rewards, products, services, clients, log, product
                         <TableCell className={cn('font-medium', !r.active && 'opacity-60')}>
                           {r.name}
                           <span className="block text-xs text-muted-foreground font-normal sm:hidden">
-                            {describeCondition(r, productNames, serviceNames)} ({describeWindow(r)}) → {describeReward(r, productNames, serviceNames)}
+                            {describeCondition(r, productNames, serviceNames, currency)} ({describeWindow(r)}) → {describeReward(r, productNames, serviceNames, currency)}
                           </span>
                         </TableCell>
                         <TableCell className={cn('hidden sm:table-cell text-sm text-muted-foreground', !r.active && 'opacity-60')}>
-                          {describeCondition(r, productNames, serviceNames)}
+                          {describeCondition(r, productNames, serviceNames, currency)}
                           <span className="block text-xs">{describeWindow(r)}{r.repeatable ? ' · repeatable' : ''}</span>
                         </TableCell>
                         <TableCell className={cn('hidden md:table-cell text-sm text-muted-foreground', !r.active && 'opacity-60')}>
-                          {describeReward(r, productNames, serviceNames)}
+                          {describeReward(r, productNames, serviceNames, currency)}
                         </TableCell>
                         <TableCell>
                           <Badge variant={r.active ? 'success' : 'secondary'}>{r.active ? 'Active' : 'Archived'}</Badge>
@@ -317,6 +318,7 @@ export function RewardsView({ rewards, products, services, clients, log, product
         reward={editing}
         products={products}
         services={services}
+        currency={currency}
       />
 
       <IssueDialog
@@ -325,7 +327,7 @@ export function RewardsView({ rewards, products, services, clients, log, product
         reward={issueTarget}
         clients={clients}
         rewardSummary={issueTarget
-          ? `${describeCondition(issueTarget, productNames, serviceNames)} (${describeWindow(issueTarget)}) → ${describeReward(issueTarget, productNames, serviceNames)}`
+          ? `${describeCondition(issueTarget, productNames, serviceNames, currency)} (${describeWindow(issueTarget)}) → ${describeReward(issueTarget, productNames, serviceNames, currency)}`
           : ''}
       />
 

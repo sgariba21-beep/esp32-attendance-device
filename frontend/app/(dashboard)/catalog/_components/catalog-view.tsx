@@ -14,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { cn, formatGHS } from '@/lib/utils'
+import { cn, formatMoney } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import { CatalogDialog } from './catalog-dialog'
 import { setProductActive, setServiceActive } from '../_actions'
@@ -50,11 +50,14 @@ type Props = {
   products: Product[]
   services: Service[]
   role: UserRole
+  currency: string
+  sellProducts: boolean
+  sellServices: boolean
 }
 
 const PAGE_SIZE = 50
 
-export function CatalogView({ products, services, role }: Props) {
+export function CatalogView({ products, services, role, currency, sellProducts, sellServices }: Props) {
   const canWrite = role !== 'cashier'
 
   // Dialog
@@ -136,6 +139,17 @@ export function CatalogView({ products, services, role }: Props) {
   const activeProductCount = products.filter((p) => p.active).length
   const activeServiceCount = services.filter((s) => s.active).length
 
+  // Module-level offerings gate (#3b): a service-only salon hides Products, a
+  // retail kiosk hides Services. Per-item active/archived is separate (above).
+  if (!sellProducts && !sellServices) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="Catalog" subtitle="Products and services available for sale" />
+        <EmptyState icon={Package} message="No offerings enabled. Turn on products or services in Settings." />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -143,14 +157,14 @@ export function CatalogView({ products, services, role }: Props) {
         subtitle="Products and services available for sale"
       />
 
-      <Tabs defaultValue="products">
+      <Tabs defaultValue={sellProducts ? 'products' : 'services'}>
         <TabsList>
-          <TabsTrigger value="products">Products ({activeProductCount})</TabsTrigger>
-          <TabsTrigger value="services">Services ({activeServiceCount})</TabsTrigger>
+          {sellProducts && <TabsTrigger value="products">Products ({activeProductCount})</TabsTrigger>}
+          {sellServices && <TabsTrigger value="services">Services ({activeServiceCount})</TabsTrigger>}
         </TabsList>
 
         {/* ── Products ─────────────────────────────────────────────────── */}
-        <TabsContent value="products">
+        {sellProducts && <TabsContent value="products">
           <div className="space-y-4 pt-4">
             <div className="flex flex-wrap gap-3 items-center justify-between">
               <div className="flex flex-wrap gap-3 items-center">
@@ -208,7 +222,7 @@ export function CatalogView({ products, services, role }: Props) {
                         .map((p) => (
                           <TableRow key={p.id}>
                             <TableCell className={cn('font-medium', !p.active && 'opacity-60')}>{p.name}</TableCell>
-                            <TableCell className={cn('tabular-nums', !p.active && 'opacity-60')}>{formatGHS(p.price)}</TableCell>
+                            <TableCell className={cn('tabular-nums', !p.active && 'opacity-60')}>{formatMoney(p.price, currency)}</TableCell>
                             <TableCell className={cn('tabular-nums', !p.active && 'opacity-60', p.stock < 0 && 'text-destructive')}>
                               {p.stock}
                             </TableCell>
@@ -262,10 +276,10 @@ export function CatalogView({ products, services, role }: Props) {
               </div>
             )}
           </div>
-        </TabsContent>
+        </TabsContent>}
 
         {/* ── Services ─────────────────────────────────────────────────── */}
-        <TabsContent value="services">
+        {sellServices && <TabsContent value="services">
           <div className="space-y-4 pt-4">
             <div className="flex flex-wrap gap-3 items-center justify-between">
               <div className="flex flex-wrap gap-3 items-center">
@@ -322,7 +336,7 @@ export function CatalogView({ products, services, role }: Props) {
                         .map((s) => (
                           <TableRow key={s.id}>
                             <TableCell className={cn('font-medium', !s.active && 'opacity-60')}>{s.name}</TableCell>
-                            <TableCell className={cn('tabular-nums', !s.active && 'opacity-60')}>{formatGHS(s.price)}</TableCell>
+                            <TableCell className={cn('tabular-nums', !s.active && 'opacity-60')}>{formatMoney(s.price, currency)}</TableCell>
                             <TableCell>
                               <Badge variant={s.active ? 'success' : 'secondary'}>
                                 {s.active ? 'Active' : 'Archived'}
@@ -373,7 +387,7 @@ export function CatalogView({ products, services, role }: Props) {
               </div>
             )}
           </div>
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
 
       <CatalogDialog

@@ -49,10 +49,14 @@ export function SettingsForm({ institution, saveAction }: Props) {
     label_staff_plural: institution.label_staff_plural,
     skip_weekends: institution.skip_weekends,
     timezone: institution.timezone,
+    currency: institution.currency,
     track_students: institution.track_students,
     track_staff: institution.track_staff,
     student_scan_mode: institution.student_scan_mode,
     staff_scan_mode: institution.staff_scan_mode,
+    sell_products: institution.sell_products,
+    sell_services: institution.sell_services,
+    loyalty_enabled: institution.loyalty_enabled,
     theme_primary: institution.theme_primary ?? '',
     theme_preset: institution.theme_preset ?? '',
   })
@@ -254,6 +258,63 @@ export function SettingsForm({ institution, saveAction }: Props) {
           <p className="text-xs text-muted-foreground">IANA timezone name, e.g. Africa/Accra, America/New_York</p>
         </div>
       </Section>
+
+      {form.type === 'shop' && (
+        <Section title="Shop" description="Currency, offerings, and loyalty for the retail module.">
+          <div className="space-y-2">
+            <Label htmlFor="currency">Currency</Label>
+            <NativeSelect id="currency" value={form.currency} onChange={(e) => set('currency', e.target.value)}>
+              <option value="GHS">Ghanaian cedi (GHS)</option>
+              <option value="NGN">Nigerian naira (NGN)</option>
+              <option value="USD">US dollar (USD)</option>
+              <option value="EUR">Euro (EUR)</option>
+              <option value="GBP">Pound sterling (GBP)</option>
+              <option value="ZAR">South African rand (ZAR)</option>
+              <option value="KES">Kenyan shilling (KES)</option>
+              <option value="XOF">West African CFA franc (XOF)</option>
+            </NativeSelect>
+            <p className="text-xs text-muted-foreground">
+              Used to display all prices, sales, and reports. Does not convert existing values.
+            </p>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-border p-4">
+            <div className="flex items-center gap-3">
+              <input
+                id="sell_services"
+                type="checkbox"
+                checked={form.sell_services}
+                onChange={(e) => set('sell_services', e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <Label htmlFor="sell_services" className="cursor-pointer">Sell services</Label>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                id="sell_products"
+                type="checkbox"
+                checked={form.sell_products}
+                onChange={(e) => set('sell_products', e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <Label htmlFor="sell_products" className="cursor-pointer">Sell products</Label>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                id="loyalty_enabled"
+                type="checkbox"
+                checked={form.loyalty_enabled}
+                onChange={(e) => set('loyalty_enabled', e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <Label htmlFor="loyalty_enabled" className="cursor-pointer">Enable loyalty rewards</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Disabling a category hides it from the catalog and new sales; existing history is unaffected.
+            </p>
+          </div>
+        </Section>
+      )}
 
       {error && <Alert variant="error"><AlertDescription>{error}</AlertDescription></Alert>}
       {saved && <Alert variant="success"><AlertDescription>Settings saved.</AlertDescription></Alert>}

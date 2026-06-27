@@ -225,6 +225,7 @@ export default async function ReportsPage() {
       lowStock={lowStock}
       rewardsIssued={rewardsIssued}
       role={role}
+      currency={institution.currency}
     />
   )
 }

@@ -18,10 +18,14 @@ export type SettingsFormData = {
   label_staff_plural: string
   skip_weekends: boolean
   timezone: string
+  currency: string
   track_students: boolean
   track_staff: boolean
   student_scan_mode: 'present_absent' | 'time_in_out'
   staff_scan_mode: 'present_absent' | 'time_in_out'
+  sell_products: boolean
+  sell_services: boolean
+  loyalty_enabled: boolean
   theme_primary: string
   theme_preset: string
 }
@@ -47,10 +51,14 @@ export async function updateInstitutionSettings(data: SettingsFormData) {
       label_staff_plural: data.label_staff_plural.trim() || 'Staff',
       skip_weekends: data.skip_weekends,
       timezone: data.timezone.trim() || 'UTC',
+      currency: data.currency.trim().toUpperCase() || 'GHS',
       track_students: data.track_students,
       track_staff: data.track_staff,
       student_scan_mode: data.student_scan_mode,
       staff_scan_mode: data.staff_scan_mode,
+      sell_products: data.sell_products,
+      sell_services: data.sell_services,
+      loyalty_enabled: data.loyalty_enabled,
       ...brandColumns(data),
     })
     .eq('id', institutionId)
