@@ -10,7 +10,7 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 
 - Ghanaian schools and small institutions track attendance on paper or not at all; the affordable end of the market has no biometric option tied to a reporting dashboard.
 - ZKTeco and similar incumbents ship standalone terminals with no multi-tenant cloud dashboard and no remote device management.
-- The system is built around term and academic-year structure, with institution type configurable as school or office.
+- The system is built around term and academic-year structure, with institution type configurable as school, office, or shop.
 - Each device is built from off-the-shelf parts at about GHS 1,000.
 - The firmware and dashboard are AGPL-3.0 on GitHub; institutions can self-host or use the managed hosted service.
 
@@ -39,7 +39,7 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
              ▼
 ┌─────────────────────────────┐
 │  Supabase Edge Functions    │
-│  (cloud, lxpemewonievaazboyez) │
+│  (cloud)                    │
 │  log-attendance             │
 │  mark-absent (pg_cron)      │
 │  get-enrollment-job         │
@@ -113,32 +113,32 @@ Single sketch: `firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC
 
 | Task | Core | Responsibility |
 |---|---|---|
-| `FingerprintTask` | 1 | Scan loop, match against the local fid map, LED feedback, enrollment execution, captive-portal launch on master-finger scan. |
-| `NetworkTask` | 0 | Provisioning, draining the in-memory send queue to `log-attendance`, SPIFFS queue flush, NTP→RTC sync, WiFi reconnect. |
+| `FingerprintTask` | 1 | Scan loop, match against the local fid map, LED feedback, enrollment execution, captive-portal launch on master-finger scan. Writes each scan to SPIFFS then signals `NetworkTask` via binary semaphore. |
+| `NetworkTask` | 0 | Provisioning, waiting on scan semaphore from `FingerprintTask`, rotate-then-process SPIFFS queue flush to `log-attendance`, NTP→RTC sync, WiFi reconnect. |
 | `EnrollmentTask` | 0 | Polls `get-enrollment-job`, hands jobs to `FingerprintTask`, acts on the decommission signal (wipes identity and reboots into provisioning). |
 
 Inter-task communication:
 
-- `memQueue` (`std::deque`) holds outbound attendance payloads. `FingerprintTask` pushes, `NetworkTask` pops. Guarded by `memQueueMutex`; `memQueueSem` wakes `NetworkTask` when a payload arrives.
+- `memQueueSem` is a binary semaphore used only as a signal: `FingerprintTask` gives it after writing a scan to SPIFFS; `NetworkTask` waits on it (or a 15 s periodic timeout) before calling `flushQueue()`. There is no in-memory scan queue.
 - Enrollment jobs pass from `EnrollmentTask` to `FingerprintTask` through `currentEnrollJob`, guarded by `enrollMutex` and signalled by `enrollSem`.
 - `spiffsMutex` serialises every SPIFFS access across all three tasks.
 
 ### Offline queue
 
-- Each scan is written to `/queue.txt` in SPIFFS before any network attempt, one JSON payload per line.
-- With WiFi up, the payload is also pushed to `memQueue` for immediate send. The SPIFFS copy is cleared once a POST returns 2xx.
-- With WiFi down, the payload stays in `/queue.txt`. `NetworkTask` flushes the file on reconnect and on boot.
-- On flush, 5xx/429/network errors keep a record for retry; a 4xx drops it.
+- **Durability-first:** each scan is written to `/queue.txt` in SPIFFS synchronously inside `FingerprintTask` before any network attempt. The scan is never held only in RAM.
+- **Rotate-then-process:** when `NetworkTask` flushes, it atomically renames `/queue.txt` → `/queue_inflight.txt` under the lock, then releases the lock. `FingerprintTask` can keep appending to a fresh `/queue.txt` while the network send runs without holding `spiffsMutex`.
+- **Crash recovery:** if power is cut mid-flush, `/queue_inflight.txt` is orphaned. On the next boot, `recoverInflightQueue()` runs before tasks start and merges it back into `/queue.txt`.
+- On flush, 5xx/429/network errors keep a record for retry; 4xx drops it.
 - Caps: 1000 entries, 256 KB, 7-day age. Oldest records are trimmed first.
 
 ### Scan IDs
 
-Each scan gets a `scan_id` of `scan-YYYYMMDDhhmmss-<member-sid>`, with the timestamp read from the DS3231 RTC. Earlier firmware derived the ID from `millis()`, which resets to zero on every reboot, so scans after a power cycle collided with earlier IDs and the server's `(institution_id, scan_id)` dedup discarded them. The RTC clock survives reboots and power loss, so the IDs stay unique. It is synced from NTP on boot and after each reconnect.
+Each scan gets a `scan_id` of `scan-YYYYMMDDhhmmss-<member-sid>`, with the timestamp read from the DS3231 RTC. The RTC clock survives reboots and power loss and is synced from NTP on boot and after each reconnect.
 
 ### OTA
 
-- On boot, with WiFi up and assignment not pending, the device GETs `releases/latest` from the GitHub API.
-- Release tags must be `firmware-v<major>.<minor>.<patch>`. The tag version is compared against the compiled-in `FIRMWARE_VERSION`; only a strictly newer version flashes, so a mistagged release cannot downgrade the fleet.
+- On boot, with WiFi up and assignment not pending, the device waits a random jitter of 0–120 s (seeded from hardware entropy) before checking for updates. This prevents a fleet-wide power blip from hitting GitHub's 60 req/hr unauthenticated rate limit simultaneously.
+- The device GETs `releases/latest` from the GitHub API. Release tags must be `firmware-v<major>.<minor>.<patch>`. The tag version is compared against the compiled-in `FIRMWARE_VERSION`; only a strictly newer version flashes.
 - The release's `.bin` asset is streamed through the `Update` library. The sensor LED holds red while writing, and the device reboots into the new image on success.
 
 ---
@@ -151,12 +151,15 @@ All dashboard data access uses `createAdminClient()` (service role — bypasses 
 -- Institution registry (one row per tenant)
 -- theme_primary: hex brand colour injected as CSS custom properties server-side (no FOUC)
 -- theme_preset: curated palette key (e.g. 'indigo', 'rose') or 'custom'; null → platform default
+-- device_secret: shared bootstrap secret — TRANSITIONAL. Will be removed once all
+--   devices have been re-provisioned with per-device secrets (devices.device_secret).
 institutions    (id, name, type, logo_url, label_member, label_members, label_group,
                  label_unit, label_period, label_staff, label_staff_plural,
                  track_students, track_staff, student_scan_mode, staff_scan_mode,
-                 skip_weekends, device_secret, timezone, theme_primary, theme_preset)
+                 skip_weekends, device_secret, timezone, theme_primary, theme_preset,
+                 loyalty_enabled)
 
--- Members (students, staff, etc.) — scoped to institution
+-- Members (students, staff, customers, etc.) — scoped to institution
 -- member_type: 'student' | 'staff'  (default 'student')
 -- sid is UNIQUE PER INSTITUTION (institution_id, sid), not globally
 -- device_id FK is ON DELETE SET NULL (device deletion preserves member records)
@@ -164,11 +167,13 @@ members         (id, sid, fullname, group_name, unit_name, fin1, fin2, status, m
                  device_id→devices SET NULL, institution_id, created_at)
 
 -- One ESP32 per unit — scoped to institution
--- scan behaviour is governed by the institution's student_scan_mode/staff_scan_mode
+-- device_secret: per-device secret issued at provisioning time by /assignment-poll
+-- revoked: true blocks the device from logging attendance (instant lockout)
 -- provisioning_token: issued by /register, required by /assignment-poll (H7)
-devices         (id, group_name, unit_name, display_name, mac, provisioning_token, institution_id)
+devices         (id, group_name, unit_name, display_name, mac, provisioning_token,
+                 device_secret, revoked, institution_id)
 
--- Academic periods — scoped to institution (nullable for office-type institutions)
+-- Academic periods — scoped to institution (nullable for office/shop-type institutions)
 periods         (id, term, year, status, start_date, end_date, institution_id)
 
 -- Attendance records — scoped to institution
@@ -189,15 +194,24 @@ enrollment_jobs (id, device_id→devices SET NULL, student_id→members, finger_
 holidays        (id, label, start_date, end_date, recurring, institution_id)
 
 -- Dashboard user roles — scoped to institution (platform_admin has null institution_id)
-profiles        (id→auth.users, role, assigned_unit, institution_id)
+-- assigned_device_id: FK used by teacher/staff role to scope attendance to their unit.
+--   Preferred over the legacy assigned_unit string; backfilled by migration.
+profiles        (id→auth.users, role, assigned_unit, assigned_device_id→devices SET NULL,
+                 institution_id)
 
 -- Deferred SPIFFS-wipe queue — no FK, survives device row deletion
 device_resets   (device_id UUID, created_at)
+
+-- Polling watermark — one row per institution, updated by triggers on attendance,
+-- members, devices, and periods. The dashboard polls /api/changes every 12 s and
+-- calls router.refresh() only when last_change_at has advanced. Replaces the
+-- previous SSE-based realtime stream (eliminated REPLICA IDENTITY FULL WAL amplification).
+institution_activity  (institution_id PK→institutions, last_change_at timestamptz)
 ```
 
 ### Migrations
 
-All migrations are in `backend/supabase/migrations/`. They are applied to the cloud instance — do not re-run locally unless testing from scratch.
+All migrations are in `backend/supabase/migrations/`. They must be reviewed and applied manually — do not auto-apply to cloud.
 
 ---
 
@@ -212,18 +226,21 @@ Authentication uses Supabase Auth (server-side only — all Supabase calls go th
 | `platform_admin` | Cross-institution (no institution_id) | All pages, bypasses all role gates, operates via service role. Responsible for creating institutions and bootstrapping first super_admin per institution. |
 | `super_admin` | Institution-scoped | All pages — devices, enrollment, promotion, academic, members, attendance, user management. Can manage users within their institution but cannot create platform_admins. |
 | `admin` | Institution-scoped | Members, academic, promotion, attendance — no devices or enrollment. |
-| `teacher` | Institution-scoped, unit-scoped | Read-only attendance and members, filtered to their `assigned_unit` only. |
-| `staff` | Institution-scoped, unit-scoped | Same as teacher — read-only attendance and members, filtered to their `assigned_unit`. Intended for non-teaching staff in office-type institutions. |
+| `teacher` | Institution-scoped, unit-scoped | Read-only attendance and members, filtered to their `assigned_device_id` (FK, with `assigned_unit` string-match fallback for unbackfilled profiles). |
+| `staff` | Institution-scoped, unit-scoped | Same as teacher — read-only attendance and members, filtered to their unit. The `/staff` roster page is not visible in the nav for this role. |
+| `cashier` | Institution-scoped (shop type) | Sales, Clients, and Catalog pages only. Intended for retail staff at shop-type institutions. Cannot access attendance, members, devices, or admin pages. |
 
 ### How it works
 
-- `frontend/lib/supabase/dal.ts` exports `verifySession()`, `requireRole(...roles)`, and `getInstitution(institutionId)`.
+- `frontend/lib/supabase/dal.ts` exports `verifySession()`, `requireRole(...roles)`, `getInstitution(institutionId)`, and `resolveInstitutionScope(session, institutionParam?)`.
 - `verifySession()` and `getInstitution()` are both `cache()`-wrapped — one DB hit per render cycle regardless of how many components call them.
 - `requireRole()` calls `verifySession()` and redirects to `/unauthorized` if the role doesn't match. `platform_admin` bypasses all role checks.
+- `resolveInstitutionScope()` enforces tenant scoping: platform_admin may pass an explicit institution param; all other roles are always locked to their own `institution_id` regardless of query params.
 - **Fail-closed:** an authenticated user with no `profiles` row (or no role) is redirected to `/unauthorized` — it does **not** default to any role. Public sign-up is disabled in Supabase Auth; accounts are created only via `/users` and `/onboarding`.
 - **Tenant ownership:** because the dashboard uses the service role (RLS bypassed), every mutating server action verifies the target record belongs to the caller's institution via `lib/supabase/ownership.ts` (`ownsRecord`). `platform_admin` is cross-tenant by design.
 - The dashboard layout calls `verifySession()` and passes `role` to the sidebar and mobile nav, which filter nav items by role.
-- `teacher` and `staff` have an `assigned_unit` in their profile. Attendance and member data is filtered server-side to that unit before rendering — including the CSV export (`/api/attendance/export`) and the realtime/enrollment SSE streams, which are scoped to the caller's institution.
+- `teacher` and `staff` have an `assigned_device_id` (FK, preferred) or `assigned_unit` (legacy string) in their profile. Attendance and member data is filtered server-side to that unit before rendering — including the CSV export (`/api/attendance/export`).
+- Run `node scripts/check-rbac.mjs` (from `frontend/`) to verify every page under `(dashboard)` has a `requireRole(` call. Exits 1 with a list if any are ungated.
 
 ### Creating the first super_admin (per institution)
 
@@ -240,22 +257,35 @@ Additional accounts are managed through the `/users` page in the dashboard.
 
 ## Dashboard Pages
 
+### Attendance & roster (all institution types)
+
 | Route | Access | Description |
 |---|---|---|
 | `/` | All roles | Overview — today's present/absent counts, attendance rate, and a recent-activity feed (last 8 scans). `teacher`/`staff` see only their unit. `platform_admin` sees a cross-tenant summary: institution count, active members, devices online, and total scans today. |
-| `/attendance` | All roles | Attendance records with date, period, member (multi-select), staff (multi-select), unit, status, and member-type filters. Per-member stats panel (present count, absent count, last seen date). Results paginated at 50 rows. `teacher`/`staff` see only their unit. Time-in/time-out scan pairs shown on a single row. CSV export available. |
-| `/members` | All roles | Member roster (non-staff). `teacher`/`staff` see only their unit, no edit controls. platform_admin can filter by institution. |
-| `/staff` | All roles | Staff member roster. Visible only when `track_staff = true`. Same access rules as `/members`. |
-| `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, set display names. Search + institution filter for platform_admin. Devices only enter via physical provisioning (no manual create). |
+| `/attendance` | All roles | Attendance records with date, period, member, unit, status, and type filters. Per-member stats panel. Results paginated at 50 rows. `teacher`/`staff` see only their unit; a teacher with no device assigned sees an empty-state prompt to contact their administrator. Time-in/time-out pairs shown on a single row. CSV export available. |
+| `/members` | All roles except cashier | Member roster (non-staff). `teacher`/`staff` see only their unit, no edit controls. |
+| `/staff` | super_admin, admin, platform_admin | Staff member roster. Visible only when `track_staff = true`. |
+| `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, revoke devices. Search + institution filter for platform_admin. Devices only enter via physical provisioning (no manual create). |
 | `/academic` | super_admin, admin, platform_admin | Academic periods and holidays. Labeled "Periods & Holidays" for office institutions. Supports recurring (yearly) holidays matched by month/day. |
-| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. Institution column for platform_admin. |
+| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. Validates member institution + device assignment before dispatching. Institution column for platform_admin. |
 | `/promotion` | super_admin, admin, platform_admin | Bulk year-end promotion — moves members to the next group, resets finger slots, deactivates final-year members. School-type institutions only. |
 | `/settings` | super_admin, platform_admin | Institution config — name, logo, type, label overrides, scan modes, skip_weekends, timezone. |
 | `/institutions` | platform_admin | All institutions with member/device counts. Edit or delete any institution (deletion fans out SPIFFS wipe to all assigned devices). |
 | `/institutions/[id]` | platform_admin | Edit a specific institution's settings. |
-| `/onboarding` | platform_admin | Create a new institution and its first super_admin account. |
-| `/users` | super_admin, admin, platform_admin | Dashboard account management. `admin` can view the list and change their own password only. `super_admin`/`platform_admin` can create, edit, and delete accounts. At least one super_admin must always exist per institution. Email search and role filter available. |
+| `/onboarding` | platform_admin | Create a new institution and its first super_admin account. Includes timezone selector (Africa/Accra default) and neutral label presets for shop-type institutions. |
+| `/users` | super_admin, admin, platform_admin | Dashboard account management. `admin` can view the list and change their own password only. `super_admin`/`platform_admin` can create, edit, and delete accounts. |
 | `/unauthorized` | — | Shown when a user navigates to a page their role cannot access. |
+| `/suspended` | — | Shown when a user's institution is suspended/deactivated. Lives outside `(dashboard)` to avoid re-entering `verifySession`. Sign-out is the only available action. |
+
+### Retail / loyalty (shop-type institutions only)
+
+| Route | Access | Description |
+|---|---|---|
+| `/sales` | super_admin, admin, cashier | Record sales transactions. Line-item entry with catalog lookup, optional stylist assignment, per-sale note. Low-stock warning surfaced as a non-blocking alert after a successful sale. |
+| `/clients` | super_admin, admin, cashier | Client roster with visit history and loyalty point balance. Search by name or phone. |
+| `/catalog` | super_admin, admin, cashier | Products and services catalog. Stock quantity tracked for products; low-stock threshold warnings on the Reports page. |
+| `/rewards` | super_admin, admin | Loyalty reward redemption and tier management. Gated additionally by `loyalty_enabled` on the institution. |
+| `/reports` | super_admin, admin | Sales analytics — daily/weekly takings, revenue by client and stylist, popular items, visit frequency, low-stock products, loyalty rewards issued. CSV export for takings, client revenue, and stylist revenue. |
 
 ### Screenshots
 
@@ -274,29 +304,30 @@ Screenshots pending production UI.
 
 1. Device boots with no `device_identity.json` in SPIFFS.
 2. Calls `POST /register` with its MAC address (`x-bootstrap-secret` header).
-3. Receives a `device_id`, a `provisioning_token`, and `status: "pending"`. The
-   device persists both to `provisioning.json` so a reboot keeps the token (H7).
-4. Shows yellow breathing LED and polls `POST /assignment-poll` every 5 s, sending
-   `{ device_id, provisioning_token }`.
+3. Receives a `device_id`, a `provisioning_token`, and `status: "pending"`. The device persists both to `provisioning.json` so a reboot keeps the token.
+4. Shows yellow breathing LED and polls `POST /assignment-poll` every 5 s, sending `{ device_id, provisioning_token }`.
 5. An admin assigns the device from the dashboard `/devices` page.
-6. Poll returns `status: "assigned"` with `institution_id`, `device_secret`,
-   `display_name` — **only if the provisioning_token matches** (otherwise 401).
-7. Device writes `device_identity.json` to SPIFFS, deletes `provisioning.json`,
-   and begins normal operation.
+6. Poll returns `status: "assigned"` with `institution_id`, `device_secret` (per-device), `display_name` — **only if the provisioning_token matches** (otherwise 401).
+7. Device writes `device_identity.json` to SPIFFS, deletes `provisioning.json`, and begins normal operation.
 
-> **TLS:** the firmware validates server certificates (`certs.h` → `ROOT_CA_BUNDLE`).
-> The bootstrap secret lives in `secrets.h` (gitignored), not in source.
+> **TLS:** the firmware validates server certificates (`certs.h` → `ROOT_CA_BUNDLE`, includes intermediates for WE1/Sectigo DV E36 — mbedTLS cannot do AIA fetching).
+> The bootstrap secret lives in `secrets.h` (gitignored). Copy `secrets.example.h` → `secrets.h` and set the same value as the `BOOTSTRAP_SECRET` secret in Supabase Edge Functions.
 
 ### Normal operation
 
-- Every scan: `POST /log-attendance` with `x-device-secret: <per-institution secret>`.
-- Enrollment polling: `POST /get-enrollment-job` with `{ device_id }`.
-- Enrollment result: `POST /update-enrollment-job` with `{ id, institution_id, status, ... }`.
-- `pg_cron` calls `POST /mark-absent` daily with `x-cron-secret` (set in Supabase Vault). **Requires the `pg_net` extension** — enable it in the Supabase dashboard under Database → Extensions before creating the cron job.
+- Every scan: `POST /log-attendance` with `{ device_id, ... }` body and `x-device-secret: <per-device secret>` header. A transitional dual-path also accepts the legacy shared `institutions.device_secret` for devices not yet re-provisioned.
+- Enrollment polling: `POST /get-enrollment-job` with `{ device_id }`, authenticated via per-device secret.
+- Enrollment result: `POST /update-enrollment-job` with `{ id, device_id, institution_id, status, ... }`, authenticated via per-device secret. `institution_id` is derived server-side from the device row — the body value is ignored.
+- Decommission signal: if `get-enrollment-job` returns `decommissioned: true`, the device wipes its identity and reboots. The `device_resets` row persists until the device re-registers (not consumed on read — durable against race conditions).
+- `pg_cron` calls `POST /mark-absent` daily with `x-cron-secret`. Processes institutions in batches of 8 concurrently. **Requires the `pg_net` extension** — enable it in the Supabase dashboard under Database → Extensions.
+
+### Revoking a device
+
+Set `devices.revoked = true` in the database. The device's next `log-attendance` call receives 401 immediately. For permanent decommission, also insert into `device_resets`.
 
 ### OTA
 
-Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest` on boot. Releases must be tagged `firmware-v<version>` (e.g. `firmware-v1.1.6`). The `.bin` asset is downloaded and flashed via the ESP32 `Update` library.
+Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest` on boot after a random jitter delay. Releases must be tagged `firmware-v<version>` (e.g. `firmware-v1.1.6`). The `.bin` asset is downloaded and flashed via the ESP32 `Update` library.
 
 ---
 
@@ -305,27 +336,37 @@ Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-de
 ```
 esp32-attendance-device/
 ├── README.md
+├── docs/
+│   ├── device-secret-migration-rollout.md  ← step-by-step guide for per-device secret rollout
+│   ├── biometric-privacy-note.md           ← what biometric data is stored where and how
+│   └── e2e-testing-checklist.md            ← test cases for each major feature area
 ├── firmware/
 │   └── ClassAttendance_Current_RTC/
-│       └── ClassAttendance_Current_RTC.ino   ← ESP32 firmware
+│       ├── ClassAttendance_Current_RTC.ino ← ESP32 firmware (single sketch)
+│       ├── certs.h                         ← ROOT_CA_BUNDLE (includes intermediates)
+│       ├── secrets.example.h               ← template for secrets.h (gitignored)
+│       └── secrets.h                       ← BOOTSTRAP_SECRET — gitignored, create from example
 ├── backend/
 │   └── supabase/
-│       ├── config.toml                        ← edge function config (verify_jwt = false for all)
-│       ├── migrations/                        ← all migrations applied to cloud
+│       ├── config.toml                     ← edge function config (verify_jwt = false for all)
+│       ├── migrations/                     ← applied to cloud manually; do NOT auto-apply
 │       └── functions/
-│           ├── log-attendance/
-│           ├── mark-absent/                   ← recurring holiday support; iterates all institutions
-│           ├── get-enrollment-job/
-│           ├── update-enrollment-job/
+│           ├── log-attendance/             ← dual-path auth: per-device + transitional shared secret
+│           ├── mark-absent/                ← BATCH_SIZE=8 concurrent; recurring holiday support
+│           ├── get-enrollment-job/         ← per-device auth; decommission signal is persistent
+│           ├── update-enrollment-job/      ← per-device auth; institution derived from device row
 │           ├── register/
-│           └── assignment-poll/
+│           └── assignment-poll/            ← issues per-device secret on first assignment
 └── frontend/
-    ├── proxy.ts                               ← Next.js middleware (NOT middleware.ts)
-    ├── AGENTS.md                              ← read before writing any Next.js code
+    ├── proxy.ts                            ← Next.js middleware (NOT middleware.ts)
+    ├── AGENTS.md                           ← read before writing any Next.js code
+    ├── scripts/
+    │   └── check-rbac.mjs                 ← CI guard: exits 1 if any dashboard page lacks requireRole
     ├── app/
-    │   ├── (auth)/login/
+    │   ├── (auth)/login/                  ← password is NOT trimmed before submission
     │   ├── (dashboard)/
-    │   │   ├── layout.tsx                     ← verifySession, generateMetadata (dynamic tab title)
+    │   │   ├── layout.tsx                 ← verifySession, generateMetadata (dynamic tab title)
+    │   │   ├── (admin)/layout.tsx         ← route-group gate for admin-only pages
     │   │   ├── attendance/
     │   │   ├── members/
     │   │   ├── staff/
@@ -334,33 +375,39 @@ esp32-attendance-device/
     │   │   ├── enrollment/
     │   │   ├── promotion/
     │   │   ├── settings/
-    │   │   ├── institutions/
-    │   │   │   └── [id]/
+    │   │   ├── institutions/[id]/
     │   │   ├── onboarding/
-    │   │   └── users/
+    │   │   ├── users/
+    │   │   ├── sales/                     ← shop only; low-stock warning after sale
+    │   │   ├── clients/                   ← shop only; visit history + loyalty balance
+    │   │   ├── catalog/                   ← shop only; products + services
+    │   │   ├── rewards/                   ← shop only; loyalty_enabled gate
+    │   │   └── reports/                   ← shop only; takings, revenue, low-stock analytics
     │   ├── api/
     │   │   ├── signin/
     │   │   ├── signout/
-    │   │   ├── enrollment-stream/             ← SSE stream for enrollment job updates
-    │   │   ├── realtime-stream/               ← SSE stream watching members, devices, periods, attendance
-    │   │   │                                     institution-scoped; platform_admin watches all tenants
-    │   │   └── attendance/export/             ← CSV export with full filter parity to the attendance page
+    │   │   ├── enrollment-stream/         ← SSE stream for enrollment job updates (kept)
+    │   │   ├── realtime-stream/           ← 410 tombstone — use /api/changes instead
+    │   │   ├── changes/                   ← watermark poll endpoint (replaces SSE stream)
+    │   │   └── attendance/export/         ← CSV export with full filter parity
+    │   ├── suspended/                     ← institution suspended; sign-out only
     │   └── unauthorized/
     ├── lib/
-    │   ├── types.ts                           ← shared TS types (InstitutionConfig, AttendanceRecord, Member, Device, AcademicTerm, Holiday)
-    │   ├── theme.ts                           ← per-institution brand theming (brandStyle, THEME_PRESETS, brandColumns)
+    │   ├── types.ts                       ← shared TS types
+    │   ├── theme.ts                       ← per-institution brand theming
     │   └── supabase/
-    │       ├── dal.ts                         ← verifySession, requireRole, getInstitution, UserRole
-    │       └── server.ts                      ← createAuthClient, createAdminClient
+    │       ├── dal.ts                     ← verifySession, requireRole, getInstitution,
+    │       │                                 resolveInstitutionScope, UserRole
+    │       └── server.ts                  ← createAuthClient, createAdminClient
     └── components/
         ├── sidebar.tsx
         ├── mobile-header.tsx
         ├── mobile-bottom-nav.tsx
-        ├── theme-toggle.tsx                   ← dark/light mode toggle
-        ├── realtime-refresh.tsx               ← subscribes to /api/realtime-stream; calls router.refresh() on any DB change
-        ├── session-manager.tsx                ← inactivity timeout + sessionStorage guard
+        ├── theme-toggle.tsx
+        ├── realtime-refresh.tsx           ← polls /api/changes every 12 s; router.refresh() on watermark advance
+        ├── session-manager.tsx            ← inactivity timeout + sessionStorage guard
         └── ui/
-            └── single-select.tsx              ← searchable dropdown (used across devices, users, enrollment, members)
+            └── single-select.tsx
 ```
 
 ---
@@ -373,7 +420,9 @@ esp32-attendance-device/
 | 2 | Multi-tenant schema + edge functions | ✅ Complete |
 | 3 | Firmware provisioning flow | ✅ Complete |
 | 4 | Frontend — de-brand, institution config, devices page, settings | ✅ Complete |
-| 5 | Captive portal — WiFi-only, remove class fields | ✅ Complete (done in Phase 3) |
+| 5 | Captive portal — WiFi-only | ✅ Complete |
+| 6 | Retail / loyalty module — shop-type tenants, cashier role, sales/clients/catalog/rewards/reports | ✅ Complete |
+| 7 | Security hardening — per-device secrets, SPIFFS-only durable queue, tenant isolation fixes, polling watermark | ✅ Complete |
 
 ---
 
