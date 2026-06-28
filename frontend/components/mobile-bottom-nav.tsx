@@ -47,7 +47,7 @@ function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavIte
   if (institution.track_students) {
     items.push({ href: '/members', label: institution.label_members, icon: Users, roles: NON_CASHIER_ROLES })
   } else if (institution.track_staff || role === 'platform_admin') {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: NON_CASHIER_ROLES })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'platform_admin'] })
   }
   return items
 }
@@ -56,7 +56,7 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
   const items: NavItem[] = []
   // The roster not already shown in the primary bar.
   if (institution.track_students && (institution.track_staff || role === 'platform_admin')) {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: NON_CASHIER_ROLES })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'platform_admin'] })
   }
   // Retail nav — top of More sheet so cashiers find Clients and Catalog immediately.
   // Catalog/Loyalty gated by the offerings / loyalty toggles (platform_admin sees all).

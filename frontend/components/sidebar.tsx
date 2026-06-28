@@ -57,7 +57,7 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
   }
 
   if (institution.track_staff || role === 'platform_admin') {
-    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
+    items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'platform_admin'] })
   }
 
   // Retail nav — shop-type tenants only. Catalog and Loyalty are further gated
