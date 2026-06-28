@@ -52,6 +52,25 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
 
   // M8: warn before overwriting another member's fingerprint slot on this device.
   // The operator may proceed, but only after an explicit (second) confirmation.
+  // T4f: validate that the student belongs to the device's institution and is
+  // assigned to this specific device, before inserting any enrollment job.
+  if ((data.command === 'register' || data.command === 'delete') && data.student_id) {
+    const { data: studentCheck } = await supabase
+      .from('members')
+      .select('id, institution_id, device_id, status')
+      .eq('id', data.student_id)
+      .single()
+
+    if (!studentCheck) return { error: 'Member not found.' }
+    if (studentCheck.status !== 'active') return { error: 'Member is not active.' }
+    if (studentCheck.institution_id !== device?.institution_id) {
+      return { error: 'Member does not belong to this device\'s institution.' }
+    }
+    if (studentCheck.device_id !== data.device_id) {
+      return { error: 'Member is not assigned to this device.' }
+    }
+  }
+
   if (data.command === 'register' && !data.confirmOverwrite) {
     const slotColumn = data.finger_slot // 'fin1' | 'fin2'
     const { data: clashes } = await supabase

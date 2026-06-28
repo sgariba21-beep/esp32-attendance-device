@@ -8,6 +8,29 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { createInstitutionWithAdmin } from '../_actions'
 
+// T17: common timezones offered in the selector. Africa/Accra is the default.
+const TIMEZONES = [
+  'Africa/Accra',
+  'Africa/Lagos',
+  'Africa/Nairobi',
+  'Africa/Cairo',
+  'Africa/Johannesburg',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Sao_Paulo',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+  'UTC',
+]
+
 function Section({
   title,
   description,
@@ -40,6 +63,7 @@ function ScanModeSelect({ id, value, onChange }: { id: string; value: string; on
 const empty = {
   institution_name: '',
   institution_type: 'school' as 'school' | 'office' | 'shop',
+  timezone: 'Africa/Accra',
   track_students: true,
   track_staff: false,
   student_scan_mode: 'present_absent' as 'present_absent' | 'time_in_out',
@@ -58,7 +82,6 @@ export function OnboardingForm() {
   function set(field: string, value: string | boolean) {
     setForm((f) => {
       const next = { ...f, [field]: value }
-      // Offices and shops don't track students — force sensible flags on type change.
       if (field === 'institution_type') {
         if (value === 'office' || value === 'shop') { next.track_students = false; next.track_staff = true }
         else { next.track_students = true }
@@ -122,8 +145,25 @@ export function OnboardingForm() {
           >
             <option value="school">School</option>
             <option value="office">Office</option>
-            <option value="shop">Shop</option>
+            <option value="shop">Shop / Retail</option>
           </NativeSelect>
+        </div>
+
+        {/* T17: timezone selector — defaults to Africa/Accra */}
+        <div className="space-y-2">
+          <Label htmlFor="timezone">Timezone</Label>
+          <NativeSelect
+            id="timezone"
+            value={form.timezone}
+            onChange={(e) => set('timezone', e.target.value)}
+          >
+            {TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>{tz}</option>
+            ))}
+          </NativeSelect>
+          <p className="text-xs text-muted-foreground">
+            Used for attendance dates and the daily mark-absent job. Can be changed in Settings.
+          </p>
         </div>
       </Section>
 

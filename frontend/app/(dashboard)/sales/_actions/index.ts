@@ -114,7 +114,30 @@ export async function createSale(input: CreateSaleInput) {
 
   if (error) return { error: error.message, id: null }
 
+  // T23: detect products that went below zero stock after this sale.
+  // The sale is already recorded (create_sale is atomic); this is non-blocking
+  // — we surface warnings in the UI but do not roll back.
+  const soldProductIds = input.items
+    .filter((i) => i.productId)
+    .map((i) => i.productId as string)
+
+  const warnings: string[] = []
+
+  if (soldProductIds.length > 0) {
+    const { data: lowStock } = await supabase
+      .from('products')
+      .select('name, stock_quantity')
+      .in('id', soldProductIds)
+      .lt('stock_quantity', 0)
+
+    for (const p of lowStock ?? []) {
+      warnings.push(
+        `"${p.name}" is now at ${p.stock_quantity} units — stock is negative. Restock when possible.`
+      )
+    }
+  }
+
   revalidatePath('/sales')
   revalidatePath('/clients')
-  return { error: null, id: txId as string }
+  return { error: null, id: txId as string, warnings }
 }

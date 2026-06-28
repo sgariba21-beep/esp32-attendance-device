@@ -76,6 +76,7 @@ type Props = {
   track_staff: boolean
   institutionType: 'school' | 'office' | 'shop'
   memberStats: MemberStat[]
+  teacherNoDevice?: boolean
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -201,9 +202,22 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
 export function AttendanceView({
   records, students, staffMembers, devices, academic, filters, page, pageSize,
   totalCount, role, assignedUnit, labels, institutions,
-  track_students, track_staff, institutionType, memberStats,
+  track_students, track_staff, institutionType, memberStats, teacherNoDevice,
 }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
+
+  if (isTeacher && teacherNoDevice) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Attendance" />
+        <EmptyState
+          icon={<Lock className="h-8 w-8 text-muted-foreground" />}
+          title="No unit assigned"
+          description="Your account isn't assigned to a unit yet — contact your administrator."
+        />
+      </div>
+    )
+  }
   const isPlatformAdmin = role === 'platform_admin'
   const isOffice = institutionType === 'office'
   const router = useRouter()

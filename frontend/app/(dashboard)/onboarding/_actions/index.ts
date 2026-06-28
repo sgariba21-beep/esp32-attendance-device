@@ -7,6 +7,7 @@ import { requireRole } from '@/lib/supabase/dal'
 export type OnboardingFormData = {
   institution_name: string
   institution_type: 'school' | 'office' | 'shop'
+  timezone: string
   track_students: boolean
   track_staff: boolean
   student_scan_mode: 'present_absent' | 'time_in_out'
@@ -19,27 +20,39 @@ export type OnboardingFormData = {
 export async function createInstitutionWithAdmin(data: OnboardingFormData) {
   await requireRole('platform_admin')
 
-  // L2: match the platform-wide minimum password length.
   if (data.admin_password.length < 8) {
     return { error: 'Password must be at least 8 characters.', institutionId: null }
   }
 
   const supabase = createAdminClient()
 
+  // T18: neutral retail defaults for shop type (no salon-specific vocabulary).
+  // Labels remain editable in Settings after creation.
+  const shopLabels = {
+    label_member:       'Staff',
+    label_members:      'Staff',
+    label_group:        'Team',
+    label_unit:         'Location',
+    label_period:       'Period',
+    label_staff:        'Staff',
+    label_staff_plural: 'Staff',
+  }
+
   const { data: institution, error: instError } = await supabase
     .from('institutions')
     .insert({
       name: data.institution_name.trim(),
       type: data.institution_type,
-      label_member:       data.institution_type === 'office' ? 'Employee'  : data.institution_type === 'shop' ? 'Stylist'  : 'Student',
-      label_members:      data.institution_type === 'office' ? 'Employees' : data.institution_type === 'shop' ? 'Stylists' : 'Students',
-      label_group:        data.institution_type === 'office' ? 'Department': data.institution_type === 'shop' ? 'Team'     : 'Form',
-      label_unit:         data.institution_type === 'office' ? 'Branch'    : data.institution_type === 'shop' ? 'Station'  : 'Class',
-      label_period:       data.institution_type === 'office' ? 'Quarter'   : data.institution_type === 'shop' ? 'Period'   : 'Term',
-      label_staff:        data.institution_type === 'office' ? 'Staff'     : data.institution_type === 'shop' ? 'Stylist'  : 'Teacher',
-      label_staff_plural: data.institution_type === 'office' ? 'Staff'     : data.institution_type === 'shop' ? 'Stylists' : 'Teachers',
+      label_member:       data.institution_type === 'office' ? 'Employee'   : data.institution_type === 'shop' ? shopLabels.label_member       : 'Student',
+      label_members:      data.institution_type === 'office' ? 'Employees'  : data.institution_type === 'shop' ? shopLabels.label_members      : 'Students',
+      label_group:        data.institution_type === 'office' ? 'Department' : data.institution_type === 'shop' ? shopLabels.label_group        : 'Form',
+      label_unit:         data.institution_type === 'office' ? 'Branch'     : data.institution_type === 'shop' ? shopLabels.label_unit         : 'Class',
+      label_period:       data.institution_type === 'office' ? 'Quarter'    : data.institution_type === 'shop' ? shopLabels.label_period       : 'Term',
+      label_staff:        data.institution_type === 'office' ? 'Staff'      : data.institution_type === 'shop' ? shopLabels.label_staff        : 'Teacher',
+      label_staff_plural: data.institution_type === 'office' ? 'Staff'      : data.institution_type === 'shop' ? shopLabels.label_staff_plural : 'Teachers',
       skip_weekends: true,
-      timezone: 'UTC',
+      // T17: use the timezone chosen in the form rather than hardcoding UTC.
+      timezone: data.timezone || 'Africa/Accra',
       track_students:    data.track_students,
       track_staff:       data.track_staff,
       student_scan_mode: data.student_scan_mode,

@@ -11,6 +11,12 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
+function genSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 Deno.serve(async (req: Request) => {
   try {
     if (req.method !== "POST") {
@@ -36,7 +42,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: device, error: deviceError } = await supabase
       .from("devices")
-      .select("id, institution_id, display_name, provisioning_token")
+      .select("id, institution_id, display_name, provisioning_token, device_secret")
       .eq("id", device_id)
       .single();
 
@@ -49,27 +55,33 @@ Deno.serve(async (req: Request) => {
       return json({ status: "pending" });
     }
 
-    // H7: the institution device_secret is released ONLY to a caller that proves
-    // it is this device by presenting the provisioning token issued at /register.
-    // Knowing the (UUID) device_id is no longer sufficient on its own.
+    // H7: the device secret is released ONLY to a caller that proves it is this
+    // device by presenting the provisioning token issued at /register.
     if (!device.provisioning_token || provisioning_token !== device.provisioning_token) {
       return json({ error: "Unauthorized" }, 401);
     }
 
-    const { data: institution, error: instError } = await supabase
-      .from("institutions")
-      .select("device_secret")
-      .eq("id", device.institution_id)
-      .single();
-
-    if (instError || !institution) {
-      return json({ error: "Institution not found" }, 500);
+    // T1e: mint a per-device secret if this device doesn't have one yet.
+    // This happens on first assignment-poll after T1 migration or first assignment.
+    let deviceSecret = device.device_secret as string | null;
+    if (!deviceSecret) {
+      deviceSecret = genSecret();
+      const { error: updateErr } = await supabase
+        .from("devices")
+        .update({ device_secret: deviceSecret })
+        .eq("id", device.id);
+      if (updateErr) {
+        return json({ error: "Failed to mint device secret" }, 500);
+      }
     }
 
     return json({
       status: "assigned",
       institution_id: device.institution_id,
-      device_secret: institution.device_secret,
+      // T1e: return the per-device secret (not the institution-wide secret).
+      // The firmware stores this and sends it as x-device-secret on every
+      // authenticated request (log-attendance, get-enrollment-job, update-enrollment-job).
+      device_secret: deviceSecret,
       display_name: device.display_name,
     });
   } catch (e) {

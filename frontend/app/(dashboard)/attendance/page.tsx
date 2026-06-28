@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole, getInstitution } from '@/lib/supabase/dal'
+import { requireRole, getInstitution, resolveInstitutionScope } from '@/lib/supabase/dal'
 import { AttendanceView } from './_components/attendance-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
@@ -11,8 +11,9 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const { role, assignedUnit, institutionId } = await requireRole('super_admin', 'admin', 'teacher', 'staff', 'platform_admin')
-  const institution = await getInstitution(institutionId)
+  const session = await requireRole('super_admin', 'admin', 'teacher', 'staff', 'platform_admin')
+  const { role, assignedUnit } = session
+  const institution = await getInstitution(session.institutionId)
 
   const params = await searchParams
   const fromDate = typeof params.from === 'string' ? params.from : undefined
@@ -35,8 +36,9 @@ export default async function AttendancePage({
 
   const supabase = createAdminClient()
 
-  // Effective institution scope for this request
-  const effectiveInstitutionId = institutionId ?? institutionFilter ?? null
+  // T6: resolveInstitutionScope closes the fail-open: non-platform roles are always
+  // scoped to their own institution; platform_admin may use the ?institution= param.
+  const effectiveInstitutionId = resolveInstitutionScope(session, institutionFilter)
 
   // Fetch all members with member_type so we can split into students vs staff for
   // the filter dropdowns in the view.
@@ -76,10 +78,16 @@ export default async function AttendancePage({
   const isTeacherRole = role === 'teacher' || role === 'staff'
   let teacherDeviceId: string | null = null
   if (isTeacherRole) {
-    const teacherDevice = assignedUnit
-      ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
-      : null
-    teacherDeviceId = teacherDevice?.id ?? null
+    // T8: prefer the FK (assigned_device_id) over the legacy string-match.
+    // verifySession now also returns assignedDeviceId from the profile row.
+    const profileDeviceId = (session as { assignedDeviceId?: string | null }).assignedDeviceId ?? null
+    if (profileDeviceId) {
+      teacherDeviceId = profileDeviceId
+    } else if (assignedUnit) {
+      // Fallback: match via legacy concatenated string (for profiles not yet backfilled)
+      const match = allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
+      teacherDeviceId = match?.id ?? null
+    }
     effectiveDeviceIds = teacherDeviceId ? [teacherDeviceId] : ['__no_match__']
   }
 
@@ -195,6 +203,7 @@ export default async function AttendancePage({
         track_students={institution.track_students}
         track_staff={institution.track_staff}
         institutionType={institution.type}
+        teacherNoDevice={noTeacherMatch}
         labels={{
           label_member: memberHeader,
           label_members: institution.label_members,

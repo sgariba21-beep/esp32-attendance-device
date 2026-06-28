@@ -5,9 +5,13 @@ import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function StaffPage() {
-  const { role, assignedUnit, institutionId } = await requireRole('super_admin', 'admin', 'teacher', 'staff', 'platform_admin')
+  // T20: staff directory is super_admin/admin/platform_admin only.
+  // teacher/staff roles are excluded — they only need their own profile, not a full
+  // staff directory. Placed in the (admin) route group for structural enforcement.
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
+  const { role } = session
   const supabase = createAdminClient()
-  const institution = await getInstitution(institutionId)
+  const institution = await getInstitution(session.institutionId)
   const isPlatformAdmin = role === 'platform_admin'
 
   let membersQ = supabase
@@ -22,9 +26,9 @@ export default async function StaffPage() {
     .order('group_name')
     .order('unit_name')
 
-  if (institutionId) {
-    membersQ = membersQ.eq('institution_id', institutionId)
-    devicesQ = devicesQ.eq('institution_id', institutionId)
+  if (session.institutionId) {
+    membersQ = membersQ.eq('institution_id', session.institutionId)
+    devicesQ = devicesQ.eq('institution_id', session.institutionId)
   }
 
   const institutionsP = isPlatformAdmin
@@ -37,22 +41,11 @@ export default async function StaffPage() {
   const allMembers = (membersRes.data ?? []) as unknown as StaffMemberWithDevice[]
   const institutions = (institutionsRes.data ?? []) as { id: string; name: string }[]
 
-  const visibleMembers = role === 'teacher' || role === 'staff'
-    ? (() => {
-        const teacherDevice = assignedUnit
-          ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
-          : null
-        return teacherDevice
-          ? allMembers.filter((m) => m.device_id === teacherDevice.id)
-          : []
-      })()
-    : allMembers
-
   return (
     <>
       <RealtimeRefresh />
       <StaffView
-        members={visibleMembers}
+        members={allMembers}
         devices={allDevices}
         role={role}
         institutions={institutions}

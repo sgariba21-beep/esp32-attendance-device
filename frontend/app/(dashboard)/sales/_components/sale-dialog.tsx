@@ -43,6 +43,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
   const [note, setNote] = useState('')
   const [items, setItems] = useState<LineItem[]>([emptyItem()])
   const [error, setError] = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -52,6 +53,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
       setNote('')
       setItems([emptyItem()])
       setError(null)
+      setWarnings([])
     }
   }, [open, preselectedClientId])
 
@@ -140,6 +142,13 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
 
     setLoading(false)
     if (result.error) { setError(result.error); return }
+
+    // T23: surface low-stock warnings as a non-blocking alert before closing.
+    if (result.warnings && result.warnings.length > 0) {
+      setWarnings(result.warnings)
+      return  // keep dialog open so user sees the warning; they can close manually
+    }
+
     onOpenChange(false)
   }
 
@@ -283,6 +292,27 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
           {error && (
             <Alert variant="error">
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* T23: non-blocking low-stock warnings — sale was recorded, but stock went negative */}
+          {warnings.length > 0 && (
+            <Alert variant="warning">
+              <AlertDescription>
+                <p className="font-medium mb-1">Sale recorded — low stock alert:</p>
+                <ul className="list-disc list-inside space-y-0.5">
+                  {warnings.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => onOpenChange(false)}
+                >
+                  Close
+                </Button>
+              </AlertDescription>
             </Alert>
           )}
 

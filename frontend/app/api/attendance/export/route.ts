@@ -1,8 +1,9 @@
 import type { NextRequest } from 'next/server'
 import { createAuthClient, createAdminClient } from '@/lib/supabase/server'
+import { resolveInstitutionScope } from '@/lib/supabase/dal'
+import type { Session } from '@/lib/supabase/dal'
 
 export async function GET(req: NextRequest) {
-  // Verify session
   const authClient = await createAuthClient()
   const { data: { user }, error: authError } = await authClient.auth.getUser()
   if (authError || !user) return new Response('Unauthorized', { status: 401 })
@@ -10,13 +11,14 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('role, institution_id, assigned_unit')
+    .select('role, institution_id, assigned_unit, assigned_device_id')
     .eq('id', user.id)
     .single()
 
   const role = profile?.role as string | undefined
   const institutionId = profile?.institution_id as string | null ?? null
   const assignedUnit = profile?.assigned_unit as string | null ?? null
+  const assignedDeviceId = profile?.assigned_device_id as string | null ?? null
 
   const allowedRoles = ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin']
   if (!role || !allowedRoles.includes(role)) return new Response('Forbidden', { status: 403 })
@@ -30,28 +32,39 @@ export async function GET(req: NextRequest) {
   const deviceIds = p.get('classes')?.split(',').filter(Boolean) ?? []
   const typeFilter = p.get('type') ?? undefined
   const statusFilter = p.get('status') ?? undefined
-  const institutionParam = p.get('institution') ?? undefined
+  const institutionParam = p.get('institution') ?? null
 
-  const effectiveInstitutionId = institutionId ?? institutionParam ?? null
+  // T6: resolveInstitutionScope closes the fail-open for non-platform roles.
+  const session: Session = {
+    user: { id: user.id },
+    role: role as Session['role'],
+    assignedUnit,
+    assignedDeviceId,
+    institutionId,
+  }
+  const effectiveInstitutionId = resolveInstitutionScope(session, institutionParam)
 
-  // H1: teacher/staff are restricted to their single assigned unit, exactly like
-  // the Attendance page. Without this, the export leaked the whole institution's
-  // attendance regardless of the requester's unit. Resolve assigned_unit → device.
+  // T8: teacher/staff use assigned_device_id FK, fall back to string-match for
+  // profiles not yet backfilled by T19.
   let effectiveDeviceIds = deviceIds
   let teacherNoMatch = false
   if (role === 'teacher' || role === 'staff') {
-    let devQ = admin.from('devices').select('id, group_name, unit_name')
-    if (effectiveInstitutionId) devQ = devQ.eq('institution_id', effectiveInstitutionId)
-    const { data: devs } = await devQ
-    const match = assignedUnit
-      ? (devs ?? []).find((d: { id: string; group_name: string; unit_name: string }) =>
-          `${d.group_name} ${d.unit_name}` === assignedUnit)
-      : null
-    if (match) effectiveDeviceIds = [match.id]
-    else teacherNoMatch = true
+    if (assignedDeviceId) {
+      effectiveDeviceIds = [assignedDeviceId]
+    } else if (assignedUnit) {
+      let devQ = admin.from('devices').select('id, group_name, unit_name')
+      if (effectiveInstitutionId) devQ = devQ.eq('institution_id', effectiveInstitutionId)
+      const { data: devs } = await devQ
+      const match = (devs ?? []).find((d: { id: string; group_name: string; unit_name: string }) =>
+        `${d.group_name} ${d.unit_name}` === assignedUnit
+      )
+      if (match) effectiveDeviceIds = [match.id]
+      else teacherNoMatch = true
+    } else {
+      teacherNoMatch = true
+    }
   }
 
-  // Resolve member IDs for type filter
   let typeMemberIds: string[] | null = null
   if (typeFilter) {
     let q = admin.from('members').select('id').eq('member_type', typeFilter)
@@ -83,7 +96,6 @@ export async function GET(req: NextRequest) {
   if (typeMemberIds !== null) query = query.in('member_id', typeMemberIds)
   if (statusFilter) query = query.eq('status', statusFilter)
 
-  // A teacher/staff whose assigned unit matches no device sees nothing (fail-closed).
   const { data: records } = teacherNoMatch ? { data: [] } : await query
 
   const isPlatformAdmin = role === 'platform_admin'

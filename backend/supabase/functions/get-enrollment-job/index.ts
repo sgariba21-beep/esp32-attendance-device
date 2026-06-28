@@ -5,28 +5,39 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: "Method not allowed" }, 405);
   }
 
-  // Device now identifies by its assigned device_id (from SPIFFS after
-  // assignment), not the old form+class string concatenation.
-  const { device_id } = await req.json();
+  let parsed: { device_id?: string };
+  try {
+    parsed = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { device_id } = parsed;
   if (!device_id) {
-    return new Response(JSON.stringify({ error: "Missing device_id" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: "Missing device_id" }, 400);
   }
 
-  // Check for a pending decommission signal BEFORE looking up the device row.
+  // T11: check for a pending decommission signal BEFORE looking up the device row.
   // The device_resets record is keyed by device_id and has no FK constraint,
-  // so it survives the deletion of the devices row. This handles both online
-  // devices (immediate next poll) and offline devices (whenever they return).
+  // so it survives the deletion of the devices row.
+  //
+  // T11 change from prior behaviour: do NOT delete the row on read. Return
+  // decommissioned:true while the row exists; clear it only when the device
+  // re-registers with a fresh identity. This removes the "one-shot signal"
+  // vulnerability where an attacker who knows a device UUID consumes the signal
+  // before the real device polls. Server-side revocation (devices.revoked, T1e)
+  // is the authoritative cut-off; the wipe is cosmetic cleanup.
   const { data: resetRecord } = await supabase
     .from("device_resets")
     .select("device_id")
@@ -34,45 +45,28 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (resetRecord) {
-    await supabase.from("device_resets").delete().eq("device_id", device_id);
-    return new Response(
-      JSON.stringify({ decommissioned: true }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
+    // Do NOT delete the row here (T11). The device will wipe and re-register;
+    // /register clears the reset row when a fresh MAC comes in for this device_id.
+    return json({ decommissioned: true });
   }
 
+  // T1e: authenticate against the per-device secret (not the institution secret).
   const { data: device, error: deviceError } = await supabase
     .from("devices")
-    .select("id, institution_id, display_name")
+    .select("id, institution_id, display_name, device_secret, revoked")
     .eq("id", device_id)
     .single();
 
   if (deviceError || !device) {
-    return new Response(JSON.stringify({ error: "Device not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: "Device not found" }, 404);
   }
 
-  // Validate per-institution secret.
-  const { data: institution, error: instError } = await supabase
-    .from("institutions")
-    .select("device_secret")
-    .eq("id", device.institution_id)
-    .single();
-
-  if (instError || !institution) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+  if (!device.device_secret || req.headers.get("x-device-secret") !== device.device_secret) {
+    return json({ error: "Unauthorized" }, 401);
   }
 
-  if (req.headers.get("x-device-secret") !== institution.device_secret) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+  if (device.revoked) {
+    return json({ error: "Device revoked" }, 403);
   }
 
   // Fetch oldest pending job for this device, scoped to institution.
@@ -90,17 +84,11 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   if (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ error: error.message }, 500);
   }
 
   if (!job) {
-    return new Response(JSON.stringify({ job: null }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return json({ job: null });
   }
 
   await supabase
@@ -111,21 +99,16 @@ Deno.serve(async (req: Request) => {
   const member = job.member as { id: string; sid: string; fullname: string } | null;
   const isMaster = job.command === "register-master";
 
-  return new Response(
-    JSON.stringify({
-      job: {
-        id: job.id,
-        command: job.command,
-        fid: job.fid ?? 0,
-        finger_slot: job.finger_slot ?? "",
-        student_id: member?.id ?? "",
-        sid: member?.sid ?? "",
-        fullname: isMaster ? (job.note ?? "Master") : (member?.fullname ?? ""),
-        // class_name renamed to unit_name; populated from the stored generated
-        // display_name column (group_name — unit_name).
-        unit_name: device.display_name ?? "",
-      },
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
-  );
+  return json({
+    job: {
+      id: job.id,
+      command: job.command,
+      fid: job.fid ?? 0,
+      finger_slot: job.finger_slot ?? "",
+      student_id: member?.id ?? "",
+      sid: member?.sid ?? "",
+      fullname: isMaster ? (job.note ?? "Master") : (member?.fullname ?? ""),
+      unit_name: device.display_name ?? "",
+    },
+  });
 });

@@ -13,11 +13,6 @@ const json = (body: unknown, status = 200) =>
 
 /**
  * Parse the device-supplied timestamp into a UTC instant (M13).
- *
- * The device RTC is synced to NTP at UTC offset 0, and the firmware sends
- * "YYYY-MM-DD HH:MM:SS" with no zone designator. We treat that as UTC and keep
- * it AUTHORITATIVE — attendance reflects when the scan happened on the device,
- * never when the server received it. Returns null if unparseable / implausible.
  */
 function parseInstant(ts: unknown): Date | null {
   if (typeof ts !== "string" || ts.trim().length < 19) return null;
@@ -33,9 +28,6 @@ function parseInstant(ts: unknown): Date | null {
 
 /**
  * Convert a UTC instant to wall-clock parts in the institution's timezone (H3).
- * Everything downstream — the stored date/time, the weekend check, holiday and
- * period boundaries — uses these, so log-attendance and mark-absent now agree on
- * what "today" is for a given institution.
  */
 function zonedParts(instant: Date, timeZone: string): { date: string; time: string; weekday: string } {
   let date: string, time: string, weekday: string;
@@ -44,7 +36,6 @@ function zonedParts(instant: Date, timeZone: string): { date: string; time: stri
     time = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(instant);
     weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(instant);
   } catch {
-    // Bad/unknown timezone string → fall back to UTC rather than crash.
     date = instant.toISOString().split("T")[0];
     time = instant.toISOString().split("T")[1].slice(0, 8);
     weekday = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" }).format(instant);
@@ -58,50 +49,103 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Method not allowed" }, 405);
     }
 
-    let parsed: { institution_id?: string; sid?: string; scan_id?: string; timestamp?: string };
+    let parsed: {
+      // New path (T1e): device_id identifies the device directly.
+      device_id?: string;
+      // Legacy / transitional fields (used by both paths).
+      institution_id?: string;
+      sid?: string;
+      scan_id?: string;
+      timestamp?: string;
+    };
     try {
       parsed = await req.json();
     } catch {
       return json({ error: "Invalid JSON body" }, 400);
     }
 
-    const { institution_id, sid, scan_id, timestamp } = parsed;
+    const { device_id, institution_id: bodyInstitutionId, sid, scan_id, timestamp } = parsed;
 
-    if (!institution_id || !sid || !scan_id || !timestamp) {
+    if (!sid || !scan_id || !timestamp) {
       return json({ error: "Missing required fields" }, 400);
     }
 
-    // M13: validate the device timestamp up front (and keep it authoritative).
     const instant = parseInstant(timestamp);
     if (!instant) {
       return json({ error: "Invalid timestamp" }, 400);
     }
 
-    // Validate secret and load institution config in one query.
+    let institution_id: string;
+    let authenticatedDeviceId: string | null = null;
+
+    if (device_id) {
+      // ── New path (T1e): per-device secret authentication ────────────────────
+      const { data: device, error: devErr } = await supabase
+        .from("devices")
+        .select("id, institution_id, device_secret, revoked")
+        .eq("id", device_id)
+        .single();
+
+      if (devErr || !device) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      if (!device.device_secret || req.headers.get("x-device-secret") !== device.device_secret) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      if (device.revoked) {
+        return json({ error: "Device revoked" }, 403);
+      }
+
+      if (!device.institution_id) {
+        return json({ error: "Device not assigned to an institution" }, 403);
+      }
+
+      institution_id = device.institution_id;
+      // Stamp attendance with the authenticated device, not member.device_id.
+      authenticatedDeviceId = device.id;
+    } else {
+      // TRANSITION: legacy path — validate against institutions.device_secret.
+      // Remove after all devices re-provisioned with per-device secrets (see T20m).
+      if (!bodyInstitutionId) {
+        return json({ error: "Missing device_id or institution_id" }, 400);
+      }
+      institution_id = bodyInstitutionId;
+
+      const { data: institution, error: instError } = await supabase
+        .from("institutions")
+        .select("device_secret, status, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode")
+        .eq("id", institution_id)
+        .single();
+
+      if (instError || !institution) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      if (req.headers.get("x-device-secret") !== institution.device_secret) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      // Status/config fetched below via a second query; store for now.
+      // Fall through to shared logic below.
+    }
+
+    // Load institution config (shared by both auth paths).
     const { data: institution, error: instError } = await supabase
       .from("institutions")
-      .select(
-        "device_secret, status, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode"
-      )
+      .select("status, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode")
       .eq("id", institution_id)
       .single();
 
     if (instError || !institution) {
-      return json({ error: "Unauthorized" }, 401);
+      return json({ error: "Institution not found" }, 500);
     }
 
-    if (req.headers.get("x-device-secret") !== institution.device_secret) {
-      return json({ error: "Unauthorized" }, 401);
-    }
-
-    // #4: a suspended/deactivated institution's hardware must stop writing
-    // attendance. Checked AFTER secret validation so status is not leaked to
-    // unauthenticated callers. 403 = authenticated device, tenant switched off.
     if (institution.status !== "active") {
       return json({ error: "Institution inactive" }, 403);
     }
 
-    // H3: derive date/time/weekday in the institution's timezone.
     const tz = institution.timezone || "UTC";
     const { date, time, weekday } = zonedParts(instant, tz);
 
@@ -111,7 +155,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Holiday check (local date).
     const { data: holiday } = await supabase
       .from("holidays")
       .select("label")
@@ -124,7 +167,6 @@ Deno.serve(async (req: Request) => {
       return json({ message: `Holiday (${holiday.label}) — scan ignored` });
     }
 
-    // Look up member — include member_type to determine tracking rules.
     const { data: member, error: memberError } = await supabase
       .from("members")
       .select("id, device_id, member_type")
@@ -137,10 +179,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Member not found" }, 404);
     }
 
-    // Determine tracking rules based on member_type.
-    // 'member' (the neutral/generic type) follows student rules.
-    const isStudentLike =
-      member.member_type === "student" || member.member_type === "member";
+    const isStudentLike = member.member_type === "student" || member.member_type === "member";
     const isStaff = member.member_type === "staff";
 
     if (isStudentLike && !institution.track_students) {
@@ -151,11 +190,8 @@ Deno.serve(async (req: Request) => {
       return json({ message: "Member type not tracked — scan ignored" });
     }
 
-    const scanMode = isStaff
-      ? institution.staff_scan_mode
-      : institution.student_scan_mode;
+    const scanMode = isStaff ? institution.staff_scan_mode : institution.student_scan_mode;
 
-    // Find active period (nullable — office-type institutions may have none).
     const { data: period } = await supabase
       .from("periods")
       .select("id, start_date, end_date")
@@ -172,7 +208,6 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Determine scan_type based on the mode configured for this member type.
     let scan_type: "present" | "time_in" | "time_out";
 
     if (scanMode === "time_in_out") {
@@ -195,10 +230,13 @@ Deno.serve(async (req: Request) => {
       scan_type = "present";
     }
 
+    // Use the authenticated device_id (new path) or fall back to member.device_id (legacy).
+    const effectiveDeviceId = authenticatedDeviceId ?? member.device_id;
+
     const { error: insertError } = await supabase.from("attendance").insert({
       member_id: member.id,
       period_id: period?.id ?? null,
-      device_id: member.device_id,
+      device_id: effectiveDeviceId,
       institution_id,
       date,
       time,
@@ -208,8 +246,6 @@ Deno.serve(async (req: Request) => {
     });
 
     if (insertError) {
-      // Unique violation — either (member_id, date, scan_type) duplicate for the
-      // day, or (institution_id, scan_id) replay. Either way it's a duplicate.
       if (insertError.code === "23505") {
         return json({ message: "Duplicate scan ignored" });
       }

@@ -18,7 +18,7 @@ export const verifySession = cache(async () => {
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('role, assigned_unit, institution_id')
+    .select('role, assigned_unit, assigned_device_id, institution_id')
     .eq('id', user!.id)
     .single()
 
@@ -31,6 +31,7 @@ export const verifySession = cache(async () => {
 
   const role = profile.role as UserRole
   const assignedUnit = (profile.assigned_unit as string | null) ?? null
+  const assignedDeviceId = (profile.assigned_device_id as string | null) ?? null
   const institutionId = (profile.institution_id as string | null) ?? null
 
   // Deactivation gate (the chokepoint): a non-platform user whose institution is
@@ -45,13 +46,14 @@ export const verifySession = cache(async () => {
     }
   }
 
-  return { user: user!, role, assignedUnit, institutionId }
+  return { user: user!, role, assignedUnit, assignedDeviceId, institutionId }
 })
 
 export type Session = {
   user: { id: string }
   role: UserRole
   assignedUnit: string | null
+  assignedDeviceId: string | null
   institutionId: string | null
 }
 
@@ -62,6 +64,33 @@ export async function requireRole(...roles: UserRole[]) {
     redirect('/unauthorized')
   }
   return session
+}
+
+/**
+ * T6 — Tenant scope resolver (closes the fail-open anti-pattern).
+ *
+ * Non-platform roles are ALWAYS scoped to their own institution — the
+ * ?institution= query param is silently ignored for them. If a non-platform
+ * user somehow has no institutionId (should never happen after T5 RBAC gates),
+ * we hard-fail with a 403 redirect rather than defaulting to cross-tenant null.
+ *
+ * platform_admin may optionally scope to a specific institution via the param.
+ */
+export function resolveInstitutionScope(
+  session: Session,
+  institutionParam?: string | null,
+): string | null {
+  if (session.role === 'platform_admin') {
+    // platform_admin: use the param if provided, otherwise cross-tenant (null = all)
+    return institutionParam ?? null
+  }
+  // Non-platform: institution must be set — fail closed if it isn't
+  if (!session.institutionId) {
+    redirect('/unauthorized')
+    return null // unreachable — redirect() throws
+  }
+  // Ignore any institution param for non-platform roles (fix T6 fail-open)
+  return session.institutionId
 }
 
 export const getInstitution = cache(async (institutionId: string | null): Promise<InstitutionConfig> => {

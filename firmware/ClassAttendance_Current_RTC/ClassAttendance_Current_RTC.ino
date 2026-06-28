@@ -61,7 +61,8 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define SCAN_COOLDOWN_MS 60000UL
 #define ENROLL_POLL_MS 10000UL
 #define ENROLL_POLL_FAST_MS 2000UL
-#define QUEUE_FILE "/queue.txt"
+#define QUEUE_FILE         "/queue.txt"
+#define QUEUE_INFLIGHT_FILE "/queue_inflight.txt"  // T2/T12: rotate-then-process
 #define FID_MAP_FILE "/fid_map.csv"   // fid,uniqueId,role,name
 #define WIFI_CREDS_FILE "/wifi_creds.json"
 #define AP_SSID  "Attendance-Setup"
@@ -85,7 +86,6 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #include <SPIFFS.h>
 #include <time.h>
 #include <vector>
-#include <deque>
 #include <string>
 #include <Adafruit_Fingerprint.h>
 #include <Wire.h>
@@ -105,8 +105,8 @@ HardwareSerial r503Serial(2);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&r503Serial);
 
 /* Synchronisation primitives */
-SemaphoreHandle_t memQueueMutex = NULL;
-SemaphoreHandle_t memQueueSem   = NULL;
+// memQueueMutex removed (T2/T12): SPIFFS is now the sole queue; spiffsMutex guards it.
+SemaphoreHandle_t memQueueSem   = NULL;  // binary signal: FingerprintTask → NetworkTask
 SemaphoreHandle_t spiffsMutex   = NULL;
 SemaphoreHandle_t enrollMutex   = NULL;
 SemaphoreHandle_t enrollSem     = NULL;
@@ -126,7 +126,6 @@ TaskHandle_t hFingerprint = NULL;
 TaskHandle_t hNetwork     = NULL;
 TaskHandle_t hEnrollment  = NULL;
 
-std::deque<String> memQueue;
 std::vector<String> fidMap;
 std::vector<String> fidMapRole;
 std::vector<String> fidMapName;
@@ -153,7 +152,7 @@ void showReadyState();
 void setSensorLED(uint8_t mode, uint8_t speed, uint8_t color);
 int fingerSearch();
 String makeScanId(const String &id);
-void sendOrQueuePayload(const String &payloadJson);
+void queueAndSignal(const String &payloadJson);
 bool initFS();
 bool loadFidMapFromFS();
 bool saveFidMapToFS();
@@ -171,8 +170,8 @@ String getRTCTimestamp();
 bool parsePayloadAgeSec(const String &payload, long nowEpoch, long &outAgeSec);
 void trimSPIFFSQueue_locked();
 bool appendToSPIFFSQueue_locked(const String &line);
-void trimQueue();
 void flushQueue();
+static void recoverInflightQueue();
 
 #define POST_MAX_RETRIES   3
 #define POST_BASE_DELAY_MS 500
@@ -702,6 +701,10 @@ bool registerDevice() {
     displayName   = extractStr("display_name");
     saveDeviceIdentity();
     clearProvisioning();
+    // T9: ensure all identity writes are visible to NetworkTask on Core 0 before
+    // clearing the flag. Without a compiler barrier the assignments above could
+    // be reordered past the store to pendingAssignment by the compiler.
+    __asm__ volatile("" ::: "memory");
     pendingAssignment = false;
   } else {
     // H7: capture and persist the provisioning token so /assignment-poll can
@@ -751,6 +754,9 @@ bool pollAssignment() {
 
   saveDeviceIdentity();
   clearProvisioning();
+  // T9: compiler barrier — all identity stores must be globally visible before
+  // NetworkTask observes pendingAssignment == false on the other core.
+  __asm__ volatile("" ::: "memory");
   pendingAssignment = false;
   Serial.printf("Assigned! institution_id=%s display_name=%s\n",
                 institutionId.c_str(), displayName.c_str());
@@ -763,7 +769,9 @@ void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
   if (jobId.length() == 0) return;
 
   // M9: escape every interpolated value (note especially can contain free text).
-  String payload = "{\"id\":\"" + jsonEscape(jobId) + "\",\"institution_id\":\"" + jsonEscape(institutionId) +
+  // T1e: include device_id so update-enrollment-job can authenticate via per-device secret.
+  String payload = "{\"id\":\"" + jsonEscape(jobId) + "\",\"device_id\":\"" + jsonEscape(deviceId) +
+                   "\",\"institution_id\":\"" + jsonEscape(institutionId) +
                    "\",\"status\":\"" + jsonEscape(status) + "\"";
   if (fingerId > 0)        payload += ",\"fid\":"            + String(fingerId);
   if (note.length())       payload += ",\"note\":\""         + jsonEscape(note)       + "\"";
@@ -1022,72 +1030,66 @@ bool appendToSPIFFSQueue_locked(const String &line) {
   return true;
 }
 
-void trimQueue() {
-  long nowEpoch = rtc.now().unixtime();
-  std::deque<String> kept;
-  for (auto &entry : memQueue) {
-    long ageSec = 0;
-    bool parsed = parsePayloadAgeSec(entry, nowEpoch, ageSec);
-    if (entryIsStale(ageSec, parsed)) { Serial.printf("memQueue: dropping stale entry (age=%lds)\n", ageSec); continue; }
-    kept.push_back(entry);
+// T2/T12: SPIFFS is the single source of truth — no memQueue.
+// Append payload to SPIFFS for durability, then signal NetworkTask for
+// immediate low-latency delivery. FingerprintTask calls this on Core 1.
+void queueAndSignal(const String &payloadJson) {
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+  if (appendToSPIFFSQueue_locked(payloadJson)) {
+    Serial.println("[queue] Persisted to SPIFFS: " + payloadJson);
   }
-  memQueue = kept;
-  while (memQueue.size() > QUEUE_MAX_ENTRIES) {
-    Serial.printf("memQueue full (%u); dropping oldest.\n", (unsigned)memQueue.size());
-    memQueue.pop_front();
-  }
+  xSemaphoreGive(spiffsMutex);
+  // Non-blocking give: if NetworkTask is mid-flush the signal is latched and
+  // will be consumed at the start of the next loop iteration.
+  xSemaphoreGive(memQueueSem);
 }
 
-void sendOrQueuePayload(const String &payloadJson) {
-  if (WiFi.status() != WL_CONNECTED) {
-    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-    if (appendToSPIFFSQueue_locked(payloadJson))
-      Serial.println("Queued locally (SPIFFS): " + payloadJson);
+// T2/T12: rotate-then-process flush. Under the lock we rename QUEUE_FILE to
+// QUEUE_INFLIGHT_FILE, releasing the lock immediately so FingerprintTask can
+// keep appending to a fresh QUEUE_FILE while we do the network I/O without
+// holding spiffsMutex. Failures are re-appended to QUEUE_FILE at the end.
+// Crash-safe: recoverInflightQueue() in setup() merges any orphaned inflight
+// file back into QUEUE_FILE on next boot.
+void flushQueue() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+  if (!SPIFFS.exists(QUEUE_FILE)) {
     xSemaphoreGive(spiffsMutex);
     return;
   }
-
-  // Persist to SPIFFS first for durability; NetworkTask clears on successful POST.
-  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-  appendToSPIFFSQueue_locked(payloadJson);
+  bool renamed = SPIFFS.rename(QUEUE_FILE, QUEUE_INFLIGHT_FILE);
   xSemaphoreGive(spiffsMutex);
-  Serial.println("[sendOrQueue] Persisted to SPIFFS: " + payloadJson);
 
-  if (xSemaphoreTake(memQueueMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    trimQueue();
-    memQueue.push_back(payloadJson);
-    xSemaphoreGive(memQueueMutex);
-    xSemaphoreGive(memQueueSem);
-    Serial.println("[sendOrQueue] Also pushed to memQueue for immediate send.");
-  } else {
-    Serial.println("[sendOrQueue] memQueue mutex timeout; SPIFFS-only path active.");
+  if (!renamed) {
+    Serial.println("flushQueue: rotate rename failed");
+    return;
   }
-}
 
-void flushQueue() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  // Read + filter the inflight snapshot — no lock needed here; only this
+  // function creates or deletes QUEUE_INFLIGHT_FILE.
   std::vector<String> pending;
   size_t droppedStale = 0;
   long nowEpoch = rtc.now().unixtime();
 
-  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-  File f = SPIFFS.open(QUEUE_FILE, FILE_READ);
-  if (!f) { xSemaphoreGive(spiffsMutex); return; }
-  while (f.available()) {
-    String ln = f.readStringUntil('\n');
-    ln.trim();
-    if (!ln.length()) continue;
-    long ageSec = 0;
-    bool parsed = parsePayloadAgeSec(ln, nowEpoch, ageSec);
-    if (entryIsStale(ageSec, parsed)) { droppedStale++; continue; }
-    pending.push_back(ln);
+  File f = SPIFFS.open(QUEUE_INFLIGHT_FILE, FILE_READ);
+  if (f) {
+    while (f.available()) {
+      String ln = f.readStringUntil('\n');
+      ln.trim();
+      if (!ln.length()) continue;
+      long ageSec = 0;
+      bool parsed = parsePayloadAgeSec(ln, nowEpoch, ageSec);
+      if (entryIsStale(ageSec, parsed)) { droppedStale++; continue; }
+      pending.push_back(ln);
+    }
+    f.close();
   }
-  f.close();
-  xSemaphoreGive(spiffsMutex);
 
   if (droppedStale) Serial.printf("flushQueue: dropped %u stale entries\n", (unsigned)droppedStale);
+
   if (pending.empty()) {
-    if (droppedStale) { xSemaphoreTake(spiffsMutex, portMAX_DELAY); SPIFFS.remove(QUEUE_FILE); xSemaphoreGive(spiffsMutex); }
+    SPIFFS.remove(QUEUE_INFLIGHT_FILE);
     return;
   }
 
@@ -1096,8 +1098,7 @@ void flushQueue() {
   for (auto &entry : pending) {
     int httpCode = 0; String body;
     bool ok = postJSONToUrl(entry, SUPABASE_URL, httpCode, body);
-    if (ok) { Serial.printf("flushQueue: sent OK: %s\n", entry.c_str()); continue; }
-    // Transient failure: retain for retry. Permanent (4xx): drop.
+    if (ok) { Serial.printf("flushQueue: sent OK\n"); continue; }
     if (httpCode >= 500 || httpCode == 429 || httpCode < 0) {
       Serial.printf("flushQueue: transient (code=%d). Keeping record.\n", httpCode);
       keep.push_back(entry);
@@ -1107,13 +1108,13 @@ void flushQueue() {
     vTaskDelay(200 / portTICK_PERIOD_MS);
   }
 
-  // Enforce count cap
+  // Enforce count cap on what we're about to re-append.
   size_t capDroppedCount = 0;
   if (keep.size() > QUEUE_MAX_SPIFFS_ENTRIES) {
     capDroppedCount = keep.size() - QUEUE_MAX_SPIFFS_ENTRIES;
     keep.erase(keep.begin(), keep.begin() + capDroppedCount);
   }
-  // Enforce byte cap (keep newest that fit)
+  // Enforce byte cap (keep newest that fit).
   size_t capDroppedBytes = 0;
   {
     size_t totalBytes = 0, firstKeep = 0;
@@ -1123,25 +1124,47 @@ void flushQueue() {
       totalBytes += keep[idx].length() + 1;
       if (totalBytes > QUEUE_MAX_SPIFFS_BYTES) { firstKeep = idx + 1; byteCapHit = true; break; }
     }
-    if (byteCapHit && firstKeep > 0) {
-      capDroppedBytes = firstKeep;
-      keep.erase(keep.begin(), keep.begin() + firstKeep);
-    }
+    if (byteCapHit && firstKeep > 0) { capDroppedBytes = firstKeep; keep.erase(keep.begin(), keep.begin() + firstKeep); }
   }
   if (capDroppedCount || capDroppedBytes)
     Serial.printf("flushQueue: cap enforced (count-dropped=%u bytes-dropped=%u)\n",
                   (unsigned)capDroppedCount, (unsigned)capDroppedBytes);
 
-  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-  if (keep.empty()) {
-    SPIFFS.remove(QUEUE_FILE);
-    Serial.println("Queue cleared.");
+  // Re-append transient failures to the live QUEUE_FILE. New scans that arrived
+  // during the network send are already in QUEUE_FILE — we append, not overwrite.
+  if (!keep.empty()) {
+    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+    for (auto &ln : keep) appendToSPIFFSQueue_locked(ln);
+    xSemaphoreGive(spiffsMutex);
+    Serial.printf("flushQueue: re-queued %u transient failures\n", (unsigned)keep.size());
   } else {
-    File wf = SPIFFS.open(QUEUE_FILE, FILE_WRITE);
-    if (wf) { for (auto &ln : keep) wf.println(ln); wf.close(); Serial.printf("Queue retained %u records\n", (unsigned)keep.size()); }
-    else Serial.println("flushQueue: rewrite failed to open");
+    Serial.println("Queue cleared.");
   }
-  xSemaphoreGive(spiffsMutex);
+
+  // Inflight file is now fully processed; delete it. If we crash here the
+  // orphaned file is harmless (recoverInflightQueue handles it on next boot).
+  SPIFFS.remove(QUEUE_INFLIGHT_FILE);
+}
+
+// T2/T12: boot crash-recovery. If a power-cut or crash happened while
+// flushQueue() held QUEUE_INFLIGHT_FILE, merge it back into QUEUE_FILE so
+// those records are retried rather than lost. Must run before tasks start.
+static void recoverInflightQueue() {
+  if (!SPIFFS.exists(QUEUE_INFLIGHT_FILE)) return;
+  Serial.println("Boot recovery: merging inflight queue into live queue");
+  File inf = SPIFFS.open(QUEUE_INFLIGHT_FILE, FILE_READ);
+  if (!inf) { SPIFFS.remove(QUEUE_INFLIGHT_FILE); return; }
+  File live = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
+  if (!live) { inf.close(); SPIFFS.remove(QUEUE_INFLIGHT_FILE); return; }
+  while (inf.available()) {
+    String ln = inf.readStringUntil('\n');
+    ln.trim();
+    if (ln.length()) live.println(ln);
+  }
+  live.close();
+  inf.close();
+  SPIFFS.remove(QUEUE_INFLIGHT_FILE);
+  Serial.println("Boot recovery: inflight queue merged.");
 }
 
 /* =================== OTA Update =================== */
@@ -1280,9 +1303,13 @@ void checkAndApplyOTA() {
 /* =================== End OTA =================== */
 
 /* =================== NetworkTask (Core 0) =================== */
+// T2/T12: memQueue removed. NetworkTask waits on a binary semaphore given by
+// FingerprintTask via queueAndSignal(), OR on a periodic flush-interval timeout.
+// Either way it calls flushQueue() which owns the rotate-then-process logic.
 void NetworkTask(void *pvParameters) {
   const TickType_t flushIntervalTicks = pdMS_TO_TICKS(15000);
   esp_task_wdt_delete(NULL);
+  static bool rtcSynced = false;
 
   if (WiFi.status() == WL_CONNECTED && !pendingAssignment) {
     Serial.println("NetworkTask: boot flush — sending any queued records.");
@@ -1300,73 +1327,45 @@ void NetworkTask(void *pvParameters) {
         continue;
       }
       if (deviceId.length() == 0) {
-        // Registration hasn't succeeded yet (e.g. first boot with no WiFi)
         registerDevice();
       } else {
         if (pollAssignment()) {
           Serial.println("NetworkTask: device assigned — flushing queue.");
+          rtcSynced = false;
           flushQueue();
         }
       }
       continue;
     }
 
-    // Normal operation: drain memQueue
-    String payload = "";
-    bool hadPayload = false;
-    if (xSemaphoreTake(memQueueMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-      if (!memQueue.empty()) {
-        payload = memQueue.front();
-        memQueue.pop_front();
-        hadPayload = true;
-      }
-      xSemaphoreGive(memQueueMutex);
-    }
+    // Normal operation: wait for a scan signal or the periodic flush interval.
+    // pdTRUE = FingerprintTask signalled a new scan; pdFALSE = interval timeout.
+    xSemaphoreTake(memQueueSem, flushIntervalTicks);
+    // Consume any extra signals that stacked while we were in flushQueue().
+    while (xSemaphoreTake(memQueueSem, 0) == pdTRUE) {}
 
-    if (hadPayload) {
-      Serial.println("NetworkTask: sending payload from memQueue");
-      int httpCode = 0; String body;
-      bool ok = postJSONToUrl(payload, SUPABASE_URL, httpCode, body);
-      if (!ok) {
-        if (httpCode >= 500 || httpCode == 429 || httpCode < 0) {
-          Serial.printf("NetworkTask: transient (code=%d). Re-queuing.\n", httpCode);
-          xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-          appendToSPIFFSQueue_locked(payload);
-          xSemaphoreGive(spiffsMutex);
-        } else {
-          Serial.printf("NetworkTask: permanent failure (code=%d). Dropping payload.\n", httpCode);
-        }
+    if (WiFi.status() == WL_CONNECTED) {
+      if (!rtcSynced) {
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        syncRTCFromNTP();
+        rtcSynced = true;
       }
-      continue;
-    }
-
-    if (xSemaphoreTake(memQueueSem, flushIntervalTicks) == pdTRUE) {
-      continue;
+      flushQueue();
     } else {
-      static bool rtcSynced = false;
-      if (WiFi.status() == WL_CONNECTED) {
-        if (!rtcSynced) {
-          configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-          vTaskDelay(pdMS_TO_TICKS(2000));
-          syncRTCFromNTP();
-          rtcSynced = true;
-        }
-        flushQueue();
-      } else {
-        rtcSynced = false;
-        Serial.println("NetworkTask: WiFi not connected; attempting reconnect");
-        WiFi.disconnect(true);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
+      rtcSynced = false;
+      Serial.println("NetworkTask: WiFi not connected; attempting reconnect");
+      WiFi.disconnect(true);
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
 
-        static unsigned long lastSPIFFSTrimMs = 0;
-        unsigned long nowMs = millis();
-        if (lastSPIFFSTrimMs == 0 || (nowMs - lastSPIFFSTrimMs) > QUEUE_SPIFFS_TRIM_INTERVAL_MS) {
-          lastSPIFFSTrimMs = nowMs;
-          xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-          trimSPIFFSQueue_locked();
-          xSemaphoreGive(spiffsMutex);
-        }
+      static unsigned long lastSPIFFSTrimMs = 0;
+      unsigned long nowMs = millis();
+      if (lastSPIFFSTrimMs == 0 || (nowMs - lastSPIFFSTrimMs) > QUEUE_SPIFFS_TRIM_INTERVAL_MS) {
+        lastSPIFFSTrimMs = nowMs;
+        xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+        trimSPIFFSQueue_locked();
+        xSemaphoreGive(spiffsMutex);
       }
     }
   }
@@ -1546,13 +1545,15 @@ void FingerprintTask(void *pvParameters) {
         String scanId = makeScanId(mapped);
         String ts = getRTCTimestamp();
         // M9: escape interpolated values (member sid is admin-entered text).
-        String payload = "{\"institution_id\":\"" + jsonEscape(institutionId) +
+        // T1e: include device_id so log-attendance can authenticate via per-device secret.
+        String payload = "{\"device_id\":\"" + jsonEscape(deviceId) +
+                         "\",\"institution_id\":\"" + jsonEscape(institutionId) +
                          "\",\"sid\":\"" + jsonEscape(mapped) +
                          "\",\"scan_id\":\"" + jsonEscape(scanId) +
                          "\",\"timestamp\":\"" + jsonEscape(ts) + "\"}";
         vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
         showReadyState();
-        sendOrQueuePayload(payload);
+        queueAndSignal(payload);
         appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | SENT | id=" + mapped +
                       " | name=" + fidMapName[fid]);
         vTaskDelay(200 / portTICK_PERIOD_MS);
@@ -1589,17 +1590,18 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
-  memQueueMutex = xSemaphoreCreateMutex();
-  memQueueSem   = xSemaphoreCreateBinary();
-  spiffsMutex   = xSemaphoreCreateMutex();
-  enrollMutex   = xSemaphoreCreateMutex();
-  enrollSem     = xSemaphoreCreateBinary();
-  if (!memQueueMutex || !memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem) {
+  // T2/T12: memQueueMutex removed; spiffsMutex guards the SPIFFS-only queue.
+  memQueueSem = xSemaphoreCreateBinary();
+  spiffsMutex = xSemaphoreCreateMutex();
+  enrollMutex = xSemaphoreCreateMutex();
+  enrollSem   = xSemaphoreCreateBinary();
+  if (!memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem) {
     Serial.println("Failed to create RTOS primitives");
     while (1) delay(1000);
   }
 
   if (!initFS()) Serial.println("SPIFFS failed");
+  recoverInflightQueue();  // T2/T12: merge any crash-orphaned inflight file
 
   // Load device identity (device_id, institution_id, device_secret, display_name)
   if (!loadDeviceIdentity()) {
@@ -1678,6 +1680,12 @@ void setup() {
   Serial.println("Tasks created; main loop will idle");
 
   if (WiFi.status() == WL_CONNECTED && !pendingAssignment) {
+    // T14: randomise the boot OTA check so a fleet-wide power blip doesn't
+    // simultaneously hit GitHub's 60 req/hr unauthenticated rate limit.
+    // esp_random() is seeded from hardware entropy; uniform across [0, 120 s).
+    uint32_t jitterMs = esp_random() % 120000UL;
+    Serial.printf("OTA: boot jitter %ums\n", jitterMs);
+    delay(jitterMs);
     checkAndApplyOTA();
   }
 }

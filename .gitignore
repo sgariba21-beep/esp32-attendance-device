@@ -1,1 +1,7 @@
 CLAUDE.md
+
+# Environment secrets — never commit these
+.env
+.env.local
+.env*.local
+backend/supabase/functions/.env

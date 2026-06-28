@@ -56,7 +56,9 @@ export default function LoginPage() {
       const res = await fetch('/api/signin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
+        // T22: send the password exactly as entered — trimming breaks passwords
+        // that legitimately contain leading/trailing spaces.
+        body: JSON.stringify({ email: email.trim(), password }),
       })
       const contentType = res.headers.get('content-type') ?? ''
       if (!contentType.includes('application/json')) {
@@ -177,8 +179,16 @@ export default function LoginPage() {
           </form>
         </div>
 
+        {/* T21: password recovery note — no self-service SMTP flow; admin resets passwords */}
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          Protected dashboard · Authorized accounts only
+          Forgot your password?{' '}
+          <a
+            href="mailto:sgariba21@gmail.com?subject=Password+reset+request"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            Contact your administrator
+          </a>
+          .
         </p>
       </div>
     </div>
