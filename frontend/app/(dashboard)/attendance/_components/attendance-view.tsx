@@ -211,9 +211,8 @@ export function AttendanceView({
       <div className="space-y-6">
         <PageHeader title="Attendance" />
         <EmptyState
-          icon={<Lock className="h-8 w-8 text-muted-foreground" />}
-          title="No unit assigned"
-          description="Your account isn't assigned to a unit yet — contact your administrator."
+          icon={Lock}
+          message="Your account isn't assigned to a unit yet — contact your administrator."
         />
       </div>
     )
