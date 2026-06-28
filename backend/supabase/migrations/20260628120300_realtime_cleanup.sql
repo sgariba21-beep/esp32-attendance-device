@@ -22,20 +22,24 @@
 -- =====================================================================
 
 -- Remove the high-WAL-cost tables from the realtime publication.
--- alter publication ... drop table is idempotent if the table isn't a member,
--- but Postgres <16 doesn't have IF EXISTS here — wrap in DO to be safe.
+-- ALTER PUBLICATION ... DROP TABLE has no IF EXISTS variant in any Postgres version.
+-- Guard with pg_publication_tables so this migration is safe to re-run and works
+-- in dev environments where the table was never added to the publication.
 do $$
+declare
+  tbl text;
 begin
-  alter publication supabase_realtime
-    drop table if exists
-      public.members,
-      public.devices,
-      public.periods,
-      public.attendance,
-      public.holidays;
-exception
-  when undefined_object then null;  -- publication doesn't exist in dev
-  when others then null;            -- table already not a member
+  foreach tbl in array array['members', 'devices', 'periods', 'attendance', 'holidays']
+  loop
+    if exists (
+      select 1 from pg_publication_tables
+       where pubname     = 'supabase_realtime'
+         and schemaname  = 'public'
+         and tablename   = tbl
+    ) then
+      execute format('alter publication supabase_realtime drop table public.%I', tbl);
+    end if;
+  end loop;
 end $$;
 
 -- Revert REPLICA IDENTITY FULL → default for tables leaving the publication.
