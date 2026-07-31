@@ -33,7 +33,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define PROVISIONING_FILE "/provisioning.json"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.2.0"         // increment on each flash (1.2.0: TLS validation, provisioning token, JSON escaping)
+#define FIRMWARE_VERSION  "1.3.0"         // increment on each flash (1.3.0: ArduinoJson replaces hand-rolled JSON parsing)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -94,6 +94,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #include <DNSServer.h>
 #include "esp_task_wdt.h"
 #include <Update.h>
+#include <ArduinoJson.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -183,7 +184,6 @@ bool loadDeviceIdentity();
 void saveDeviceIdentity();
 bool registerDevice();
 bool pollAssignment();
-String jsonEscape(const String &s);
 bool loadProvisioning();
 void saveProvisioning();
 void clearProvisioning();
@@ -242,61 +242,37 @@ bool loadDeviceIdentity() {
   if (!SPIFFS.exists(DEVICE_IDENTITY_FILE)) return false;
   File f = SPIFFS.open(DEVICE_IDENTITY_FILE, FILE_READ);
   if (!f) return false;
-  String json = f.readString();
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
   f.close();
+  if (err) {
+    Serial.printf("Device identity parse failed: %s\n", err.c_str());
+    return false;
+  }
 
-  auto extractStr = [&](const String &key) -> String {
-    String search = "\"" + key + "\":\"";
-    int p = json.indexOf(search);
-    if (p < 0) return "";
-    int start = p + search.length();
-    int end = json.indexOf('"', start);
-    if (end < 0) return "";
-    return json.substring(start, end);
-  };
-
-  deviceId      = extractStr("device_id");
-  institutionId = extractStr("institution_id");
-  deviceSecret  = extractStr("device_secret");
-  displayName   = extractStr("display_name");
+  // The `| ""` default covers both a missing key and an explicit JSON null.
+  deviceId      = doc["device_id"]      | "";
+  institutionId = doc["institution_id"] | "";
+  deviceSecret  = doc["device_secret"]  | "";
+  displayName   = doc["display_name"]   | "";
 
   return deviceId.length() > 0 && institutionId.length() > 0;
 }
 
-// M9: escape a string for safe inclusion inside a JSON string literal. Without
-// this, a display_name / member sid containing a " or \ corrupts the JSON we
-// write to SPIFFS or POST to the server.
-String jsonEscape(const String &s) {
-  String out;
-  out.reserve(s.length() + 8);
-  for (size_t i = 0; i < s.length(); ++i) {
-    char c = s[i];
-    switch (c) {
-      case '"':  out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n";  break;
-      case '\r': out += "\\r";  break;
-      case '\t': out += "\\t";  break;
-      default:
-        if ((unsigned char)c < 0x20) {
-          char buf[7];
-          sprintf(buf, "\\u%04x", c);
-          out += buf;
-        } else {
-          out += c;
-        }
-    }
-  }
-  return out;
-}
+// M9 (superseded in 1.3.0): hand-rolled jsonEscape() is gone — ArduinoJson
+// escapes on serialize, so a display_name / member sid containing " or \ is
+// handled by the library for every payload we write to SPIFFS or POST.
 
 void saveDeviceIdentity() {
   File f = SPIFFS.open(DEVICE_IDENTITY_FILE, FILE_WRITE);
   if (!f) { Serial.println("Failed to write device identity"); return; }
-  f.print("{\"device_id\":\"" + jsonEscape(deviceId) +
-          "\",\"institution_id\":\"" + jsonEscape(institutionId) +
-          "\",\"device_secret\":\"" + jsonEscape(deviceSecret) +
-          "\",\"display_name\":\"" + jsonEscape(displayName) + "\"}");
+  JsonDocument doc;
+  doc["device_id"]      = deviceId;
+  doc["institution_id"] = institutionId;
+  doc["device_secret"]  = deviceSecret;
+  doc["display_name"]   = displayName;
+  serializeJson(doc, f);
   f.close();
   Serial.println("Device identity saved: " + deviceId + " / " + displayName);
 }
@@ -307,8 +283,10 @@ void saveDeviceIdentity() {
 void saveProvisioning() {
   File f = SPIFFS.open(PROVISIONING_FILE, FILE_WRITE);
   if (!f) { Serial.println("Failed to write provisioning file"); return; }
-  f.print("{\"device_id\":\"" + jsonEscape(deviceId) +
-          "\",\"provisioning_token\":\"" + jsonEscape(provisioningToken) + "\"}");
+  JsonDocument doc;
+  doc["device_id"]          = deviceId;
+  doc["provisioning_token"] = provisioningToken;
+  serializeJson(doc, f);
   f.close();
 }
 
@@ -316,21 +294,17 @@ bool loadProvisioning() {
   if (!SPIFFS.exists(PROVISIONING_FILE)) return false;
   File f = SPIFFS.open(PROVISIONING_FILE, FILE_READ);
   if (!f) return false;
-  String json = f.readString();
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
   f.close();
+  if (err) {
+    Serial.printf("Provisioning parse failed: %s\n", err.c_str());
+    return false;
+  }
 
-  auto extractStr = [&](const String &key) -> String {
-    String search = "\"" + key + "\":\"";
-    int p = json.indexOf(search);
-    if (p < 0) return "";
-    int start = p + search.length();
-    int end = json.indexOf('"', start);
-    if (end < 0) return "";
-    return json.substring(start, end);
-  };
-
-  deviceId          = extractStr("device_id");
-  provisioningToken = extractStr("provisioning_token");
+  deviceId          = doc["device_id"]          | "";
+  provisioningToken = doc["provisioning_token"] | "";
   return deviceId.length() > 0 && provisioningToken.length() > 0;
 }
 
@@ -667,7 +641,11 @@ bool registerDevice() {
   sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X",
           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-  String payload = "{\"mac\":\"" + String(macStr) + "\"}";
+  JsonDocument reqDoc;
+  reqDoc["mac"] = macStr;
+  String payload;
+  serializeJson(reqDoc, payload);
+
   int code = 0; String body = "";
   Serial.println("Registering device with MAC: " + String(macStr));
 
@@ -676,29 +654,26 @@ bool registerDevice() {
     return false;
   }
 
-  auto extractStr = [&](const String &key) -> String {
-    String search = "\"" + key + "\":\"";
-    int p = body.indexOf(search);
-    if (p < 0) return "";
-    int start = p + search.length();
-    int end = body.indexOf('"', start);
-    if (end < 0) return "";
-    return body.substring(start, end);
-  };
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.printf("register: JSON parse failed: %s\n", err.c_str());
+    return false;
+  }
 
-  deviceId = extractStr("device_id");
+  deviceId = doc["device_id"] | "";
   if (deviceId.length() == 0) {
     Serial.println("register: no device_id in response");
     return false;
   }
 
-  String status = extractStr("status");
+  String status = doc["status"] | "";
   Serial.printf("Registered: device_id=%s status=%s\n", deviceId.c_str(), status.c_str());
 
   if (status == "assigned") {
-    institutionId = extractStr("institution_id");
-    deviceSecret  = extractStr("device_secret");
-    displayName   = extractStr("display_name");
+    institutionId = doc["institution_id"] | "";
+    deviceSecret  = doc["device_secret"]  | "";
+    displayName   = doc["display_name"]   | "";
     saveDeviceIdentity();
     clearProvisioning();
     // T9: ensure all identity writes are visible to NetworkTask on Core 0 before
@@ -709,7 +684,7 @@ bool registerDevice() {
   } else {
     // H7: capture and persist the provisioning token so /assignment-poll can
     // later prove this device's identity to retrieve the device_secret.
-    provisioningToken = extractStr("provisioning_token");
+    provisioningToken = doc["provisioning_token"] | "";
     saveProvisioning();
     pendingAssignment = true;
   }
@@ -724,28 +699,29 @@ bool pollAssignment() {
 
   // H7: send the provisioning token so the server releases the device_secret
   // only to the device that registered.
-  String payload = "{\"device_id\":\"" + jsonEscape(deviceId) +
-                   "\",\"provisioning_token\":\"" + jsonEscape(provisioningToken) + "\"}";
+  JsonDocument reqDoc;
+  reqDoc["device_id"]          = deviceId;
+  reqDoc["provisioning_token"] = provisioningToken;
+  String payload;
+  serializeJson(reqDoc, payload);
+
   int code = 0; String body = "";
 
   if (!postJSONBootstrap(payload, ASSIGNMENT_POLL_URL, code, body)) return false;
 
-  auto extractStr = [&](const String &key) -> String {
-    String search = "\"" + key + "\":\"";
-    int p = body.indexOf(search);
-    if (p < 0) return "";
-    int start = p + search.length();
-    int end = body.indexOf('"', start);
-    if (end < 0) return "";
-    return body.substring(start, end);
-  };
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.printf("pollAssignment: JSON parse failed: %s\n", err.c_str());
+    return false;
+  }
 
-  String status = extractStr("status");
+  String status = doc["status"] | "";
   if (status != "assigned") return false;
 
-  institutionId = extractStr("institution_id");
-  deviceSecret  = extractStr("device_secret");
-  displayName   = extractStr("display_name");
+  institutionId = doc["institution_id"] | "";
+  deviceSecret  = doc["device_secret"]  | "";
+  displayName   = doc["display_name"]   | "";
 
   if (institutionId.length() == 0 || deviceSecret.length() == 0) {
     Serial.println("pollAssignment: assigned but missing institution fields");
@@ -768,16 +744,20 @@ void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
                         const String &note, const String &fingerSlot, const String &studentId) {
   if (jobId.length() == 0) return;
 
-  // M9: escape every interpolated value (note especially can contain free text).
   // T1e: include device_id so update-enrollment-job can authenticate via per-device secret.
-  String payload = "{\"id\":\"" + jsonEscape(jobId) + "\",\"device_id\":\"" + jsonEscape(deviceId) +
-                   "\",\"institution_id\":\"" + jsonEscape(institutionId) +
-                   "\",\"status\":\"" + jsonEscape(status) + "\"";
-  if (fingerId > 0)        payload += ",\"fid\":"            + String(fingerId);
-  if (note.length())       payload += ",\"note\":\""         + jsonEscape(note)       + "\"";
-  if (fingerSlot.length()) payload += ",\"finger_slot\":\"" + jsonEscape(fingerSlot) + "\"";
-  if (studentId.length())  payload += ",\"student_id\":\""  + jsonEscape(studentId)  + "\"";
-  payload += "}";
+  // Optional fields stay omitted (not null) when unset — update-enrollment-job
+  // branches on their presence, so this must not become an unconditional write.
+  JsonDocument doc;
+  doc["id"]             = jobId;
+  doc["device_id"]      = deviceId;
+  doc["institution_id"] = institutionId;
+  doc["status"]         = status;
+  if (fingerId > 0)        doc["fid"]         = fingerId;
+  if (note.length())       doc["note"]        = note;
+  if (fingerSlot.length()) doc["finger_slot"] = fingerSlot;
+  if (studentId.length())  doc["student_id"]  = studentId;
+  String payload;
+  serializeJson(doc, payload);
 
   Serial.printf("reportEnrollUpdate: jobId=%s status=%s fid=%d\n",
                 jobId.c_str(), status.c_str(), fingerId);
@@ -1201,12 +1181,20 @@ void checkAndApplyOTA() {
     String body = http.getString();
     http.end();
 
-    int tagIdx = body.indexOf("\"tag_name\"");
-    if (tagIdx < 0) { Serial.println("OTA: No tag_name in response"); return; }
-    int q1 = body.indexOf('"', body.indexOf(':', tagIdx) + 1);
-    int q2 = body.indexOf('"', q1 + 1);
-    if (q1 < 0 || q2 < 0) { Serial.println("OTA: Could not parse tag_name"); return; }
-    String latestTag = body.substring(q1 + 1, q2);
+    // The GitHub release payload is large (tens of KB) and we need exactly two
+    // things from it. A deserialization filter keeps the document tiny instead
+    // of materialising every field of every asset.
+    JsonDocument filter;
+    filter["tag_name"] = true;
+    filter["assets"][0]["browser_download_url"] = true;
+
+    JsonDocument doc;
+    DeserializationError err =
+        deserializeJson(doc, body, DeserializationOption::Filter(filter));
+    if (err) { Serial.printf("OTA: JSON parse failed: %s\n", err.c_str()); return; }
+
+    String latestTag = doc["tag_name"] | "";
+    if (latestTag.length() == 0) { Serial.println("OTA: No tag_name in response"); return; }
 
     if (!latestTag.startsWith(OTA_TAG_PREFIX)) {
       Serial.printf("OTA: Release tag '%s' is not for this firmware variant. Skipping.\n",
@@ -1222,16 +1210,10 @@ void checkAndApplyOTA() {
       return;
     }
 
-    int searchFrom = 0;
-    while (true) {
-      int keyIdx = body.indexOf("\"browser_download_url\"", searchFrom);
-      if (keyIdx < 0) break;
-      int u1 = body.indexOf('"', body.indexOf(':', keyIdx) + 1);
-      int u2 = body.indexOf('"', u1 + 1);
-      if (u1 < 0 || u2 < 0) break;
-      String candidate = body.substring(u1 + 1, u2);
+    // First .bin asset wins, matching the previous scan order.
+    for (JsonObject asset : doc["assets"].as<JsonArray>()) {
+      String candidate = asset["browser_download_url"] | "";
       if (candidate.endsWith(".bin")) { binUrl = candidate; break; }
-      searchFrom = u2 + 1;
     }
   }
 
@@ -1379,68 +1361,57 @@ void EnrollmentTask(void *pvParameters) {
   for (;;) {
     if (WiFi.status() == WL_CONNECTED && deviceId.length() > 0 && !pendingAssignment) {
       Serial.println("EnrollmentTask: polling for enrollment job...");
-      String payload = "{\"device_id\":\"" + jsonEscape(deviceId) + "\"}";
+      JsonDocument reqDoc;
+      reqDoc["device_id"] = deviceId;
+      String payload;
+      serializeJson(reqDoc, payload);
+
       int code = 0; String body = "";
       postJSONToUrl(payload, ENROLL_GET_URL, code, body);
       Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
 
-      // Decommission signal: the platform deleted this device. Wipe identity and reboot
-      // so the device returns to the provisioning flow on next power-on.
-      if (code >= 200 && code < 300 && body.indexOf("\"decommissioned\":true") >= 0) {
-        Serial.println("EnrollmentTask: device decommissioned — wiping identity and rebooting");
-        SPIFFS.remove(DEVICE_IDENTITY_FILE);
-        clearProvisioning();
-        ESP.restart();
-      }
+      if (code >= 200 && code < 300 && body.length()) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, body);
+        if (err) {
+          Serial.printf("EnrollmentTask: JSON parse failed: %s\n", err.c_str());
+        } else {
+          // Decommission signal: the platform deleted this device. Wipe identity and reboot
+          // so the device returns to the provisioning flow on next power-on.
+          if (doc["decommissioned"] | false) {
+            Serial.println("EnrollmentTask: device decommissioned — wiping identity and rebooting");
+            SPIFFS.remove(DEVICE_IDENTITY_FILE);
+            clearProvisioning();
+            ESP.restart();
+          }
 
-      if (code >= 200 && code < 300 && body.length() && body.indexOf("\"job\":null") < 0) {
-        auto extractStr = [&](const String &key) -> String {
-          int p = body.indexOf("\"" + key + "\"");
-          if (p < 0) return "";
-          int colon = body.indexOf(':', p);
-          if (colon < 0) return "";
-          int valStart = colon + 1;
-          while (valStart < (int)body.length() && body[valStart] == ' ') valStart++;
-          if (body.substring(valStart, valStart + 4) == "null") return "";
-          int q1 = body.indexOf('"', colon);
-          if (q1 < 0) return "";
-          int q2 = body.indexOf('"', q1 + 1);
-          if (q2 < 0) return "";
-          return body.substring(q1 + 1, q2);
-        };
-        auto extractInt = [&](const String &key) -> int {
-          int p = body.indexOf("\"" + key + "\"");
-          if (p < 0) return 0;
-          int colon = body.indexOf(':', p);
-          if (colon < 0) return 0;
-          int numStart = colon + 1;
-          while (numStart < (int)body.length() && body[numStart] == ' ') numStart++;
-          if (body.substring(numStart, numStart + 4) == "null") return 0;
-          int numEnd = numStart;
-          while (numEnd < (int)body.length() && (isdigit(body[numEnd]) || body[numEnd] == '-')) numEnd++;
-          return body.substring(numStart, numEnd).toInt();
-        };
+          // Job fields are read from the nested "job" object rather than
+          // searched for across the whole body, so a top-level key can no
+          // longer shadow a job field of the same name.
+          JsonObject jobObj = doc["job"];
+          if (!jobObj.isNull()) {
+            EnrollJob job;
+            job.id           = jobObj["id"]          | "";
+            job.command      = jobObj["command"]     | "";
+            job.fingerSlot   = jobObj["finger_slot"] | "";
+            job.studentId    = jobObj["student_id"]  | "";
+            job.uniqueId     = jobObj["sid"]         | "";
+            job.name         = jobObj["fullname"]    | "";
+            job.requestedFid = jobObj["fid"]         | 0;
 
-        EnrollJob job;
-        job.id           = extractStr("id");
-        job.command      = extractStr("command");
-        job.fingerSlot   = extractStr("finger_slot");
-        job.studentId    = extractStr("student_id");
-        job.uniqueId     = extractStr("sid");
-        job.name         = extractStr("fullname");
-        job.requestedFid = extractInt("fid");
-
-        if (job.id.length() > 0 && job.command.length() > 0) {
-          xSemaphoreTake(enrollMutex, portMAX_DELAY);
-          currentEnrollJob = job;
-          enrollmentJobPending = true;
-          xSemaphoreGive(enrollMutex);
-          Serial.printf("EnrollmentTask: job queued id=%s cmd=%s fid=%d slot=%s uid=%s\n",
-                        job.id.c_str(), job.command.c_str(), job.requestedFid,
-                        job.fingerSlot.c_str(), job.uniqueId.c_str());
-          xSemaphoreGive(enrollSem);
-          vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
-          continue;
+            if (job.id.length() > 0 && job.command.length() > 0) {
+              xSemaphoreTake(enrollMutex, portMAX_DELAY);
+              currentEnrollJob = job;
+              enrollmentJobPending = true;
+              xSemaphoreGive(enrollMutex);
+              Serial.printf("EnrollmentTask: job queued id=%s cmd=%s fid=%d slot=%s uid=%s\n",
+                            job.id.c_str(), job.command.c_str(), job.requestedFid,
+                            job.fingerSlot.c_str(), job.uniqueId.c_str());
+              xSemaphoreGive(enrollSem);
+              vTaskDelay(pdMS_TO_TICKS(ENROLL_POLL_FAST_MS));
+              continue;
+            }
+          }
         }
       }
     } else {
@@ -1544,13 +1515,17 @@ void FingerprintTask(void *pvParameters) {
         setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
         String scanId = makeScanId(mapped);
         String ts = getRTCTimestamp();
-        // M9: escape interpolated values (member sid is admin-entered text).
         // T1e: include device_id so log-attendance can authenticate via per-device secret.
-        String payload = "{\"device_id\":\"" + jsonEscape(deviceId) +
-                         "\",\"institution_id\":\"" + jsonEscape(institutionId) +
-                         "\",\"sid\":\"" + jsonEscape(mapped) +
-                         "\",\"scan_id\":\"" + jsonEscape(scanId) +
-                         "\",\"timestamp\":\"" + jsonEscape(ts) + "\"}";
+        // Serialised compactly (no spaces), which parsePayloadAgeSec relies on
+        // when it scans queued lines for "timestamp":".
+        JsonDocument doc;
+        doc["device_id"]      = deviceId;
+        doc["institution_id"] = institutionId;
+        doc["sid"]            = mapped;
+        doc["scan_id"]        = scanId;
+        doc["timestamp"]      = ts;
+        String payload;
+        serializeJson(doc, payload);
         vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
         showReadyState();
         queueAndSignal(payload);
