@@ -671,9 +671,32 @@ bool registerDevice() {
   Serial.printf("Registered: device_id=%s status=%s\n", deviceId.c_str(), status.c_str());
 
   if (status == "assigned") {
-    institutionId = doc["institution_id"] | "";
-    deviceSecret  = doc["device_secret"]  | "";
-    displayName   = doc["display_name"]   | "";
+    String newInstitutionId = doc["institution_id"] | "";
+    String newDeviceSecret  = doc["device_secret"]  | "";
+    String newDisplayName   = doc["display_name"]   | "";
+
+    // /register deliberately withholds institution_id/device_secret when this
+    // MAC is already assigned (see register/index.ts) -- releasing a live
+    // device's secret to anyone holding just the shared bootstrap secret would
+    // let them impersonate a device they've never physically touched. That
+    // means "assigned" here can arrive incomplete (a re-registering device
+    // whose SPIFFS was wiped). Trusting it anyway would save an identity file
+    // with an empty institution_id/device_secret -- and since deviceId above
+    // is already set, this device would never call registerDevice() again,
+    // bricking silently. Treat an incomplete "assigned" as not-yet-assigned:
+    // NetworkTask will fall through to pollAssignment() instead (deviceId is
+    // known), which fails loudly with 401 until an admin deletes/re-adds the
+    // device in the dashboard.
+    if (newInstitutionId.length() == 0 || newDeviceSecret.length() == 0) {
+      Serial.println("register: assigned but institution_id/device_secret withheld -- "
+                      "needs admin action (delete + re-add device in dashboard)");
+      pendingAssignment = true;
+      return true;
+    }
+
+    institutionId = newInstitutionId;
+    deviceSecret  = newDeviceSecret;
+    displayName   = newDisplayName;
     saveDeviceIdentity();
     clearProvisioning();
     // T9: ensure all identity writes are visible to NetworkTask on Core 0 before
