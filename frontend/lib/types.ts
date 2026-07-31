@@ -12,6 +12,8 @@ export type InstitutionConfig = {
   label_staff_plural: string
   skip_weekends: boolean
   timezone: string
+  /** Member name shown on the device screen during an attendance scan (enrollment cards always show the full name). */
+  member_name_display: 'full' | 'first' | 'initial_last' | 'sid' | 'none'
   /** ISO-4217 display currency (GHS, NGN, USD…). Formatting only; no FX. */
   currency: string
   track_students: boolean
@@ -45,6 +47,7 @@ export const DEFAULT_INSTITUTION: InstitutionConfig = {
   label_staff_plural: 'Staff',
   skip_weekends: false,
   timezone: 'UTC',
+  member_name_display: 'first',
   currency: 'GHS',
   track_students: true,
   track_staff: false,

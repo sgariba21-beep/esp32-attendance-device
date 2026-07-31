@@ -18,6 +18,7 @@ export type SettingsFormData = {
   label_staff_plural: string
   skip_weekends: boolean
   timezone: string
+  member_name_display: 'full' | 'first' | 'initial_last' | 'sid' | 'none'
   currency: string
   track_students: boolean
   track_staff: boolean
@@ -51,6 +52,7 @@ export async function updateInstitutionSettings(data: SettingsFormData) {
       label_staff_plural: data.label_staff_plural.trim() || 'Staff',
       skip_weekends: data.skip_weekends,
       timezone: data.timezone.trim() || 'UTC',
+      member_name_display: data.member_name_display,
       currency: data.currency.trim().toUpperCase() || 'GHS',
       track_students: data.track_students,
       track_staff: data.track_staff,

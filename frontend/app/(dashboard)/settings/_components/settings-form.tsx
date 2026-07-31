@@ -49,6 +49,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
     label_staff_plural: institution.label_staff_plural,
     skip_weekends: institution.skip_weekends,
     timezone: institution.timezone,
+    member_name_display: institution.member_name_display,
     currency: institution.currency,
     track_students: institution.track_students,
     track_staff: institution.track_staff,
@@ -90,6 +91,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
       type: form.type as 'school' | 'office' | 'shop',
       student_scan_mode: form.student_scan_mode as 'present_absent' | 'time_in_out',
       staff_scan_mode: form.staff_scan_mode as 'present_absent' | 'time_in_out',
+      member_name_display: form.member_name_display as 'full' | 'first' | 'initial_last' | 'sid' | 'none',
     })
 
     setLoading(false)
@@ -256,6 +258,24 @@ export function SettingsForm({ institution, saveAction }: Props) {
             placeholder="Africa/Accra"
           />
           <p className="text-xs text-muted-foreground">IANA timezone name, e.g. Africa/Accra, America/New_York</p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="member_name_display">Name shown on device screen during a scan</Label>
+          <NativeSelect
+            id="member_name_display"
+            value={form.member_name_display}
+            onChange={(e) => set('member_name_display', e.target.value)}
+          >
+            <option value="full">Full name</option>
+            <option value="first">First name</option>
+            <option value="initial_last">Initial + last name</option>
+            <option value="sid">ID number only</option>
+            <option value="none">No name</option>
+          </NativeSelect>
+          <p className="text-xs text-muted-foreground">
+            Applies to attendance scan confirmations on the device screen only. Enrollment always shows the full name.
+          </p>
         </div>
       </Section>
 
