@@ -31,9 +31,15 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 // SPIFFS file holding device_id + provisioning_token while awaiting assignment (H7),
 // so a reboot during the pending window does not lose the token.
 #define PROVISIONING_FILE "/provisioning.json"
+// Per-institution device_config cache (Phase 2 OLED), so scan-card rendering (and
+// later the idle clock) survives a reboot without WiFi. Written atomically: to the
+// .tmp path first, then renamed over the live file -- same idiom flushQueue uses
+// for the identical partial-write risk. See loadDeviceConfig()/saveDeviceConfig().
+#define DEVICE_CONFIG_FILE     "/device_config.json"
+#define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.3.0"         // increment on each flash (1.3.0: ArduinoJson replaces hand-rolled JSON parsing)
+#define FIRMWARE_VERSION  "1.4.0"         // increment on each flash (1.4.0: device_config SPIFFS cache)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -123,6 +129,13 @@ String displayName   = "";
 String provisioningToken = "";            // H7: required by /assignment-poll before secret release
 volatile bool pendingAssignment = false;  // true until dashboard assigns this device
 
+/* Per-institution device_config cache (Phase 2 OLED) — loaded from SPIFFS before any
+ * task starts. Governs attendance-scan card rendering only; member names are already
+ * in fid_map.csv regardless. See loadDeviceConfig()/saveDeviceConfig(). */
+String deviceConfigNameDisplay = "first";  // compile-time default until a valid cache file overrides it
+long   deviceConfigRevOnDisk   = 0;        // rev actually persisted to flash, not any pending value; 0 = never persisted (always "stale" to the server)
+int    deviceConfigTzOffset    = 0;        // minutes east of UTC; refreshed on every poll response
+
 TaskHandle_t hFingerprint = NULL;
 TaskHandle_t hNetwork     = NULL;
 TaskHandle_t hEnrollment  = NULL;
@@ -187,6 +200,8 @@ bool pollAssignment();
 bool loadProvisioning();
 void saveProvisioning();
 void clearProvisioning();
+bool loadDeviceConfig();
+void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDisplay);
 
 /* ---------------- LED helpers ---------------- */
 
@@ -310,6 +325,84 @@ bool loadProvisioning() {
 
 void clearProvisioning() {
   if (SPIFFS.exists(PROVISIONING_FILE)) SPIFFS.remove(PROVISIONING_FILE);
+}
+
+/* ================== Device Config Cache (SPIFFS) ================== */
+// Phase 2 OLED: per-institution config (currently just member_name_display),
+// cached offline so scan-card rendering survives a reboot without WiFi and so
+// a card rendered before the very first poll response never shows a full name
+// under a stricter policy. On-disk keys are the short `_ver`/`_rev`/... form,
+// distinct from the `device_config_`-prefixed wire keys in the poll response.
+bool loadDeviceConfig() {
+  if (!SPIFFS.exists(DEVICE_CONFIG_FILE)) {
+    // Never polled yet (or wiped on decommission). Compile-time default stands;
+    // rev/tz_offset stay at 0 so the first poll always reports as stale.
+    Serial.println("No device_config file; using compile-time default (first).");
+    return true;
+  }
+
+  File f = SPIFFS.open(DEVICE_CONFIG_FILE, FILE_READ);
+  if (!f) {
+    Serial.println("device_config: exists but failed to open -- falling back to none");
+    deviceConfigNameDisplay = "none";
+    return false;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+
+  long ver = doc["_ver"] | 0;
+  long rev = doc["_rev"] | 0;
+  // A file existing means a policy WAS configured; if we can't tell which
+  // (truncated write, flash corruption), do not fall open to the compile-time
+  // default -- fall to the most restrictive option instead.
+  if (err || ver < 1 || rev < 1) {
+    Serial.printf("device_config: corrupt/invalid (err=%s ver=%ld rev=%ld) -- falling back to none\n",
+                  err ? err.c_str() : "-", ver, rev);
+    deviceConfigNameDisplay = "none";
+    deviceConfigRevOnDisk = 0;  // untrusted -- always request fresh state from the server
+    return false;
+  }
+
+  deviceConfigRevOnDisk   = rev;
+  deviceConfigTzOffset    = doc["_tz_offset"] | 0;
+  deviceConfigNameDisplay = doc["_name_display"] | "first";
+  Serial.printf("device_config loaded: rev=%ld tz_offset=%d name_display=%s\n",
+                deviceConfigRevOnDisk, deviceConfigTzOffset, deviceConfigNameDisplay.c_str());
+  return true;
+}
+
+// Atomic write: full new state to the .tmp path, then rename over the live
+// file -- same idiom flushQueue uses for the identical partial-write risk.
+// Caller is responsible for revision-gating (only call when rev or tz_offset
+// actually changed) -- the device polls every 10s, so an unconditional write
+// here would be ~8,600 flash writes a day.
+void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDisplay) {
+  File f = SPIFFS.open(DEVICE_CONFIG_TMP_FILE, FILE_WRITE);
+  if (!f) { Serial.println("device_config: failed to open tmp file for write"); return; }
+  JsonDocument doc;
+  doc["_ver"]          = ver;
+  doc["_rev"]          = rev;
+  doc["_tz_offset"]    = tzOffset;
+  doc["_name_display"] = nameDisplay;
+  serializeJson(doc, f);
+  f.close();
+
+  if (SPIFFS.exists(DEVICE_CONFIG_FILE)) SPIFFS.remove(DEVICE_CONFIG_FILE);
+  if (!SPIFFS.rename(DEVICE_CONFIG_TMP_FILE, DEVICE_CONFIG_FILE)) {
+    // rev/tz_offset/name_display globals are NOT updated -- deviceConfigRevOnDisk
+    // still reflects the last value actually on disk, so the next poll reports
+    // the same (stale) rev and the server resends, retrying the write.
+    Serial.println("device_config: rename failed -- will retry on next poll");
+    return;
+  }
+
+  deviceConfigRevOnDisk   = rev;
+  deviceConfigTzOffset    = tzOffset;
+  deviceConfigNameDisplay = nameDisplay;
+  Serial.printf("device_config saved: rev=%ld tz_offset=%d name_display=%s\n",
+                rev, tzOffset, nameDisplay.c_str());
 }
 
 /* ================== Captive Portal ================== */
@@ -1386,6 +1479,8 @@ void EnrollmentTask(void *pvParameters) {
       Serial.println("EnrollmentTask: polling for enrollment job...");
       JsonDocument reqDoc;
       reqDoc["device_id"] = deviceId;
+      // Rev actually on disk, not any pending value -- see saveDeviceConfig().
+      reqDoc["device_config_rev"] = deviceConfigRevOnDisk;
       String payload;
       serializeJson(reqDoc, payload);
 
@@ -1405,7 +1500,27 @@ void EnrollmentTask(void *pvParameters) {
             Serial.println("EnrollmentTask: device decommissioned — wiping identity and rebooting");
             SPIFFS.remove(DEVICE_IDENTITY_FILE);
             clearProvisioning();
+            // A device re-provisioned into a different institution must not
+            // inherit the previous tenant's name-display policy.
+            if (SPIFFS.exists(DEVICE_CONFIG_FILE)) SPIFFS.remove(DEVICE_CONFIG_FILE);
+            if (SPIFFS.exists(DEVICE_CONFIG_TMP_FILE)) SPIFFS.remove(DEVICE_CONFIG_TMP_FILE);
             ESP.restart();
+          }
+
+          // device_config_* fields are present on every response (job null or
+          // not). Only persist when something actually changed vs. disk --
+          // revision-gated, not poll-gated (see saveDeviceConfig()).
+          long serverConfigRev = doc["device_config_rev"] | 0;
+          int  serverTzOffset  = doc["device_config_tz_offset"] | 0;
+          if (serverConfigRev > 0 &&
+              (serverConfigRev != deviceConfigRevOnDisk || serverTzOffset != deviceConfigTzOffset)) {
+            long serverConfigVer = doc["device_config_ver"] | 1;
+            // Only sent when the server considers config_rev stale. A tz_offset-only
+            // change (DST, rev unchanged) is the normal case where it's absent here --
+            // keep the cached value rather than overwrite it with a guess. Also covers
+            // the defensive case of a rev change landing without it.
+            String nameDisplay = doc["device_config_name_display"] | deviceConfigNameDisplay;
+            saveDeviceConfig(serverConfigVer, serverConfigRev, serverTzOffset, nameDisplay);
           }
 
           // Job fields are read from the nested "job" object rather than
@@ -1615,6 +1730,11 @@ void setup() {
     Serial.printf("Device identity loaded: device_id=%s institution=%s display=%s\n",
                   deviceId.c_str(), institutionId.c_str(), displayName.c_str());
   }
+
+  // Before task creation: once FingerprintTask starts, a scan can land
+  // immediately, and a card rendered before the policy loads could show a
+  // full name under a stricter (e.g. "none") configured policy.
+  loadDeviceConfig();
 
   loadFidMapFromFS();
   memset(lastScanMillis, 0, sizeof(lastScanMillis));
