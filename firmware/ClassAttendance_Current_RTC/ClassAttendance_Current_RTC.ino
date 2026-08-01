@@ -39,7 +39,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.5.0"         // increment on each flash (1.5.0: SSD1306 display foundation)
+#define FIRMWARE_VERSION  "1.6.0"         // increment on each flash (1.6.0: scan path display cards)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -166,11 +166,29 @@ enum DisplayTier {
 bool          displayAvailable      = false;  // false if SSD1306 init failed -- no hard dependency on the panel
 volatile bool tierActive[TIER_COUNT]     = { false, false, false, false, true };
 unsigned long tierExpiresAtMs[TIER_COUNT] = { 0, 0, 0, 0, 0 };  // 0 = no expiry
+// Card content (Phase 4 OLED): headline is size-2 text, line2/line3 are size-1.
+// Only TIER_INTERACTION has a poster so far (scan cards); tiers 0/2/3 remain
+// content-less infrastructure until Phase 5/6.
+String        tierHeadline[TIER_COUNT];
+String        tierLine2[TIER_COUNT];
+String        tierLine3[TIER_COUNT];
 volatile bool displayDirty          = true;   // forces the first render once FingerprintTask starts
 volatile bool displayAsleep         = false;
 volatile bool displayWakeRequested  = false;  // set by any core; only Core 1 issues the actual I2C wake command
 unsigned long displayLastActivityMs = 0;
 unsigned long lastIdleRenderMs      = 0;
+
+// Verdict channel (Phase 4): NetworkTask (Core 0, flushQueue) deposits the
+// server's verdict for a scan_id here; FingerprintTask (Core 1) picks it up
+// only if it matches the scan_id it's currently watching (pendingScanId,
+// Core-1-exclusive, declared near FingerprintTask). Single slot -- flushing a
+// backlog of dozens of records after a reconnect just overwrites this
+// repeatedly, and the consumer ignores every one that doesn't match what it's
+// actively waiting on. That's the entire batch-flush suppression mechanism;
+// no special-case "am I in a batch" detection needed.
+volatile bool verdictPending = false;
+String        verdictScanId  = "";
+String        verdictText    = "";
 
 TaskHandle_t hFingerprint = NULL;
 TaskHandle_t hNetwork     = NULL;
@@ -196,6 +214,16 @@ volatile bool otaInProgress = false;
 
 static unsigned long lastScanMillis[MAX_FID + 1];
 static bool fidEverScanned[MAX_FID + 1];
+
+/* Pending-scan verdict watch (Phase 4 OLED) -- Core-1-exclusive (FingerprintTask
+ * is the only reader/writer), no mutex needed. Set when a scan is posted online;
+ * checkScanVerdict() consumes the cross-core verdictPending mailbox (which IS
+ * mutex-protected -- see the globals near the tier table) only when it matches
+ * pendingScanId. */
+String        pendingScanId         = "";
+String        pendingScanName       = "";
+unsigned long pendingScanStartMs    = 0;
+unsigned long pendingScanDeadlineMs = 0;  // pendingScanStartMs + 4000 (the correlation window)
 
 /* Forward declarations */
 void showReadyState();
@@ -234,6 +262,11 @@ bool postJSONBootstrap(const String &jsonPayload, const char* targetUrl, int &ou
 // every access after task creation goes through these two (Phase 3 OLED).
 void setDisplayName(const String &name);
 String getDisplayNameSafe();
+// Same story for deviceConfigNameDisplay/TzOffset -- written from Core 0
+// (saveDeviceConfig), read from Core 1 as of Phase 3 (tz offset) / Phase 4
+// (name policy).
+String getDeviceConfigNameDisplaySafe();
+int getDeviceConfigTzOffsetSafe();
 bool loadDeviceIdentity();
 void saveDeviceIdentity();
 bool registerDevice();
@@ -244,13 +277,18 @@ void clearProvisioning();
 bool loadDeviceConfig();
 void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDisplay);
 
-// Display mailbox (Phase 3 OLED) -- Core-0-safe, never touch `display` directly.
-void postDisplayState(DisplayTier tier, unsigned long timeboxMs);
+// Display mailbox (Phase 3/4 OLED) -- Core-0-safe, never touch `display` directly.
+void postDisplayState(DisplayTier tier, unsigned long timeboxMs,
+                      const String &headline, const String &line2, const String &line3);
 void clearDisplayState(DisplayTier tier);
+void postScanVerdict(const String &entryPayload, bool ok, const String &body);
 // Core-1-only (called from FingerprintTask).
 void renderDisplayIfDirty();
 void renderIdleScreen();
+void renderInteractionCard();
 void showBootSplash();
+void checkScanVerdict();
+String resolveScanCardName(const String &name, const String &sid);
 // UTF-8-to-CP437-safe text for the display font. Not Core-restricted itself
 // (pure string transform, no I2C) -- Phase 4+ scan/enrollment cards should
 // route member/enrollee names through this too.
@@ -349,6 +387,24 @@ void setDisplayName(const String &name) {
 String getDisplayNameSafe() {
   xSemaphoreTake(displayMutex, portMAX_DELAY);
   String v = displayName;
+  xSemaphoreGive(displayMutex);
+  return v;
+}
+
+// Same reasoning as getDisplayNameSafe(): deviceConfigNameDisplay/TzOffset are
+// written from Core 0 (saveDeviceConfig, EnrollmentTask) and read from Core 1
+// (resolveScanCardName, renderIdleScreen). deviceConfigRevOnDisk has no
+// equivalent getter -- it's Core-0-exclusive, never read from Core 1.
+String getDeviceConfigNameDisplaySafe() {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  String v = deviceConfigNameDisplay;
+  xSemaphoreGive(displayMutex);
+  return v;
+}
+
+int getDeviceConfigTzOffsetSafe() {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  int v = deviceConfigTzOffset;
   xSemaphoreGive(displayMutex);
   return v;
 }
@@ -473,23 +529,31 @@ void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDispla
     return;
   }
 
-  deviceConfigRevOnDisk   = rev;
+  deviceConfigRevOnDisk = rev;  // Core-0-exclusive bookkeeping, never read from Core 1 -- no mutex needed
+  // tzOffset/nameDisplay ARE read from Core 1 (renderIdleScreen since Phase 3,
+  // resolveScanCardName as of Phase 4) -- through displayMutex on both ends.
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
   deviceConfigTzOffset    = tzOffset;
   deviceConfigNameDisplay = nameDisplay;
+  xSemaphoreGive(displayMutex);
   Serial.printf("device_config saved: rev=%ld tz_offset=%d name_display=%s\n",
                 rev, tzOffset, nameDisplay.c_str());
 }
 
-/* ================== Display (SSD1306, Phase 3) ================== */
+/* ================== Display (SSD1306, Phase 3/4) ================== */
 // Mailbox API -- Core 0 (NetworkTask/EnrollmentTask) callable. Only touches the
-// shared tier table under displayMutex; never draws. Unused by any real caller
-// as of Phase 3 (foundation only) -- Phase 5/6 wire actual content into tiers
-// 0-3 (interaction cards, blocked/degraded banners). Idle (tier 4) needs no
-// caller: it's always active as the base state.
-void postDisplayState(DisplayTier tier, unsigned long timeboxMs) {
+// shared tier table under displayMutex; never draws. Tier 1 (scan cards) is
+// wired up as of Phase 4; tiers 0/2/3 remain content-less infrastructure
+// until Phase 5/6. Idle (tier 4) needs no caller: it's always active as the
+// base state.
+void postDisplayState(DisplayTier tier, unsigned long timeboxMs,
+                      const String &headline, const String &line2, const String &line3) {
   xSemaphoreTake(displayMutex, portMAX_DELAY);
   tierActive[tier] = true;
   tierExpiresAtMs[tier] = timeboxMs ? (millis() + timeboxMs) : 0;
+  tierHeadline[tier] = headline;
+  tierLine2[tier] = line2;
+  tierLine3[tier] = line3;
   displayDirty = true;
   if (tier <= TIER_BLOCKED) {
     // Tier 0/1/2 wake the panel. The actual I2C command only ever runs on
@@ -505,6 +569,39 @@ void clearDisplayState(DisplayTier tier) {
   tierActive[tier] = false;
   tierExpiresAtMs[tier] = 0;
   displayDirty = true;
+  xSemaphoreGive(displayMutex);
+}
+
+// Core 0 (NetworkTask, from flushQueue) -- deposits a verdict for a scan_id.
+// Does NOT check whether it matches anything FingerprintTask is watching;
+// that's the consumer's job (checkScanVerdict, Core 1). Overwrites whatever
+// was here before, by design -- see the verdictPending comment at the globals.
+void postScanVerdict(const String &entryPayload, bool ok, const String &body) {
+  JsonDocument reqDoc;
+  if (deserializeJson(reqDoc, entryPayload)) return;  // shouldn't happen -- we built this payload ourselves
+  String scanId = reqDoc["scan_id"] | "";
+  if (scanId.length() == 0) return;
+
+  String verdict;
+  if (ok) {
+    JsonDocument respDoc;
+    DeserializationError err = deserializeJson(respDoc, body);
+    String scanType = "";
+    if (!err) scanType = respDoc["scan_type"] | "";
+    if (scanType == "present") verdict = "PRESENT";
+    else if (scanType == "time_in") verdict = "TIME IN";
+    else if (scanType == "time_out") verdict = "TIME OUT";
+    // Any other 200 (weekend/holiday/duplicate/not-tracked/period/already-logged)
+    // -- full reason is Serial/dashboard-only, this is a compact summary.
+    else verdict = "NOT LOGGED";
+  } else {
+    verdict = "ERROR";
+  }
+
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  verdictScanId = scanId;
+  verdictText = verdict;
+  verdictPending = true;
   xSemaphoreGive(displayMutex);
 }
 
@@ -580,6 +677,34 @@ String sanitizeForDisplay(const String &s) {
   return out;
 }
 
+// Phase 4: applies the Phase 2 member_name_display policy (institutions.
+// member_name_display, cached as deviceConfigNameDisplay) to a scan card.
+// "none" is a deliberate privacy choice -- never falls back to sid, unlike
+// every other policy. Any other policy falls back to sid when no name is on
+// record at all (fid_map.csv rows written by older firmware are 3-field and
+// load with an empty name -- there's nothing else to show). Unrecognized
+// policy values fail restrictive (show nothing), matching loadDeviceConfig()'s
+// corrupt-cache philosophy -- never fall open to more than configured.
+String resolveScanCardName(const String &name, const String &sid) {
+  String policy = getDeviceConfigNameDisplaySafe();
+  if (policy == "none") return "";
+  if (name.length() == 0) return sid;
+
+  if (policy == "full") return name;
+  if (policy == "sid") return sid;
+  if (policy == "first") {
+    int sp = name.indexOf(' ');
+    return sp < 0 ? name : name.substring(0, sp);
+  }
+  if (policy == "initial_last") {
+    int sp = name.indexOf(' ');
+    if (sp < 0) return name;  // single token -- nothing to abbreviate
+    String last = name.substring(name.lastIndexOf(' ') + 1);
+    return String(name[0]) + ". " + last;
+  }
+  return "";  // unrecognized value -- fail restrictive
+}
+
 void showBootSplash() {
   if (!displayAvailable) return;
   String nameSnapshot = sanitizeForDisplay(getDisplayNameSafe());
@@ -601,7 +726,7 @@ void showBootSplash() {
 // truncate/overflow for a +14:00 zone (840 minutes).
 void renderIdleScreen() {
   DateTime utcNow = rtc.now();
-  uint32_t localEpoch = utcNow.unixtime() + (int32_t)deviceConfigTzOffset * 60;
+  uint32_t localEpoch = utcNow.unixtime() + (int32_t)getDeviceConfigTzOffsetSafe() * 60;
   DateTime local(localEpoch);
 
   char clockBuf[6];
@@ -619,6 +744,63 @@ void renderIdleScreen() {
 
   display.setCursor(0, 36);
   display.print(WiFi.status() == WL_CONNECTED ? "Online" : "Offline");
+}
+
+// Tier 1 interaction card (Phase 4: scan outcomes; Phase 5 adds enrollment/
+// master-confirm content the same way). Headline is the short, controlled
+// status text (verdict/state -- always fits the 10-char size-2 budget since
+// it's firmware-authored); line2 is the member name, which is unpredictable
+// free text and gets the more generous 21-char size-1 budget instead.
+void renderInteractionCard() {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  String headline = tierHeadline[TIER_INTERACTION];
+  String l2 = tierLine2[TIER_INTERACTION];
+  String l3 = tierLine3[TIER_INTERACTION];
+  xSemaphoreGive(displayMutex);
+
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print(sanitizeForDisplay(headline));
+
+  display.setTextSize(1);
+  if (l2.length()) {
+    display.setCursor(0, 24);
+    display.print(sanitizeForDisplay(l2));
+  }
+  if (l3.length()) {
+    display.setCursor(0, 36);
+    display.print(sanitizeForDisplay(l3));
+  }
+}
+
+// Picks up a verdict for the scan FingerprintTask is currently watching, if
+// any. Called every loop iteration; both early-outs below are cheap (no
+// mutex) so this costs nothing once nothing's pending.
+void checkScanVerdict() {
+  if (pendingScanId.length() == 0) return;
+
+  if (millis() > pendingScanDeadlineMs) {
+    pendingScanId = "";  // correlation window elapsed -- give up watching
+    return;
+  }
+
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  bool haveVerdict = verdictPending && verdictScanId == pendingScanId;
+  String v = verdictText;
+  if (haveVerdict) verdictPending = false;  // consume it
+  xSemaphoreGive(displayMutex);
+
+  if (!haveVerdict) return;
+
+  // Plan: Phase 1 shows ~1.5s; extend to ~2.5s total (from the original scan)
+  // if the verdict lands inside that. A late verdict (up to the 4s
+  // correlation window) still gets a full second of visibility rather than
+  // being silently dropped -- capped, not left to balloon past ~5s total.
+  unsigned long elapsed = millis() - pendingScanStartMs;
+  unsigned long remainingMs = (elapsed < 2500) ? (2500 - elapsed) : 1000;
+  postDisplayState(TIER_INTERACTION, remainingMs, pendingScanName, v, "");
+  pendingScanId = "";
 }
 
 // Dirty-flag render: called every FingerprintTask loop iteration (~100 Hz)
@@ -671,11 +853,12 @@ void renderDisplayIfDirty() {
 
   display.clearDisplay();
   switch (activeTier) {
+    case TIER_INTERACTION:
+      renderInteractionCard();
+      break;
     case TIER_IDLE:
     default:
-      // TIER_TAKEOVER / TIER_INTERACTION / TIER_BLOCKED / TIER_DEGRADED
-      // content is Phase 5/6 -- idle is the only real screen this phase, and
-      // the only tier ever active today, since nothing posts to 0-3 yet.
+      // TIER_TAKEOVER / TIER_BLOCKED / TIER_DEGRADED content is Phase 5/6.
       renderIdleScreen();
       break;
   }
@@ -1474,12 +1657,21 @@ void flushQueue() {
   for (auto &entry : pending) {
     int httpCode = 0; String body;
     bool ok = postJSONToUrl(entry, SUPABASE_URL, httpCode, body);
-    if (ok) { Serial.printf("flushQueue: sent OK\n"); continue; }
+    if (ok) {
+      Serial.printf("flushQueue: sent OK\n");
+      postScanVerdict(entry, true, body);
+      continue;
+    }
     if (httpCode >= 500 || httpCode == 429 || httpCode < 0) {
+      // Transient -- re-queued for a later retry, so this is NOT a final
+      // verdict yet. No postScanVerdict() call: better to let the pending
+      // card time out silently than show a premature ERROR that a retry
+      // might still turn into a success.
       Serial.printf("flushQueue: transient (code=%d). Keeping record.\n", httpCode);
       keep.push_back(entry);
     } else {
       Serial.printf("flushQueue: permanent failure (code=%d). Dropping record.\n", httpCode);
+      postScanVerdict(entry, false, body);
     }
     vTaskDelay(200 / portTICK_PERIOD_MS);
   }
@@ -1859,6 +2051,9 @@ void FingerprintTask(void *pvParameters) {
   const unsigned long feedbackDuration = 600;
 
   for (;;) {
+    // Pick up a verdict for the live scan (if any) before rendering, so it
+    // shows up in this same iteration rather than a lag later.
+    checkScanVerdict();
     // Display owner is this task (Core 1) only -- runs every iteration but is
     // a cheap no-op unless something's actually dirty (see renderDisplayIfDirty).
     renderDisplayIfDirty();
@@ -1933,6 +2128,22 @@ void FingerprintTask(void *pvParameters) {
       if (fidEverScanned[fid] && (nowMs - lastScanMillis[fid] < SCAN_COOLDOWN_MS)) {
         unsigned long remaining = (SCAN_COOLDOWN_MS - (nowMs - lastScanMillis[fid])) / 1000;
         Serial.printf("Cooldown: fid=%d, %lus remaining. Ignoring scan.\n", fid, remaining);
+        String cooldownName = resolveScanCardName(fidMapName[fid], fidMap[fid]);
+        // Invalidate any earlier scan's verdict watch -- this card supersedes
+        // it, and a late verdict for that older scan must not overwrite this
+        // one (single pending slot: only the most recent interaction watches
+        // for a verdict). Same reasoning at every postDisplayState() call
+        // below that doesn't itself set pendingScanId.
+        pendingScanId = "";
+        postDisplayState(TIER_INTERACTION, 1500, "COOLDOWN", cooldownName, String(remaining) + "s left");
+        // postDisplayState() only sets shared state -- the actual I2C draw
+        // happens on the next renderDisplayIfDirty() call. Without this, that
+        // wouldn't happen until the top of the *next* loop iteration, ~600ms+
+        // after the LED (or lack of one, here) already reflects this outcome.
+        // postDisplayState() itself stays draw-free (Core 0 also calls it, and
+        // must never touch `display`); the render-now call belongs at each
+        // Core-1 call site instead, right after posting.
+        renderDisplayIfDirty();
         vTaskDelay(600 / portTICK_PERIOD_MS);
         showReadyState();
         vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -1960,6 +2171,26 @@ void FingerprintTask(void *pvParameters) {
         setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
         String scanId = makeScanId(mapped);
         String ts = getRTCTimestamp();
+        String cardName = resolveScanCardName(fidMapName[fid], mapped);
+
+        // Two-phase card (Q2): local "scanned" card now, patched with the real
+        // verdict when flushQueue's response comes back (checkScanVerdict, top
+        // of this loop) -- IF it lands within the 4s correlation window. Known
+        // offline right now means no verdict is ever coming this cycle, so
+        // don't bother watching for one; say so instead of promising a
+        // confirmation that can't arrive.
+        if (WiFi.status() == WL_CONNECTED) {
+          pendingScanId = scanId;
+          pendingScanName = cardName;
+          pendingScanStartMs = millis();
+          pendingScanDeadlineMs = pendingScanStartMs + 4000;
+          postDisplayState(TIER_INTERACTION, 1500, "SCANNED", cardName, "");
+        } else {
+          pendingScanId = "";
+          postDisplayState(TIER_INTERACTION, 1500, "SAVED", cardName, "Offline");
+        }
+        renderDisplayIfDirty();  // draw now, in sync with the LED -- see the cooldown branch above
+
         // T1e: include device_id so log-attendance can authenticate via per-device secret.
         // Serialised compactly (no spaces), which parsePayloadAgeSec relies on
         // when it scans queued lines for "timestamp":".
@@ -1980,6 +2211,9 @@ void FingerprintTask(void *pvParameters) {
       } else {
         Serial.printf("Matched fingerID %d but no mapping configured. Ignoring.\n", fid);
         setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+        pendingScanId = "";
+        postDisplayState(TIER_INTERACTION, 1500, "NOT MAPPED", "See admin", "");
+        renderDisplayIfDirty();  // draw now, in sync with the LED -- see the cooldown branch above
         vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
         showReadyState();
         appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | NO_MAPPING");
@@ -1990,12 +2224,18 @@ void FingerprintTask(void *pvParameters) {
     } else if (fid == -4) {
       Serial.println("No match - showing steady red briefly");
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+      pendingScanId = "";
+      postDisplayState(TIER_INTERACTION, 1500, "NO MATCH", "", "");
+      renderDisplayIfDirty();  // draw now, in sync with the LED -- see the cooldown branch above
       vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
       showReadyState();
       appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | NO_MATCH");
       vTaskDelay(100 / portTICK_PERIOD_MS);
     } else {
       setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+      pendingScanId = "";
+      postDisplayState(TIER_INTERACTION, 1500, "SCAN ERROR", "", "");
+      renderDisplayIfDirty();  // draw now, in sync with the LED -- see the cooldown branch above
       vTaskDelay(200 / portTICK_PERIOD_MS);
       showReadyState();
     }
