@@ -39,7 +39,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.6.0"         // increment on each flash (1.6.0: scan path display cards)
+#define FIRMWARE_VERSION  "1.7.0"         // increment on each flash (1.7.0: enrollment/portal/master-confirm display cards)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -225,6 +225,19 @@ String        pendingScanName       = "";
 unsigned long pendingScanStartMs    = 0;
 unsigned long pendingScanDeadlineMs = 0;  // pendingScanStartMs + 4000 (the correlation window)
 
+/* Master-finger confirmation state machine (Phase 5 OLED, Q5) -- also
+ * Core-1-exclusive. Armed on a first master-role press; a second press of
+ * the SAME fid within the window confirms and launches the portal, a
+ * DIFFERENT fid cancels and falls through to normal processing for that new
+ * fid, and no-match/sensor-error events are ignored entirely (never reach
+ * this state since they're not fid>0 matches). Timeout is checked
+ * unconditionally every loop iteration, not nested inside a scan match --
+ * otherwise an armed-but-idle window would only ever resolve whenever the
+ * next scan attempt happened to land, not at the actual 8s deadline. */
+bool          masterConfirmArmed       = false;
+int           masterConfirmFid         = -1;
+unsigned long masterConfirmDeadlineMs  = 0;
+
 /* Forward declarations */
 void showReadyState();
 void setSensorLED(uint8_t mode, uint8_t speed, uint8_t color);
@@ -236,7 +249,7 @@ bool loadFidMapFromFS();
 bool saveFidMapToFS();
 int findFidByUnique(const String &uniqueId);
 void clearAllFidMap();
-int enrollID_toFid(int requestedFid);
+int enrollID_toFid(const EnrollJob &job, int requestedFid);
 void enrollment_doRegister(const EnrollJob &job, const String &role);
 void enrollment_doDeleteByFid(const EnrollJob &job, int fid);
 void enrollment_doDeleteByUnique(const EnrollJob &job);
@@ -285,9 +298,10 @@ void postScanVerdict(const String &entryPayload, bool ok, const String &body);
 // Core-1-only (called from FingerprintTask).
 void renderDisplayIfDirty();
 void renderIdleScreen();
-void renderInteractionCard();
+void renderCard(DisplayTier tier);
 void showBootSplash();
 void checkScanVerdict();
+void checkMasterConfirmTimeout();
 String resolveScanCardName(const String &name, const String &sid);
 // UTF-8-to-CP437-safe text for the display font. Not Core-restricted itself
 // (pure string transform, no I2C) -- Phase 4+ scan/enrollment cards should
@@ -746,16 +760,20 @@ void renderIdleScreen() {
   display.print(WiFi.status() == WL_CONNECTED ? "Online" : "Offline");
 }
 
-// Tier 1 interaction card (Phase 4: scan outcomes; Phase 5 adds enrollment/
-// master-confirm content the same way). Headline is the short, controlled
-// status text (verdict/state -- always fits the 10-char size-2 budget since
-// it's firmware-authored); line2 is the member name, which is unpredictable
-// free text and gets the more generous 21-char size-1 budget instead.
-void renderInteractionCard() {
+// Generic card renderer for any tier whose content lives in tierHeadline[]/
+// tierLine2[]/tierLine3[] -- Tier 1 (Phase 4: scan outcomes; Phase 5:
+// enrollment/master-confirm) and Tier 0 (Phase 5: the portal screen) both
+// use it, since postDisplayState() already stores content generically per
+// tier regardless of which tier posts it. Headline is meant for short,
+// controlled status text (verdict/state/mode -- always fits the 10-char
+// size-2 budget since it's firmware-authored); line2/3 are for less
+// predictable content (member names, SSID) that need the more generous
+// 21-char size-1 budget instead.
+void renderCard(DisplayTier tier) {
   xSemaphoreTake(displayMutex, portMAX_DELAY);
-  String headline = tierHeadline[TIER_INTERACTION];
-  String l2 = tierLine2[TIER_INTERACTION];
-  String l3 = tierLine3[TIER_INTERACTION];
+  String headline = tierHeadline[tier];
+  String l2 = tierLine2[tier];
+  String l3 = tierLine3[tier];
   xSemaphoreGive(displayMutex);
 
   display.setTextColor(SSD1306_WHITE);
@@ -801,6 +819,22 @@ void checkScanVerdict() {
   unsigned long remainingMs = (elapsed < 2500) ? (2500 - elapsed) : 1000;
   postDisplayState(TIER_INTERACTION, remainingMs, pendingScanName, v, "");
   pendingScanId = "";
+}
+
+// Master-confirm timeout (Phase 5, Q5) -- called every loop iteration,
+// unconditionally, so an armed window resolves at the actual 8s deadline
+// rather than only whenever the next scan attempt happens to land. Deadline
+// set marginally earlier than the "CONFIRM?" card's own tier timebox (both
+// set within the same few lines at arm time), so this reliably wins the
+// race and overrides with "CANCELLED" before the generic tier-expiry logic
+// in renderDisplayIfDirty() would otherwise just silently fall back to idle.
+void checkMasterConfirmTimeout() {
+  if (!masterConfirmArmed) return;
+  if (millis() <= masterConfirmDeadlineMs) return;
+  Serial.printf("Master confirm timed out (fid=%d, no second press within 8s).\n", masterConfirmFid);
+  masterConfirmArmed = false;
+  pendingScanId = "";
+  postDisplayState(TIER_INTERACTION, 1500, "CANCELLED", "", "");
 }
 
 // Dirty-flag render: called every FingerprintTask loop iteration (~100 Hz)
@@ -853,12 +887,16 @@ void renderDisplayIfDirty() {
 
   display.clearDisplay();
   switch (activeTier) {
+    case TIER_TAKEOVER:
     case TIER_INTERACTION:
-      renderInteractionCard();
+      // activeTier is plain int (see its declaration above) -- C++ doesn't
+      // implicitly convert int to an enum parameter, hence the cast. Safe by
+      // construction: it's always assigned from a loop index < TIER_COUNT.
+      renderCard((DisplayTier)activeTier);
       break;
     case TIER_IDLE:
     default:
-      // TIER_TAKEOVER / TIER_BLOCKED / TIER_DEGRADED content is Phase 5/6.
+      // TIER_BLOCKED / TIER_DEGRADED content is Phase 6.
       renderIdleScreen();
       break;
   }
@@ -923,6 +961,18 @@ void startCaptivePortal() {
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
   Serial.print("Portal AP IP: "); Serial.println(WiFi.softAPIP());
+
+  // Tier 0 takeover (Q4): SSID and IP only, never the password. No expiry --
+  // this persists until the device restarts (either via /save or manually).
+  // Safe to call display.* directly here even though this can also run from
+  // setup() before any tasks exist: both paths are Core 1 (the Arduino main
+  // loopTask is pinned there by default, same as FingerprintTask), and
+  // Wire/display/displayMutex are all initialized at the very top of setup(),
+  // before this function can ever be reached either way. Other tasks are
+  // suspended above, so there's no concurrent poster to arbitrate against;
+  // a single render is enough since nothing about this screen changes.
+  postDisplayState(TIER_TAKEOVER, 0, "SETUP", AP_SSID, WiFi.softAPIP().toString());
+  renderDisplayIfDirty();
 
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
@@ -1347,17 +1397,32 @@ void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
 
 /* ================== Enrollment execution ================== */
 
-int enrollID_toFid(int requestedFid) {
+// E-series cards (Phase 5): process steps for enrolling a single finger.
+// Takes the job for name/slot -- job.name and job.fingerSlot are known to
+// the caller and only needed here for display, so passed through rather
+// than threading them as separate parameters. The final ENROLLED outcome
+// card is posted by the caller (enrollment_doRegister), not here -- this
+// function only reports process/failure states along the way.
+int enrollID_toFid(const EnrollJob &job, int requestedFid) {
   if (requestedFid < 1 || requestedFid > MAX_FID) {
     Serial.println("Requested fid invalid");
     return -1;
   }
+
+  String name = job.name;
+  String slotLabel = (job.fingerSlot == "fin2") ? "Finger 2" : "Finger 1";
+  // Any card posted here supersedes an older scan's verdict watch, same as
+  // every other Tier 1 posting site (see the cooldown branch in
+  // FingerprintTask for the fuller reasoning).
+  pendingScanId = "";
 
   Serial.printf("Enrollment: starting for fid=%d\n", requestedFid);
   unsigned long timeout = 20000;
 
   Serial.println("Place finger: (first press) -- 20s timeout");
   setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
+  postDisplayState(TIER_INTERACTION, timeout, "PRESS 1/2", name, slotLabel);
+  renderDisplayIfDirty();
   unsigned long start = millis();
   int p;
   while (millis() - start < timeout) {
@@ -1365,42 +1430,79 @@ int enrollID_toFid(int requestedFid) {
     if (p == FINGERPRINT_OK) break;
     if (p == FINGERPRINT_NOFINGER) { delay(120); continue; }
     Serial.printf("getImage error (1): %d\n", p);
+    postDisplayState(TIER_INTERACTION, 1500, "BAD SCAN", name, "");
+    renderDisplayIfDirty();
     return -1;
   }
-  if (millis() - start >= timeout) { Serial.println("Timeout (first press)"); return -1; }
+  if (millis() - start >= timeout) {
+    Serial.println("Timeout (first press)");
+    postDisplayState(TIER_INTERACTION, 1500, "TIMED OUT", name, "");
+    renderDisplayIfDirty();
+    return -1;
+  }
 
   Serial.println("Image captured (1). Converting...");
   p = finger.image2Tz(1);
-  if (p != FINGERPRINT_OK) { Serial.printf("image2Tz (1) failed: %d\n", p); return -1; }
+  if (p != FINGERPRINT_OK) {
+    Serial.printf("image2Tz (1) failed: %d\n", p);
+    postDisplayState(TIER_INTERACTION, 1500, "BAD SCAN", name, "");
+    renderDisplayIfDirty();
+    return -1;
+  }
 
   Serial.println("Remove finger.");
   setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
+  postDisplayState(TIER_INTERACTION, 1500, "REMOVE", name, "");
+  renderDisplayIfDirty();
   delay(1200);
 
   Serial.println("Place same finger again: (second press) -- 20s timeout");
   setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
+  postDisplayState(TIER_INTERACTION, timeout, "PRESS 2/2", name, slotLabel);
+  renderDisplayIfDirty();
   start = millis();
   while (millis() - start < timeout) {
     p = finger.getImage();
     if (p == FINGERPRINT_OK) break;
     if (p == FINGERPRINT_NOFINGER) { delay(120); continue; }
     Serial.printf("getImage error (2): %d\n", p);
+    postDisplayState(TIER_INTERACTION, 1500, "BAD SCAN", name, "");
+    renderDisplayIfDirty();
     return -1;
   }
-  if (millis() - start >= timeout) { Serial.println("Timeout (second press)"); return -1; }
+  if (millis() - start >= timeout) {
+    Serial.println("Timeout (second press)");
+    postDisplayState(TIER_INTERACTION, 1500, "TIMED OUT", name, "");
+    renderDisplayIfDirty();
+    return -1;
+  }
 
   Serial.println("Image captured (2). Converting...");
   p = finger.image2Tz(2);
-  if (p != FINGERPRINT_OK) { Serial.printf("image2Tz (2) failed: %d\n", p); return -1; }
+  if (p != FINGERPRINT_OK) {
+    Serial.printf("image2Tz (2) failed: %d\n", p);
+    postDisplayState(TIER_INTERACTION, 1500, "BAD SCAN", name, "");
+    renderDisplayIfDirty();
+    return -1;
+  }
 
   Serial.println("Creating model...");
   p = finger.createModel();
-  if (p != FINGERPRINT_OK) { Serial.printf("createModel failed: %d\n", p); return -1; }
+  if (p != FINGERPRINT_OK) {
+    // Almost always FINGERPRINT_ENROLLMISMATCH -- the two presses didn't
+    // resolve to the same finger.
+    Serial.printf("createModel failed: %d\n", p);
+    postDisplayState(TIER_INTERACTION, 1500, "MISMATCH", name, "");
+    renderDisplayIfDirty();
+    return -1;
+  }
 
   Serial.printf("Storing model to ID %d\n", requestedFid);
   p = finger.storeModel(requestedFid);
   if (p == FINGERPRINT_OK) { Serial.println("Stored successfully!"); return requestedFid; }
   Serial.printf("Failed to store model, code: %d\n", p);
+  postDisplayState(TIER_INTERACTION, 1500, "STORE FAIL", name, "");
+  renderDisplayIfDirty();
   return -1;
 }
 
@@ -1412,6 +1514,9 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
     }
     if (fidToUse < 1 || fidToUse > MAX_FID) {
       Serial.println("No free fid available on device");
+      pendingScanId = "";
+      postDisplayState(TIER_INTERACTION, 1500, "FULL", "No free slot", "");
+      renderDisplayIfDirty();
       reportEnrollUpdate(job.id, "failed", -1, "no-free-fid", job.fingerSlot, job.studentId);
       return;
     }
@@ -1422,7 +1527,7 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
   }
 
   setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
-  int resFid = enrollID_toFid(fidToUse);
+  int resFid = enrollID_toFid(job, fidToUse);
   if (resFid > 0) {
     fidMap[resFid]     = job.uniqueId.length() ? job.uniqueId : String("AUTO_") + String(resFid);
     fidMapRole[resFid] = role;
@@ -1430,11 +1535,17 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
     saveFidMapToFS();
     Serial.printf("Saved fid %d -> %s name=%s\n", resFid, fidMap[resFid].c_str(), fidMapName[resFid].c_str());
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+    postDisplayState(TIER_INTERACTION, 1500, "ENROLLED", job.name,
+                     (job.fingerSlot == "fin2") ? "Finger 2" : "Finger 1");
+    renderDisplayIfDirty();
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
     reportEnrollUpdate(job.id, "completed", resFid, "", job.fingerSlot, job.studentId);
   } else {
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+    // enrollID_toFid() already posted a specific card for the failure cause
+    // (timed out / bad scan / mismatch / store fail) -- don't overwrite it
+    // with a generic one here.
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
     reportEnrollUpdate(job.id, "failed", -1, "enroll-failed", job.fingerSlot, job.studentId);
@@ -1442,7 +1553,10 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
 }
 
 void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
+  pendingScanId = "";
   if (fid < 1 || fid > MAX_FID) {
+    postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, "");
+    renderDisplayIfDirty();
     reportEnrollUpdate(job.id, "failed", -1, "invalid-fid", job.fingerSlot, job.studentId);
     return;
   }
@@ -1450,9 +1564,13 @@ void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
   if (p == FINGERPRINT_OK) {
     fidMap[fid] = ""; fidMapRole[fid] = ""; fidMapName[fid] = "";
     saveFidMapToFS();
+    postDisplayState(TIER_INTERACTION, 1500, "REMOVED", job.name, "");
+    renderDisplayIfDirty();
     reportEnrollUpdate(job.id, "completed", fid, "", job.fingerSlot, job.studentId);
   } else {
     Serial.printf("deleteModel failed: %d\n", p);
+    postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, "");
+    renderDisplayIfDirty();
     reportEnrollUpdate(job.id, "failed", fid, String(p), job.fingerSlot, job.studentId);
   }
 }
@@ -1460,6 +1578,9 @@ void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
 void enrollment_doDeleteByUnique(const EnrollJob &job) {
   int fid = findFidByUnique(job.uniqueId);
   if (fid <= 0) {
+    pendingScanId = "";
+    postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, "Not found");
+    renderDisplayIfDirty();
     reportEnrollUpdate(job.id, "failed", -1, "not-found", job.fingerSlot, job.studentId);
     return;
   }
@@ -2054,6 +2175,9 @@ void FingerprintTask(void *pvParameters) {
     // Pick up a verdict for the live scan (if any) before rendering, so it
     // shows up in this same iteration rather than a lag later.
     checkScanVerdict();
+    // Unconditional -- must resolve an armed master-confirm window at its
+    // actual 8s deadline even if no new scan ever arrives.
+    checkMasterConfirmTimeout();
     // Display owner is this task (Core 1) only -- runs every iteration but is
     // a cheap no-op unless something's actually dirty (see renderDisplayIfDirty).
     renderDisplayIfDirty();
@@ -2094,12 +2218,21 @@ void FingerprintTask(void *pvParameters) {
           else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.studentId);
         } else if (job.command == "clearall") {
           Serial.println("Performing clearAll on sensor and local map");
+          pendingScanId = "";
           int rc = finger.emptyDatabase();
           if (rc == FINGERPRINT_OK) {
             clearAllFidMap();
+            // Q5: no device confirmation for clearall (already admin-
+            // authenticated in the dashboard), but still a prominent 5s
+            // notification -- longer than the standard 1.5s given the scale
+            // of what just happened.
+            postDisplayState(TIER_INTERACTION, 5000, "ERASED", "All prints", "");
+            renderDisplayIfDirty();
             reportEnrollUpdate(job.id, "completed", 0, "", "", "");
           } else {
             Serial.printf("emptyDatabase returned %d\n", rc);
+            postDisplayState(TIER_INTERACTION, 5000, "ERASE FAIL", "", "");
+            renderDisplayIfDirty();
             reportEnrollUpdate(job.id, "failed", 0, String(rc), "", "");
           }
         } else {
@@ -2123,6 +2256,56 @@ void FingerprintTask(void *pvParameters) {
     }
     if (fid > 0) {
       Serial.print("Fingerprint matched ID: "); Serial.println(fid);
+
+      String role = fidMapRole[fid];
+      role.toLowerCase();
+
+      // Master-finger confirmation (Phase 5, Q5) -- evaluated BEFORE the
+      // cooldown gate below. lastScanMillis is stamped on first press and
+      // the 60s attendance cooldown is far longer than this 8s confirm
+      // window, so a same-fid second press would otherwise be caught and
+      // swallowed by that gate before ever reaching a role check, and the
+      // portal could never open. Master presses never touch the cooldown
+      // bookkeeping at all -- they aren't attendance events.
+      if (masterConfirmArmed) {
+        if (fid == masterConfirmFid) {
+          // Same master fid again within the window -- confirmed.
+          masterConfirmArmed = false;
+          Serial.println("Master confirmed: launching WiFi captive portal.");
+          pendingScanId = "";
+          postDisplayState(TIER_INTERACTION, 1000, "CONFIRMED", "Starting setup", "");
+          renderDisplayIfDirty();
+          for (int i = 0; i < 5; i++) {
+            setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
+            vTaskDelay(120 / portTICK_PERIOD_MS);
+            setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
+            vTaskDelay(120 / portTICK_PERIOD_MS);
+          }
+          startCaptivePortal();
+          continue;
+        } else {
+          // A different fid -- cancel, and fall through so THIS fid still
+          // gets processed normally below (cooldown gate + dispatch).
+          Serial.println("Master confirm cancelled: different finger scanned.");
+          masterConfirmArmed = false;
+        }
+      }
+
+      if (role == "master") {
+        // First press (or a fresh press right after the cancel above) --
+        // arm instead of acting immediately.
+        masterConfirmArmed = true;
+        masterConfirmFid = fid;
+        masterConfirmDeadlineMs = millis() + 8000;
+        Serial.println("Master scanned: awaiting confirmation (scan again within 8s).");
+        pendingScanId = "";
+        postDisplayState(TIER_INTERACTION, 8000, "CONFIRM?", "Scan again", "");
+        renderDisplayIfDirty();
+        setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
+        showReadyState();
+        continue;
+      }
 
       unsigned long nowMs = millis();
       if (fidEverScanned[fid] && (nowMs - lastScanMillis[fid] < SCAN_COOLDOWN_MS)) {
@@ -2153,20 +2336,12 @@ void FingerprintTask(void *pvParameters) {
       lastScanMillis[fid] = nowMs;
       fidEverScanned[fid] = true;
 
+      // role is already known from above, and is guaranteed not "master"
+      // here -- that case always continue()s (confirmed/armed/cancelled-
+      // and-rearmed) before reaching this point.
       String mapped = fidMap[fid];
-      String role   = fidMapRole[fid];
-      role.toLowerCase();
 
-      if (role == "master") {
-        Serial.println("Master scanned: launching WiFi captive portal.");
-        for (int i = 0; i < 5; i++) {
-          setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
-          vTaskDelay(120 / portTICK_PERIOD_MS);
-          setSensorLED(FINGERPRINT_LED_OFF, 0, 0);
-          vTaskDelay(120 / portTICK_PERIOD_MS);
-        }
-        startCaptivePortal();
-      } else if (mapped.length()) {
+      if (mapped.length()) {
         // All non-master members (student, teacher, staff) use the same attendance payload.
         setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
         String scanId = makeScanId(mapped);
