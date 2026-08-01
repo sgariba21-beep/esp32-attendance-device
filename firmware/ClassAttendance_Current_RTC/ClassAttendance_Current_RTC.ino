@@ -251,6 +251,11 @@ void clearDisplayState(DisplayTier tier);
 void renderDisplayIfDirty();
 void renderIdleScreen();
 void showBootSplash();
+// UTF-8-to-CP437-safe text for the display font. Not Core-restricted itself
+// (pure string transform, no I2C) -- Phase 4+ scan/enrollment cards should
+// route member/enrollee names through this too.
+String sanitizeForDisplay(const String &s);
+String transliterateCodepoint(uint32_t cp);
 
 /* ---------------- LED helpers ---------------- */
 
@@ -505,9 +510,79 @@ void clearDisplayState(DisplayTier tier) {
 
 // Core-1-only from here down (called from FingerprintTask).
 
+// A handful of common multi-byte codepoints transliterated to ASCII, plus the
+// Latin-1 Supplement accented-letter block (names may contain these). Falls
+// back to '?' for anything with no reasonable ASCII equivalent -- better than
+// silently dropping it or (worse) rendering the wrong CP437 glyph.
+String transliterateCodepoint(uint32_t cp) {
+  switch (cp) {
+    case 0x2013: case 0x2014: return "-";   // en/em dash
+    case 0x2018: case 0x2019: return "'";   // curly single quotes
+    case 0x201C: case 0x201D: return "\"";  // curly double quotes
+    case 0x2026: return "...";              // ellipsis
+    case 0x2022: return "*";                // bullet
+    case 0x00C6: return "AE";
+    case 0x00E6: return "ae";
+    case 0x00DF: return "ss";
+  }
+  if (cp >= 0x00C0 && cp <= 0x00C5) return "A";
+  if (cp == 0x00C7) return "C";
+  if (cp >= 0x00C8 && cp <= 0x00CB) return "E";
+  if (cp >= 0x00CC && cp <= 0x00CF) return "I";
+  if (cp == 0x00D0) return "D";
+  if (cp == 0x00D1) return "N";
+  if ((cp >= 0x00D2 && cp <= 0x00D6) || cp == 0x00D8) return "O";
+  if (cp >= 0x00D9 && cp <= 0x00DC) return "U";
+  if (cp == 0x00DD) return "Y";
+  if (cp >= 0x00E0 && cp <= 0x00E5) return "a";
+  if (cp == 0x00E7) return "c";
+  if (cp >= 0x00E8 && cp <= 0x00EB) return "e";
+  if (cp >= 0x00EC && cp <= 0x00EF) return "i";
+  if (cp == 0x00F0) return "d";
+  if (cp == 0x00F1) return "n";
+  if ((cp >= 0x00F2 && cp <= 0x00F6) || cp == 0x00F8) return "o";
+  if (cp >= 0x00F9 && cp <= 0x00FC) return "u";
+  if (cp == 0x00FD || cp == 0x00FF) return "y";
+  return "?";
+}
+
+// Adafruit_GFX's default font only covers CP437-style single-byte glyphs, not
+// UTF-8 -- printing a raw multi-byte UTF-8 sequence renders one wrong glyph
+// per byte (an em dash's 0xE2 0x80 0x94 renders as three garbage characters,
+// one of them pi). Admin-entered text (institution/device names, and later
+// member names on scan/enrollment cards) can contain smart quotes/dashes from
+// phones and word processors, or accented letters in names. Applied at the
+// render boundary only -- the raw UTF-8 stays in device_identity.json and
+// Serial logs; only what actually reaches display.print() is sanitized.
+String sanitizeForDisplay(const String &s) {
+  String out;
+  out.reserve(s.length());
+  size_t i = 0;
+  while (i < s.length()) {
+    uint8_t c = (uint8_t)s[i];
+    if (c < 0x80) {
+      out += (char)c;
+      i++;
+    } else if ((c & 0xE0) == 0xC0 && i + 1 < s.length()) {
+      uint32_t cp = ((uint32_t)(c & 0x1F) << 6) | ((uint8_t)s[i + 1] & 0x3F);
+      out += transliterateCodepoint(cp);
+      i += 2;
+    } else if ((c & 0xF0) == 0xE0 && i + 2 < s.length()) {
+      uint32_t cp = ((uint32_t)(c & 0x0F) << 12) | (((uint8_t)s[i + 1] & 0x3F) << 6) | ((uint8_t)s[i + 2] & 0x3F);
+      out += transliterateCodepoint(cp);
+      i += 3;
+    } else if ((c & 0xF8) == 0xF0 && i + 3 < s.length()) {
+      i += 4;  // outside the BMP (e.g. emoji) -- nothing sensible to show, drop it
+    } else {
+      i++;  // stray continuation byte or malformed input -- skip
+    }
+  }
+  return out;
+}
+
 void showBootSplash() {
   if (!displayAvailable) return;
-  String nameSnapshot = getDisplayNameSafe();
+  String nameSnapshot = sanitizeForDisplay(getDisplayNameSafe());
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(2);
@@ -537,7 +612,7 @@ void renderIdleScreen() {
   display.setCursor(0, 0);
   display.print(clockBuf);
 
-  String nameSnapshot = getDisplayNameSafe();
+  String nameSnapshot = sanitizeForDisplay(getDisplayNameSafe());
   display.setTextSize(1);
   display.setCursor(0, 24);
   display.print(nameSnapshot.length() ? nameSnapshot : String("Unassigned"));
