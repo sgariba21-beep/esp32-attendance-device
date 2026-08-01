@@ -39,7 +39,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.4.0"         // increment on each flash (1.4.0: device_config SPIFFS cache)
+#define FIRMWARE_VERSION  "1.5.0"         // increment on each flash (1.5.0: SSD1306 display foundation)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -83,6 +83,14 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define SCAN_LOG_FILE "/scan_log.txt"
 #define SCAN_LOG_MAX_BYTES (200UL * 1024UL)
 
+/* SSD1306 OLED (Phase 3). Same I2C bus as the DS3231 RTC (0x68) -- no address
+ * clash at 0x3C. Display owner is Core 1 (FingerprintTask) only; see
+ * renderDisplayIfDirty(). */
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT 64
+#define OLED_ADDR     0x3C
+#define DISPLAY_SLEEP_MS (120UL * 1000UL)
+
 /* ============ END CONFIG ================ */
 
 #include <WiFi.h>
@@ -96,6 +104,8 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #include <Adafruit_Fingerprint.h>
 #include <Wire.h>
 #include <RTClib.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <WebServer.h>
 #include <DNSServer.h>
 #include "esp_task_wdt.h"
@@ -107,6 +117,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #include "freertos/semphr.h"
 
 RTC_DS3231 rtc;
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 HardwareSerial r503Serial(2);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&r503Serial);
@@ -117,6 +128,7 @@ SemaphoreHandle_t memQueueSem   = NULL;  // binary signal: FingerprintTask → N
 SemaphoreHandle_t spiffsMutex   = NULL;
 SemaphoreHandle_t enrollMutex   = NULL;
 SemaphoreHandle_t enrollSem     = NULL;
+SemaphoreHandle_t displayMutex  = NULL;  // guards displayName + the tier table below (Phase 3 OLED)
 
 String wifiSSID = "";
 String wifiPASS = "";
@@ -135,6 +147,30 @@ volatile bool pendingAssignment = false;  // true until dashboard assigns this d
 String deviceConfigNameDisplay = "first";  // compile-time default until a valid cache file overrides it
 long   deviceConfigRevOnDisk   = 0;        // rev actually persisted to flash, not any pending value; 0 = never persisted (always "stale" to the server)
 int    deviceConfigTzOffset    = 0;        // minutes east of UTC; refreshed on every poll response
+
+/* ---- Display state mailbox (Phase 3 OLED) ----
+ * NetworkTask/EnrollmentTask (Core 0) post/clear tier state here through
+ * postDisplayState()/clearDisplayState() -- they never touch `display`
+ * directly. FingerprintTask (Core 1) is the sole reader+drawer, via
+ * renderDisplayIfDirty(). Guarded by displayMutex; tier 0 = highest priority.
+ * Idle (TIER_IDLE) is always active as the base state so resolution never
+ * lands on "nothing". */
+enum DisplayTier {
+  TIER_TAKEOVER    = 0,  // fatal init, captive portal, OTA, sensor missing -- exclusive, never sleeps
+  TIER_INTERACTION = 1,  // enrollment prompts/outcomes, scan outcomes, master confirm -- timeboxed
+  TIER_BLOCKED     = 2,  // awaiting assignment, provisioning error, decommissioned -- never sleeps
+  TIER_DEGRADED    = 3,  // offline+queue depth, clock unsynced, dropped-record count -- banner over idle
+  TIER_IDLE        = 4,  // clock, display name, link state -- always active as the fallback
+  TIER_COUNT       = 5
+};
+bool          displayAvailable      = false;  // false if SSD1306 init failed -- no hard dependency on the panel
+volatile bool tierActive[TIER_COUNT]     = { false, false, false, false, true };
+unsigned long tierExpiresAtMs[TIER_COUNT] = { 0, 0, 0, 0, 0 };  // 0 = no expiry
+volatile bool displayDirty          = true;   // forces the first render once FingerprintTask starts
+volatile bool displayAsleep         = false;
+volatile bool displayWakeRequested  = false;  // set by any core; only Core 1 issues the actual I2C wake command
+unsigned long displayLastActivityMs = 0;
+unsigned long lastIdleRenderMs      = 0;
 
 TaskHandle_t hFingerprint = NULL;
 TaskHandle_t hNetwork     = NULL;
@@ -193,6 +229,11 @@ static void recoverInflightQueue();
 
 bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHttpCode, String &outBody);
 bool postJSONBootstrap(const String &jsonPayload, const char* targetUrl, int &outHttpCode, String &outBody);
+// displayName is read from Core 1 (display) but written from Core 0
+// (registerDevice/pollAssignment/EnrollmentTask) once tasks are running --
+// every access after task creation goes through these two (Phase 3 OLED).
+void setDisplayName(const String &name);
+String getDisplayNameSafe();
 bool loadDeviceIdentity();
 void saveDeviceIdentity();
 bool registerDevice();
@@ -202,6 +243,14 @@ void saveProvisioning();
 void clearProvisioning();
 bool loadDeviceConfig();
 void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDisplay);
+
+// Display mailbox (Phase 3 OLED) -- Core-0-safe, never touch `display` directly.
+void postDisplayState(DisplayTier tier, unsigned long timeboxMs);
+void clearDisplayState(DisplayTier tier);
+// Core-1-only (called from FingerprintTask).
+void renderDisplayIfDirty();
+void renderIdleScreen();
+void showBootSplash();
 
 /* ---------------- LED helpers ---------------- */
 
@@ -279,17 +328,38 @@ bool loadDeviceIdentity() {
 // escapes on serialize, so a display_name / member sid containing " or \ is
 // handled by the library for every payload we write to SPIFFS or POST.
 
+// Mutex-protected accessors for displayName (Phase 3): NetworkTask/EnrollmentTask
+// (Core 0) write it, FingerprintTask (Core 1) reads it every render for the boot
+// splash and idle screen. Arduino String isn't safe for a concurrent
+// read-while-write, which was harmless before Phase 3 (nothing on Core 1 ever
+// read it) and is now live. setDisplayName() also marks the display dirty so a
+// rename shows up on the next render.
+void setDisplayName(const String &name) {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  displayName = name;
+  displayDirty = true;
+  xSemaphoreGive(displayMutex);
+}
+
+String getDisplayNameSafe() {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  String v = displayName;
+  xSemaphoreGive(displayMutex);
+  return v;
+}
+
 void saveDeviceIdentity() {
   File f = SPIFFS.open(DEVICE_IDENTITY_FILE, FILE_WRITE);
   if (!f) { Serial.println("Failed to write device identity"); return; }
+  String nameSnapshot = getDisplayNameSafe();
   JsonDocument doc;
   doc["device_id"]      = deviceId;
   doc["institution_id"] = institutionId;
   doc["device_secret"]  = deviceSecret;
-  doc["display_name"]   = displayName;
+  doc["display_name"]   = nameSnapshot;
   serializeJson(doc, f);
   f.close();
-  Serial.println("Device identity saved: " + deviceId + " / " + displayName);
+  Serial.println("Device identity saved: " + deviceId + " / " + nameSnapshot);
 }
 
 // H7: persist device_id + provisioning_token while the device is pending so a
@@ -403,6 +473,141 @@ void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDispla
   deviceConfigNameDisplay = nameDisplay;
   Serial.printf("device_config saved: rev=%ld tz_offset=%d name_display=%s\n",
                 rev, tzOffset, nameDisplay.c_str());
+}
+
+/* ================== Display (SSD1306, Phase 3) ================== */
+// Mailbox API -- Core 0 (NetworkTask/EnrollmentTask) callable. Only touches the
+// shared tier table under displayMutex; never draws. Unused by any real caller
+// as of Phase 3 (foundation only) -- Phase 5/6 wire actual content into tiers
+// 0-3 (interaction cards, blocked/degraded banners). Idle (tier 4) needs no
+// caller: it's always active as the base state.
+void postDisplayState(DisplayTier tier, unsigned long timeboxMs) {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  tierActive[tier] = true;
+  tierExpiresAtMs[tier] = timeboxMs ? (millis() + timeboxMs) : 0;
+  displayDirty = true;
+  if (tier <= TIER_BLOCKED) {
+    // Tier 0/1/2 wake the panel. The actual I2C command only ever runs on
+    // Core 1 (renderDisplayIfDirty) -- this just requests it.
+    displayWakeRequested = true;
+    displayLastActivityMs = millis();
+  }
+  xSemaphoreGive(displayMutex);
+}
+
+void clearDisplayState(DisplayTier tier) {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  tierActive[tier] = false;
+  tierExpiresAtMs[tier] = 0;
+  displayDirty = true;
+  xSemaphoreGive(displayMutex);
+}
+
+// Core-1-only from here down (called from FingerprintTask).
+
+void showBootSplash() {
+  if (!displayAvailable) return;
+  String nameSnapshot = getDisplayNameSafe();
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print("v" FIRMWARE_VERSION);
+  display.setTextSize(1);
+  display.setCursor(0, 24);
+  display.print(nameSnapshot.length() ? nameSnapshot : String("Starting..."));
+  display.display();
+}
+
+// Tier 4 idle content: clock, unit display name, WiFi link state. Local time
+// is UTC (the RTC's own timebase, since NTP sync uses configTime(0,0,...))
+// plus deviceConfigTzOffset minutes, computed on raw unixtime -- NOT via
+// RTClib's TimeSpan, whose minutes field is int8_t and would silently
+// truncate/overflow for a +14:00 zone (840 minutes).
+void renderIdleScreen() {
+  DateTime utcNow = rtc.now();
+  uint32_t localEpoch = utcNow.unixtime() + (int32_t)deviceConfigTzOffset * 60;
+  DateTime local(localEpoch);
+
+  char clockBuf[6];
+  sprintf(clockBuf, "%02d:%02d", local.hour(), local.minute());
+
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print(clockBuf);
+
+  String nameSnapshot = getDisplayNameSafe();
+  display.setTextSize(1);
+  display.setCursor(0, 24);
+  display.print(nameSnapshot.length() ? nameSnapshot : String("Unassigned"));
+
+  display.setCursor(0, 36);
+  display.print(WiFi.status() == WL_CONNECTED ? "Online" : "Offline");
+}
+
+// Dirty-flag render: called every FingerprintTask loop iteration (~100 Hz)
+// but only actually flushes the ~1 KB I2C frame when something changed --
+// never repaint from showReadyState()-frequency code, which would wreck both
+// the scan loop and the RTC reads sharing this bus (see design notes).
+void renderDisplayIfDirty() {
+  if (!displayAvailable) return;
+
+  unsigned long now = millis();
+  bool tierChanged = false;
+
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  for (int t = 0; t < TIER_COUNT; t++) {
+    if (tierActive[t] && tierExpiresAtMs[t] && now > tierExpiresAtMs[t]) {
+      // Higher tier's timebox ended -- fall back to the highest-priority
+      // active lower tier (idle, tier 4, is always active as the floor).
+      tierActive[t] = false;
+      tierExpiresAtMs[t] = 0;
+      tierChanged = true;
+    }
+  }
+  int activeTier = TIER_IDLE;
+  for (int t = 0; t < TIER_COUNT; t++) {
+    if (tierActive[t]) { activeTier = t; break; }
+  }
+  bool wakeRequested = displayWakeRequested;
+  displayWakeRequested = false;
+  xSemaphoreGive(displayMutex);
+
+  if (tierChanged) displayDirty = true;
+
+  bool neverSleeps = (activeTier == TIER_TAKEOVER || activeTier == TIER_BLOCKED);
+
+  if (displayAsleep) {
+    if (!wakeRequested && !neverSleeps) return;  // stay asleep, nothing to draw
+    display.ssd1306_command(SSD1306_DISPLAYON);
+    displayAsleep = false;
+    displayDirty = true;
+    Serial.println("Display: waking");
+  } else if (!neverSleeps && (now - displayLastActivityMs > DISPLAY_SLEEP_MS)) {
+    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    displayAsleep = true;
+    Serial.println("Display: sleeping (120s idle)");
+    return;
+  }
+
+  bool idleTick = (activeTier == TIER_IDLE) && (now - lastIdleRenderMs >= 1000);
+  if (!displayDirty && !idleTick) return;
+
+  display.clearDisplay();
+  switch (activeTier) {
+    case TIER_IDLE:
+    default:
+      // TIER_TAKEOVER / TIER_INTERACTION / TIER_BLOCKED / TIER_DEGRADED
+      // content is Phase 5/6 -- idle is the only real screen this phase, and
+      // the only tier ever active today, since nothing posts to 0-3 yet.
+      renderIdleScreen();
+      break;
+  }
+  display.display();
+
+  displayDirty = false;
+  if (activeTier == TIER_IDLE) lastIdleRenderMs = now;
 }
 
 /* ================== Captive Portal ================== */
@@ -789,7 +994,7 @@ bool registerDevice() {
 
     institutionId = newInstitutionId;
     deviceSecret  = newDeviceSecret;
-    displayName   = newDisplayName;
+    setDisplayName(newDisplayName);
     saveDeviceIdentity();
     clearProvisioning();
     // T9: ensure all identity writes are visible to NetworkTask on Core 0 before
@@ -837,7 +1042,7 @@ bool pollAssignment() {
 
   institutionId = doc["institution_id"] | "";
   deviceSecret  = doc["device_secret"]  | "";
-  displayName   = doc["display_name"]   | "";
+  setDisplayName(doc["display_name"] | "");
 
   if (institutionId.length() == 0 || deviceSecret.length() == 0) {
     Serial.println("pollAssignment: assigned but missing institution fields");
@@ -1523,6 +1728,18 @@ void EnrollmentTask(void *pvParameters) {
             saveDeviceConfig(serverConfigVer, serverConfigRev, serverTzOffset, nameDisplay);
           }
 
+          // display_name can be renamed in the dashboard after initial
+          // assignment; register/assignment-poll only ever set it once, so
+          // refresh it here on every poll instead. No concurrent Core-0 writer
+          // to race against: registerDevice()/pollAssignment() only run while
+          // pendingAssignment is true, and this task only reaches here once
+          // it's false (see the outer if-condition above).
+          String serverDisplayName = doc["display_name"] | "";
+          if (serverDisplayName.length() > 0 && serverDisplayName != getDisplayNameSafe()) {
+            setDisplayName(serverDisplayName);
+            saveDeviceIdentity();
+          }
+
           // Job fields are read from the nested "job" object rather than
           // searched for across the whole body, so a top-level key can no
           // longer shadow a job field of the same name.
@@ -1567,6 +1784,10 @@ void FingerprintTask(void *pvParameters) {
   const unsigned long feedbackDuration = 600;
 
   for (;;) {
+    // Display owner is this task (Core 1) only -- runs every iteration but is
+    // a cheap no-op unless something's actually dirty (see renderDisplayIfDirty).
+    renderDisplayIfDirty();
+
     // OTA in progress: hold red breathing
     if (otaInProgress) {
       setSensorLED(FINGERPRINT_LED_BREATHING, 15, FINGERPRINT_LED_RED);
@@ -1619,6 +1840,17 @@ void FingerprintTask(void *pvParameters) {
 
     // Normal scan
     int fid = fingerSearch();
+    if (fid != -1) {
+      // Any real getImage() event (match, no-match, or error after a capture)
+      // wakes the display -- -1 is specifically FINGERPRINT_NOFINGER, the
+      // idle-poll case with no finger present, so this only runs on actual
+      // finger interaction, not the idle polling loop. Takes effect on the
+      // next renderDisplayIfDirty() call (top of this loop), a <30ms lag.
+      xSemaphoreTake(displayMutex, portMAX_DELAY);
+      displayWakeRequested = true;
+      displayLastActivityMs = millis();
+      xSemaphoreGive(displayMutex);
+    }
     if (fid > 0) {
       Serial.print("Fingerprint matched ID: "); Serial.println(fid);
 
@@ -1703,12 +1935,31 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  // Phase 3: moved to the very top, before anything else. The screen is most
+  // valuable during the up-to-15s WiFi connect below (and the captive portal,
+  // which can block far longer) -- windows where the sensor LED isn't yet
+  // under our control and the device would otherwise look dead. RTC (also on
+  // this bus) still initializes later, unchanged; Wire.begin() just needs to
+  // run once before any I2C peripheral use. No hard dependency on the panel:
+  // if init fails, displayAvailable stays false and every display.* call
+  // downstream is a no-op guarded on it.
+  Wire.begin(21, 22);
+  // periphBegin=false: Wire is already begun above with our pins (21/22).
+  // The default (true) would have begin() call Wire.begin() again internally
+  // with the board's default pins -- harmless here since those also happen
+  // to be 21/22 on plain ESP32, but not something to rely on.
+  displayAvailable = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR, true, false);
+  if (!displayAvailable) {
+    Serial.println("SSD1306 not found -- continuing without display.");
+  }
+
   // T2/T12: memQueueMutex removed; spiffsMutex guards the SPIFFS-only queue.
-  memQueueSem = xSemaphoreCreateBinary();
-  spiffsMutex = xSemaphoreCreateMutex();
-  enrollMutex = xSemaphoreCreateMutex();
-  enrollSem   = xSemaphoreCreateBinary();
-  if (!memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem) {
+  memQueueSem  = xSemaphoreCreateBinary();
+  spiffsMutex  = xSemaphoreCreateMutex();
+  enrollMutex  = xSemaphoreCreateMutex();
+  enrollSem    = xSemaphoreCreateBinary();
+  displayMutex = xSemaphoreCreateMutex();
+  if (!memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem || !displayMutex) {
     Serial.println("Failed to create RTOS primitives");
     while (1) delay(1000);
   }
@@ -1735,6 +1986,11 @@ void setup() {
   // immediately, and a card rendered before the policy loads could show a
   // full name under a stricter (e.g. "none") configured policy.
   loadDeviceConfig();
+
+  // display_name is already resolved above if this device was previously
+  // provisioned; a fresh device just shows the version until assigned.
+  showBootSplash();
+  displayLastActivityMs = millis();
 
   loadFidMapFromFS();
   memset(lastScanMillis, 0, sizeof(lastScanMillis));
@@ -1781,14 +2037,15 @@ void setup() {
     }
   }
 
-  Wire.begin(21, 22);
-  initRTC();
+  initRTC();  // Wire already initialized at the top of setup()
   configTime(0, 0, "pool.ntp.org");
   if (WiFi.status() == WL_CONNECTED) syncRTCFromNTP();
 
   setupFingerprint();
 
-  BaseType_t ok1 = xTaskCreatePinnedToCore(FingerprintTask, "FingerprintTask", 8192,  NULL, 1, &hFingerprint, 1);
+  // Stack bumped 8192 -> 10240 (Phase 3): FingerprintTask now also owns display
+  // rendering (Adafruit_GFX text calls, tier resolution) on top of its existing work.
+  BaseType_t ok1 = xTaskCreatePinnedToCore(FingerprintTask, "FingerprintTask", 10240, NULL, 1, &hFingerprint, 1);
   BaseType_t ok2 = xTaskCreatePinnedToCore(NetworkTask,     "NetworkTask",     16384, NULL, 1, &hNetwork,     0);
   BaseType_t ok3 = xTaskCreatePinnedToCore(EnrollmentTask,  "EnrollmentTask",  12288, NULL, 1, &hEnrollment,  0);
   if (ok1 != pdPASS || ok2 != pdPASS || ok3 != pdPASS) {

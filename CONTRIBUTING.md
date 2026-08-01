@@ -35,7 +35,7 @@ Create the first account directly in Supabase Auth, then insert a `profiles` row
 ## Firmware setup
 
 1. Install the Arduino IDE and the ESP32 board package (Boards Manager → "esp32" by Espressif).
-2. Install the libraries: Adafruit Fingerprint Sensor Library, RTClib, and ArduinoJson (v7.x — the firmware uses the elastic `JsonDocument` API, which v6 does not have). The rest ship with the ESP32 core.
+2. Install the libraries: Adafruit Fingerprint Sensor Library, RTClib, ArduinoJson (v7.x — the firmware uses the elastic `JsonDocument` API, which v6 does not have), and Adafruit SSD1306 + Adafruit GFX Library (0.96" I2C OLED at address 0x3C). The rest ship with the ESP32 core.
 3. Copy `firmware/ClassAttendance_Current_RTC/secrets.example.h` to `secrets.h` in the same folder and set `BOOTSTRAP_SECRET`. Generate it with `openssl rand -hex 32` and set the same value on the Supabase project. `secrets.h` is gitignored.
 4. `certs.h` holds the TLS root CA bundle and is committed. Update it if the server certificate chain changes (see the README "Firmware TLS Certs" note).
 5. Select board "ESP32 Dev Module", set the port, and flash.
