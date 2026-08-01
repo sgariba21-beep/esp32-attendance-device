@@ -120,6 +120,11 @@ Deno.serve(async (req: Request) => {
     device_config_ver: DEVICE_CONFIG_VERSION,
     device_config_rev: configRev,
     device_config_tz_offset: tzOffsetMinutes(institution?.timezone || "UTC"),
+    // Sent every poll (not gated on device_config_rev) so a dashboard rename
+    // reaches the idle screen within one 10s cycle instead of only ever being
+    // set once, at initial assignment (register/assignment-poll don't get
+    // called again after that).
+    display_name: device.display_name ?? "",
   };
   if (deviceRev < configRev) {
     deviceConfig.device_config_name_display = institution?.member_name_display ?? "first";
