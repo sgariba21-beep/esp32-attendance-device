@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 import { ownsRecord } from '@/lib/supabase/ownership'
+import { MAX_BULK_IMPORT_ROWS, type BulkMemberRow, type BulkImportResponse } from '@/lib/types'
 
 export type MemberFormData = {
   sid: string
@@ -98,6 +99,57 @@ export async function updateMember(id: string, data: MemberFormData) {
   revalidatePath('/members')
   revalidatePath('/staff')
   return { error: null }
+}
+
+export async function bulkCreateMembers(rows: BulkMemberRow[]): Promise<BulkImportResponse> {
+  const session = await requireRole('super_admin', 'admin')
+  const { institutionId } = session
+  const supabase = createAdminClient()
+
+  if (rows.length === 0) return { error: 'No rows to import.', results: [] }
+  if (rows.length > MAX_BULK_IMPORT_ROWS) {
+    return { error: `Import is limited to ${MAX_BULK_IMPORT_ROWS} rows at a time.`, results: [] }
+  }
+
+  const deviceIds = [...new Set(rows.map((r) => r.device_id))]
+  const { data: deviceRows } = await supabase
+    .from('devices')
+    .select('id, group_name, institution_id')
+    .in('id', deviceIds)
+  const deviceMap = new Map((deviceRows ?? []).map((d) => [d.id, d]))
+
+  // Imported members land inactive by design — an operator reviews/activates
+  // them (typically after fingerprint enrollment), same tenant guard as createMember.
+  const results = []
+  for (const row of rows) {
+    const device = deviceMap.get(row.device_id)
+    if (!device || (session.role !== 'platform_admin' && device.institution_id !== institutionId)) {
+      results.push({ sid: row.sid, fullname: row.fullname, error: 'Unit not found.' })
+      continue
+    }
+
+    const { error } = await supabase.from('members').insert({
+      sid: row.sid.trim(),
+      fullname: row.fullname.trim(),
+      device_id: row.device_id,
+      group_name: device.group_name,
+      institution_id: institutionId ?? device.institution_id,
+      member_type: 'student',
+      fin1: 0,
+      fin2: 0,
+      status: 'inactive',
+    })
+
+    results.push({
+      sid: row.sid,
+      fullname: row.fullname,
+      error: error ? (error.code === '23505' ? 'A member with that ID already exists.' : error.message) : null,
+    })
+  }
+
+  revalidatePath('/members')
+  revalidatePath('/staff')
+  return { error: null, results }
 }
 
 export async function setMemberStatus(id: string, status: 'active' | 'inactive') {

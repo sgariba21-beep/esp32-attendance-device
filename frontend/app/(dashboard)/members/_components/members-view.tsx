@@ -16,7 +16,8 @@ import {
 import { cn, pluralize } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import { MemberDialog } from './member-dialog'
-import { setMemberStatus } from '../_actions'
+import { BulkImportDialog } from '@/components/bulk-import-dialog'
+import { setMemberStatus, bulkCreateMembers } from '../_actions'
 import type { MemberWithDevice } from '../page'
 import type { Device } from '@/lib/types'
 
@@ -41,6 +42,7 @@ export function MembersView({ members, devices, role, institutions, labels }: Pr
   const isTeacher = role === 'teacher' || role === 'staff'
   const isPlatformAdmin = role === 'platform_admin'
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [editing, setEditing] = useState<MemberWithDevice | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<MemberWithDevice | null>(null)
@@ -99,7 +101,12 @@ export function MembersView({ members, devices, role, institutions, labels }: Pr
       <PageHeader
         title={labels.label_members}
         subtitle={`${filtered.length} of ${members.length} ${members.length !== 1 ? labels.label_members.toLowerCase() : labels.label_member.toLowerCase()}`}
-        actions={!isTeacher ? <Button onClick={openAdd}>Add {labels.label_member.toLowerCase()}</Button> : undefined}
+        actions={!isTeacher ? (
+          <>
+            <Button variant="outline" onClick={() => setImportOpen(true)}>Import CSV</Button>
+            <Button onClick={openAdd}>Add {labels.label_member.toLowerCase()}</Button>
+          </>
+        ) : undefined}
       />
 
       <div className="flex flex-wrap gap-3 items-center">
@@ -263,6 +270,16 @@ export function MembersView({ members, devices, role, institutions, labels }: Pr
           await handleToggleStatus(confirmTarget)
           setConfirmTarget(null)
         }}
+      />
+
+      <BulkImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        devices={devices}
+        institutions={institutions}
+        isPlatformAdmin={isPlatformAdmin}
+        labels={labels}
+        onImport={bulkCreateMembers}
       />
     </div>
   )

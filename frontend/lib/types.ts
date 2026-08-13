@@ -118,6 +118,17 @@ export type UnassignedDevice = {
   display_name: string | null
 }
 
+/** A single validated row queued for bulk member/staff CSV import. */
+export type BulkMemberRow = { sid: string; fullname: string; device_id: string }
+
+/** Per-row outcome reported back after a bulk import server action runs. */
+export type BulkImportRowResult = { sid: string; fullname: string; error: string | null }
+
+export type BulkImportResponse = { error: string | null; results: BulkImportRowResult[] }
+
+/** Server-side cap on rows per bulk import call, kept in sync with client-side messaging. */
+export const MAX_BULK_IMPORT_ROWS = 500
+
 export type AcademicTerm = {
   id: string
   term: string
