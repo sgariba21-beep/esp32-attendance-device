@@ -39,7 +39,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.7.0"         // increment on each flash (1.7.0: enrollment/portal/master-confirm display cards)
+#define FIRMWARE_VERSION  "1.8.0"         // increment on each flash (1.8.0: persistent/degraded state display cards)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -163,6 +163,11 @@ enum DisplayTier {
   TIER_IDLE        = 4,  // clock, display name, link state -- always active as the fallback
   TIER_COUNT       = 5
 };
+
+// Phase 6: which Tier 2 (Blocked) state is currently posted, if any. Defined
+// here (not next to setBlockedReason() itself, further down) so it's visible
+// to that function's forward declaration in the block below.
+enum BlockedReason { BLOCKED_NONE, BLOCKED_PENDING, BLOCKED_REJECTED, BLOCKED_REVOKED };
 bool          displayAvailable      = false;  // false if SSD1306 init failed -- no hard dependency on the panel
 volatile bool tierActive[TIER_COUNT]     = { false, false, false, false, true };
 unsigned long tierExpiresAtMs[TIER_COUNT] = { 0, 0, 0, 0, 0 };  // 0 = no expiry
@@ -189,6 +194,25 @@ unsigned long lastIdleRenderMs      = 0;
 volatile bool verdictPending = false;
 String        verdictScanId  = "";
 String        verdictText    = "";
+
+// Queue depth + dropped-record count (Phase 6 OLED) -- in-RAM only, never
+// recomputed by counting SPIFFS lines on repaint. Written from Core 0
+// (queueAndSignal is Core 1 via FingerprintTask, but flushQueue/
+// trimSPIFFSQueue_locked run on NetworkTask, Core 0; trimSPIFFSQueue_locked
+// can ALSO run on Core 1 when called from queueAndSignal's near-cap path) and
+// read from Core 1 for the offline banner -- mutex-protected like everything
+// else that crosses cores here. droppedRecordCount counts actual data loss
+// only (stale-aged-out, permanently-failed, or cap-evicted entries), never
+// successful sends.
+long queueDepth         = 0;
+long droppedRecordCount = 0;
+
+// Device MAC (Phase 6): the dashboard's key for identifying an unassigned
+// device, so the awaiting-assignment/rejected screens can show it. Populated
+// once in setup() after WiFi.mode(WIFI_STA), Core-1-exclusive (single-
+// threaded at that point) -- read-only from everywhere else afterward, so no
+// mutex needed for reads either.
+String deviceMac = "";
 
 TaskHandle_t hFingerprint = NULL;
 TaskHandle_t hNetwork     = NULL;
@@ -263,6 +287,7 @@ void trimSPIFFSQueue_locked();
 bool appendToSPIFFSQueue_locked(const String &line);
 void flushQueue();
 static void recoverInflightQueue();
+static void seedQueueDepthFromDisk();
 
 #define POST_MAX_RETRIES   3
 #define POST_BASE_DELAY_MS 500
@@ -295,6 +320,12 @@ void postDisplayState(DisplayTier tier, unsigned long timeboxMs,
                       const String &headline, const String &line2, const String &line3);
 void clearDisplayState(DisplayTier tier);
 void postScanVerdict(const String &entryPayload, bool ok, const String &body);
+// Queue-depth/dropped-record bookkeeping and Tier 2 state (Phase 6 OLED) --
+// also Core-0-safe.
+void queueDepthAdjust(long delta);
+void droppedCountAdjust(long delta);
+void getQueueStatsSafe(long &depth, long &dropped);
+void setBlockedReason(BlockedReason reason);
 // Core-1-only (called from FingerprintTask).
 void renderDisplayIfDirty();
 void renderIdleScreen();
@@ -619,6 +650,68 @@ void postScanVerdict(const String &entryPayload, bool ok, const String &body) {
   xSemaphoreGive(displayMutex);
 }
 
+// Queue-depth/dropped-record bookkeeping (Phase 6). Callers pass the delta
+// they already computed -- these never re-derive anything from SPIFFS.
+void queueDepthAdjust(long delta) {
+  if (delta == 0) return;
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  queueDepth += delta;
+  if (queueDepth < 0) queueDepth = 0;  // defensive floor; should never go negative
+  xSemaphoreGive(displayMutex);
+}
+
+void droppedCountAdjust(long delta) {
+  if (delta == 0) return;
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  droppedRecordCount += delta;
+  xSemaphoreGive(displayMutex);
+}
+
+void getQueueStatsSafe(long &depth, long &dropped) {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  depth = queueDepth;
+  dropped = droppedRecordCount;
+  xSemaphoreGive(displayMutex);
+}
+
+// Tier 2 blocked-state tracking (Phase 6). Core-0-exclusive by construction:
+// registerDevice()/pollAssignment() only run while pendingAssignment is true,
+// EnrollmentTask's poll only runs once it's false, so PENDING/REJECTED and
+// REVOKED are never live at the same time. registerDevice() can also run
+// from setup() (single-threaded, before tasks exist), which is equally safe.
+// Not mutex-protected: NetworkTask and EnrollmentTask are different Core-0
+// tasks that could in principle race on this plain enum, but the worst case
+// is a redundant repost (an extra harmless redraw), never corruption -- the
+// same reasoning as leaving simple scalars like deviceConfigTzOffset
+// unprotected would have been, except there we went with a mutex anyway for
+// consistency since a String was already being protected right next to it.
+// Here there's no adjacent String write to piggyback on, so the plain
+// version is the right call. (BlockedReason itself is defined up near
+// DisplayTier, not here, so the forward declaration below can see it.)
+BlockedReason currentBlockedReason = BLOCKED_NONE;
+
+void setBlockedReason(BlockedReason reason) {
+  if (reason == currentBlockedReason) return;  // dedupe -- avoid reposting (and redrawing) every poll
+  currentBlockedReason = reason;
+  switch (reason) {
+    case BLOCKED_NONE:
+      clearDisplayState(TIER_BLOCKED);
+      break;
+    case BLOCKED_PENDING:
+      postDisplayState(TIER_BLOCKED, 0, "PENDING", deviceMac, "See dashboard");
+      break;
+    case BLOCKED_REJECTED:
+      // Must look different from ordinary PENDING, or a rejected provisioning
+      // token is undebuggable in the field (looks identical to "just hasn't
+      // been assigned yet" forever).
+      postDisplayState(TIER_BLOCKED, 0, "REJECTED", deviceMac, "See admin");
+      break;
+    case BLOCKED_REVOKED:
+      postDisplayState(TIER_BLOCKED, 0, "REVOKED", deviceMac, "See admin");
+      break;
+  }
+}
+
 // Core-1-only from here down (called from FingerprintTask).
 
 // A handful of common multi-byte codepoints transliterated to ASCII, plus the
@@ -758,6 +851,24 @@ void renderIdleScreen() {
 
   display.setCursor(0, 36);
   display.print(WiFi.status() == WL_CONNECTED ? "Online" : "Offline");
+
+  // Tier 3 (Phase 6): offline+queue-depth banner, a 4th line layered over
+  // idle rather than a separate screen -- "persistent banner over idle" per
+  // the priority tiers table, not a takeover. Dropped-record count only
+  // shows here, never on an otherwise-clean idle screen -- the real audience
+  // for silent data loss is the administrator via the dashboard, this is
+  // just a hint something's wrong right now.
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  bool degraded = tierActive[TIER_DEGRADED];
+  xSemaphoreGive(displayMutex);
+  if (degraded) {
+    long depth = 0, dropped = 0;
+    getQueueStatsSafe(depth, dropped);
+    String banner = String(depth) + " queued";
+    if (dropped > 0) banner += " (" + String(dropped) + " lost)";
+    display.setCursor(0, 48);
+    display.print(banner);
+  }
 }
 
 // Generic card renderer for any tier whose content lives in tierHeadline[]/
@@ -882,28 +993,34 @@ void renderDisplayIfDirty() {
     return;
   }
 
-  bool idleTick = (activeTier == TIER_IDLE) && (now - lastIdleRenderMs >= 1000);
+  // TIER_DEGRADED renders via renderIdleScreen() too (Phase 6: it's a banner
+  // over idle, not a separate screen), so its clock needs the same 1s tick.
+  bool idleTick = (activeTier == TIER_IDLE || activeTier == TIER_DEGRADED) &&
+                 (now - lastIdleRenderMs >= 1000);
   if (!displayDirty && !idleTick) return;
 
   display.clearDisplay();
   switch (activeTier) {
     case TIER_TAKEOVER:
     case TIER_INTERACTION:
+    case TIER_BLOCKED:
       // activeTier is plain int (see its declaration above) -- C++ doesn't
       // implicitly convert int to an enum parameter, hence the cast. Safe by
       // construction: it's always assigned from a loop index < TIER_COUNT.
       renderCard((DisplayTier)activeTier);
       break;
+    case TIER_DEGRADED:
     case TIER_IDLE:
     default:
-      // TIER_BLOCKED / TIER_DEGRADED content is Phase 6.
+      // TIER_DEGRADED is idle + an extra banner line, drawn inside
+      // renderIdleScreen() itself (it checks tierActive[TIER_DEGRADED]).
       renderIdleScreen();
       break;
   }
   display.display();
 
   displayDirty = false;
-  if (activeTier == TIER_IDLE) lastIdleRenderMs = now;
+  if (activeTier == TIER_IDLE || activeTier == TIER_DEGRADED) lastIdleRenderMs = now;
 }
 
 /* ================== Captive Portal ================== */
@@ -1241,19 +1358,16 @@ bool postJSONBootstrap(const String &jsonPayload, const char* targetUrl, int &ou
 // and writes device_identity.json. Sets pendingAssignment=true if status="pending".
 // Returns true if the HTTP call succeeded.
 bool registerDevice() {
-  uint8_t mac[6];
-  esp_wifi_get_mac(WIFI_IF_STA, mac);
-  char macStr[18];
-  sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X",
-          mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
+  // deviceMac is populated once in setup() right after WiFi.mode(WIFI_STA) --
+  // reused here instead of recomputing it locally (Phase 6: also needed for
+  // the awaiting-assignment/rejected screens).
   JsonDocument reqDoc;
-  reqDoc["mac"] = macStr;
+  reqDoc["mac"] = deviceMac;
   String payload;
   serializeJson(reqDoc, payload);
 
   int code = 0; String body = "";
-  Serial.println("Registering device with MAC: " + String(macStr));
+  Serial.println("Registering device with MAC: " + deviceMac);
 
   if (!postJSONBootstrap(payload, REGISTER_URL, code, body)) {
     Serial.printf("register HTTP failed (code=%d)\n", code);
@@ -1297,6 +1411,11 @@ bool registerDevice() {
       Serial.println("register: assigned but institution_id/device_secret withheld -- "
                       "needs admin action (delete + re-add device in dashboard)");
       pendingAssignment = true;
+      // Not REJECTED yet -- that's specifically for a rejected provisioning
+      // token, which is what pollAssignment() will discover moments from now
+      // (no valid token exists on this path). PENDING is an accurate baseline
+      // in the meantime.
+      setBlockedReason(BLOCKED_PENDING);
       return true;
     }
 
@@ -1310,12 +1429,14 @@ bool registerDevice() {
     // be reordered past the store to pendingAssignment by the compiler.
     __asm__ volatile("" ::: "memory");
     pendingAssignment = false;
+    setBlockedReason(BLOCKED_NONE);
   } else {
     // H7: capture and persist the provisioning token so /assignment-poll can
     // later prove this device's identity to retrieve the device_secret.
     provisioningToken = doc["provisioning_token"] | "";
     saveProvisioning();
     pendingAssignment = true;
+    setBlockedReason(BLOCKED_PENDING);
   }
   return true;
 }
@@ -1336,7 +1457,15 @@ bool pollAssignment() {
 
   int code = 0; String body = "";
 
-  if (!postJSONBootstrap(payload, ASSIGNMENT_POLL_URL, code, body)) return false;
+  if (!postJSONBootstrap(payload, ASSIGNMENT_POLL_URL, code, body)) {
+    // Distinct from ordinary "awaiting assignment" -- a rejected token means
+    // the device row was deleted/re-created (H7) or the token otherwise no
+    // longer matches, and no amount of waiting will fix it. Without this the
+    // state is undebuggable in the field: it looks identical to "just hasn't
+    // been assigned yet" forever.
+    if (code == 401) setBlockedReason(BLOCKED_REJECTED);
+    return false;
+  }
 
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, body);
@@ -1346,7 +1475,10 @@ bool pollAssignment() {
   }
 
   String status = doc["status"] | "";
-  if (status != "assigned") return false;
+  if (status != "assigned") {
+    setBlockedReason(BLOCKED_PENDING);
+    return false;
+  }
 
   institutionId = doc["institution_id"] | "";
   deviceSecret  = doc["device_secret"]  | "";
@@ -1363,6 +1495,7 @@ bool pollAssignment() {
   // NetworkTask observes pendingAssignment == false on the other core.
   __asm__ volatile("" ::: "memory");
   pendingAssignment = false;
+  setBlockedReason(BLOCKED_NONE);
   Serial.printf("Assigned! institution_id=%s display_name=%s\n",
                 institutionId.c_str(), displayName.c_str());
   return true;
@@ -1687,10 +1820,16 @@ void trimSPIFFSQueue_locked() {
   }
 
   size_t totalDropped = droppedAge + droppedCount + droppedBytes;
-  if (totalDropped)
+  if (totalDropped) {
     Serial.printf("SPIFFS queue trimmed: dropped %u (age=%u count=%u bytes=%u), kept %u\n",
                   (unsigned)totalDropped, (unsigned)droppedAge,
                   (unsigned)droppedCount, (unsigned)droppedBytes, (unsigned)kept.size());
+    // Every trim-dropped entry is actual data loss (nothing here was ever
+    // sent) -- reconcile both counters using numbers already computed above,
+    // never by re-counting SPIFFS lines.
+    queueDepthAdjust(-(long)totalDropped);
+    droppedCountAdjust((long)totalDropped);
+  }
 }
 
 bool appendToSPIFFSQueue_locked(const String &line) {
@@ -1715,10 +1854,14 @@ bool appendToSPIFFSQueue_locked(const String &line) {
 // immediate low-latency delivery. FingerprintTask calls this on Core 1.
 void queueAndSignal(const String &payloadJson) {
   xSemaphoreTake(spiffsMutex, portMAX_DELAY);
-  if (appendToSPIFFSQueue_locked(payloadJson)) {
+  bool persisted = appendToSPIFFSQueue_locked(payloadJson);
+  if (persisted) {
     Serial.println("[queue] Persisted to SPIFFS: " + payloadJson);
   }
   xSemaphoreGive(spiffsMutex);
+  // Outside the spiffsMutex critical section -- this is a separate,
+  // lightweight displayMutex-protected counter, not SPIFFS state.
+  if (persisted) queueDepthAdjust(1);
   // Non-blocking give: if NetworkTask is mid-flush the signal is latched and
   // will be consumed at the start of the next loop iteration.
   xSemaphoreGive(memQueueSem);
@@ -1766,7 +1909,15 @@ void flushQueue() {
     f.close();
   }
 
-  if (droppedStale) Serial.printf("flushQueue: dropped %u stale entries\n", (unsigned)droppedStale);
+  if (droppedStale) {
+    Serial.printf("flushQueue: dropped %u stale entries\n", (unsigned)droppedStale);
+    // Reconciled immediately, not at the end with the network-loop counts --
+    // pending.empty() below can return before reaching that point, and a
+    // stale-only batch (nothing left to even attempt sending) must not skip
+    // this accounting.
+    queueDepthAdjust(-(long)droppedStale);
+    droppedCountAdjust((long)droppedStale);
+  }
 
   if (pending.empty()) {
     SPIFFS.remove(QUEUE_INFLIGHT_FILE);
@@ -1775,24 +1926,29 @@ void flushQueue() {
 
   Serial.printf("Flushing %u queued records\n", (unsigned)pending.size());
   std::vector<String> keep;
+  size_t sentOkCount = 0;
+  size_t permanentDropCount = 0;
   for (auto &entry : pending) {
     int httpCode = 0; String body;
     bool ok = postJSONToUrl(entry, SUPABASE_URL, httpCode, body);
     if (ok) {
       Serial.printf("flushQueue: sent OK\n");
       postScanVerdict(entry, true, body);
+      sentOkCount++;
       continue;
     }
     if (httpCode >= 500 || httpCode == 429 || httpCode < 0) {
       // Transient -- re-queued for a later retry, so this is NOT a final
       // verdict yet. No postScanVerdict() call: better to let the pending
       // card time out silently than show a premature ERROR that a retry
-      // might still turn into a success.
+      // might still turn into a success. Stays in `keep`, so it's not part
+      // of this flush's queue-depth reconciliation either -- still pending.
       Serial.printf("flushQueue: transient (code=%d). Keeping record.\n", httpCode);
       keep.push_back(entry);
     } else {
       Serial.printf("flushQueue: permanent failure (code=%d). Dropping record.\n", httpCode);
       postScanVerdict(entry, false, body);
+      permanentDropCount++;
     }
     vTaskDelay(200 / portTICK_PERIOD_MS);
   }
@@ -1818,6 +1974,16 @@ void flushQueue() {
   if (capDroppedCount || capDroppedBytes)
     Serial.printf("flushQueue: cap enforced (count-dropped=%u bytes-dropped=%u)\n",
                   (unsigned)capDroppedCount, (unsigned)capDroppedBytes);
+
+  // Reconcile using the counts this flush already computed -- never by
+  // re-counting SPIFFS lines. Everything in `keep` stays pending (no depth
+  // change); sent-OK, permanently-failed, and cap-evicted entries are all
+  // gone from the queue, but only the latter two are actual data loss.
+  long removedThisFlush = (long)sentOkCount + (long)permanentDropCount +
+                          (long)capDroppedCount + (long)capDroppedBytes;
+  long lostThisFlush = (long)permanentDropCount + (long)capDroppedCount + (long)capDroppedBytes;
+  if (removedThisFlush) queueDepthAdjust(-removedThisFlush);
+  if (lostThisFlush) droppedCountAdjust(lostThisFlush);
 
   // Re-append transient failures to the live QUEUE_FILE. New scans that arrived
   // during the network send are already in QUEUE_FILE — we append, not overwrite.
@@ -1854,6 +2020,29 @@ static void recoverInflightQueue() {
   inf.close();
   SPIFFS.remove(QUEUE_INFLIGHT_FILE);
   Serial.println("Boot recovery: inflight queue merged.");
+}
+
+// Boot-only (Phase 6): seed the in-RAM queue-depth counter from whatever's
+// already on disk -- a prior session's unflushed backlog, or nothing on a
+// fresh device. Must run after recoverInflightQueue() so an orphaned
+// in-flight file is already merged back in and gets counted. Single-threaded
+// here (before tasks start), so a direct assignment, not the mutex-protected
+// queueDepthAdjust() -- nothing else could be racing yet. This is the ONLY
+// place queue depth is ever derived by counting SPIFFS lines; everywhere
+// else it's the maintained in-RAM counter, never recomputed on repaint.
+static void seedQueueDepthFromDisk() {
+  if (!SPIFFS.exists(QUEUE_FILE)) { queueDepth = 0; return; }
+  File f = SPIFFS.open(QUEUE_FILE, FILE_READ);
+  if (!f) { queueDepth = 0; return; }
+  long count = 0;
+  while (f.available()) {
+    String ln = f.readStringUntil('\n');
+    ln.trim();
+    if (ln.length()) count++;
+  }
+  f.close();
+  queueDepth = count;
+  Serial.printf("Queue depth seeded from disk: %ld\n", queueDepth);
 }
 
 /* =================== OTA Update =================== */
@@ -1931,6 +2120,15 @@ void checkAndApplyOTA() {
   Serial.printf("OTA: Free heap before download: %u bytes\n", esp_get_free_heap_size());
 
   otaInProgress = true;
+  // checkAndApplyOTA() runs from setup() after tasks are created (this is
+  // the boot-jitter-delayed call at the end of setup()), so it's a separate
+  // task from FingerprintTask even though both happen to be pinned to Core 1
+  // -- they time-slice, not run single-threaded. postDisplayState() is
+  // Core-0-safe (never touches `display`), so it's the correct way to get
+  // content on screen here too; FingerprintTask's own render loop (still
+  // running throughout OTA -- only its sensor-scanning half is skipped while
+  // otaInProgress) picks it up and actually draws it.
+  postDisplayState(TIER_TAKEOVER, 0, "OTA UPDATE", "Starting...", "Do not unplug");
   delay(600);
 
   {
@@ -1959,19 +2157,34 @@ void checkAndApplyOTA() {
     binHttp.setUserAgent("ESP32-Attendance/1.0");
     if (!binHttp.begin(binClient, binUrl)) {
       Serial.printf("OTA: Failed to begin binary download. Free heap: %u\n", esp_get_free_heap_size());
-      otaInProgress = false; return;
+      otaInProgress = false; clearDisplayState(TIER_TAKEOVER); return;
     }
     int binCode = binHttp.GET();
     if (binCode != HTTP_CODE_OK) {
       Serial.printf("OTA: Binary download returned %d\n", binCode);
-      binHttp.end(); otaInProgress = false; return;
+      binHttp.end(); otaInProgress = false; clearDisplayState(TIER_TAKEOVER); return;
     }
     int contentLen = binHttp.getSize();
     Serial.printf("OTA: Binary size = %d bytes\n", contentLen);
     if (!Update.begin(contentLen > 0 ? contentLen : UPDATE_SIZE_UNKNOWN)) {
       Serial.printf("OTA: Update.begin failed: %s\n", Update.errorString());
-      binHttp.end(); otaInProgress = false; return;
+      binHttp.end(); otaInProgress = false; clearDisplayState(TIER_TAKEOVER); return;
     }
+    // Deliberately NOT rewriting the download/flash loop itself to compute
+    // this manually -- checkAndApplyOTA() is already the highest-risk
+    // function in the codebase (a fault here isn't remotely recoverable), so
+    // this is the most surgical option: Update's own progress hook, added
+    // alongside the untouched writeStream() call, not a replacement for it.
+    Update.onProgress([](size_t written, size_t total) {
+      static unsigned long lastUiUpdateMs = 0;
+      unsigned long now = millis();
+      if (now - lastUiUpdateMs < 500 && written < total) return;  // throttled, but always show the final tick
+      lastUiUpdateMs = now;
+      char progress[8];
+      if (total > 0) snprintf(progress, sizeof(progress), "%d%%", (int)(100UL * written / total));
+      else snprintf(progress, sizeof(progress), "%uKB", (unsigned)(written / 1024));
+      postDisplayState(TIER_TAKEOVER, 0, "OTA UPDATE", progress, "Do not unplug");
+    });
     WiFiClient *stream = binHttp.getStreamPtr();
     size_t written = Update.writeStream(*stream);
     Serial.printf("OTA: Written %u / %d bytes\n", written, contentLen);
@@ -1979,14 +2192,17 @@ void checkAndApplyOTA() {
     if (Update.end()) {
       if (Update.isFinished()) {
         Serial.println("OTA: Update complete! Rebooting...");
+        postDisplayState(TIER_TAKEOVER, 0, "OTA UPDATE", "100%", "Rebooting...");
         setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
         delay(1500);
         ESP.restart();
       } else {
         Serial.println("OTA: Update did not finish correctly.");
+        clearDisplayState(TIER_TAKEOVER);
       }
     } else {
       Serial.printf("OTA: Update.end error: %s\n", Update.errorString());
+      clearDisplayState(TIER_TAKEOVER);
     }
   }
   otaInProgress = false;
@@ -2035,7 +2251,18 @@ void NetworkTask(void *pvParameters) {
     // Consume any extra signals that stacked while we were in flushQueue().
     while (xSemaphoreTake(memQueueSem, 0) == pdTRUE) {}
 
+    // Tier 3 offline+queue-depth banner (Phase 6): posted once on the
+    // online->offline edge, not every loop -- renderIdleScreen() re-reads
+    // the live counters itself on every 1s idle tick regardless, so there's
+    // nothing to keep resyncing here. "Show the count only while offline" --
+    // a permanent counter reading 0 all day is decoration.
+    static bool wasOffline = false;
+
     if (WiFi.status() == WL_CONNECTED) {
+      if (wasOffline) {
+        clearDisplayState(TIER_DEGRADED);
+        wasOffline = false;
+      }
       if (!rtcSynced) {
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -2044,6 +2271,10 @@ void NetworkTask(void *pvParameters) {
       }
       flushQueue();
     } else {
+      if (!wasOffline) {
+        postDisplayState(TIER_DEGRADED, 0, "", "", "");
+        wasOffline = true;
+      }
       rtcSynced = false;
       Serial.println("NetworkTask: WiFi not connected; attempting reconnect");
       WiFi.disconnect(true);
@@ -2081,7 +2312,16 @@ void EnrollmentTask(void *pvParameters) {
       postJSONToUrl(payload, ENROLL_GET_URL, code, body);
       Serial.printf("EnrollmentTask: HTTP %d body=%s\n", code, body.c_str());
 
-      if (code >= 200 && code < 300 && body.length()) {
+      if (code == 403) {
+        // Revoked (devices.revoked): the device keeps its identity -- unlike
+        // decommission, this isn't a wipe -- but is blocked from doing
+        // anything until an admin un-revokes it. Persistent, Tier 2, never
+        // sleeps. Cleared below the moment a normal response comes back.
+        Serial.println("EnrollmentTask: device revoked");
+        setBlockedReason(BLOCKED_REVOKED);
+      } else if (code >= 200 && code < 300 && body.length()) {
+        // A normal response means we're not revoked (if we ever were).
+        setBlockedReason(BLOCKED_NONE);
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, body);
         if (err) {
@@ -2097,6 +2337,12 @@ void EnrollmentTask(void *pvParameters) {
             // inherit the previous tenant's name-display policy.
             if (SPIFFS.exists(DEVICE_CONFIG_FILE)) SPIFFS.remove(DEVICE_CONFIG_FILE);
             if (SPIFFS.exists(DEVICE_CONFIG_TMP_FILE)) SPIFFS.remove(DEVICE_CONFIG_TMP_FILE);
+            // Brief, visible confirmation before the wipe -- Core-0-safe post
+            // (never touches `display` itself); FingerprintTask's own render
+            // loop (Core 1, still running -- not suspended here) picks it up
+            // and draws it during this delay.
+            postDisplayState(TIER_TAKEOVER, 0, "RESET", "Re-provisioning", "");
+            vTaskDelay(pdMS_TO_TICKS(1500));
             ESP.restart();
           }
 
@@ -2451,11 +2697,28 @@ void setup() {
   displayMutex = xSemaphoreCreateMutex();
   if (!memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem || !displayMutex) {
     Serial.println("Failed to create RTOS primitives");
+    // Draw directly, bypassing the mutex/mailbox entirely -- displayMutex
+    // itself may be one of the things that just failed to create, and no
+    // task exists yet that could safely pick up a mailbox post anyway.
+    // Single-threaded here (setup(), before any task runs), so a direct
+    // draw is safe -- unlike every other display write in this codebase.
+    if (displayAvailable) {
+      display.clearDisplay();
+      display.setTextColor(SSD1306_WHITE);
+      display.setTextSize(2);
+      display.setCursor(0, 0);
+      display.print("INIT FAIL");
+      display.setTextSize(1);
+      display.setCursor(0, 24);
+      display.print("RTOS error");
+      display.display();
+    }
     while (1) delay(1000);
   }
 
   if (!initFS()) Serial.println("SPIFFS failed");
   recoverInflightQueue();  // T2/T12: merge any crash-orphaned inflight file
+  seedQueueDepthFromDisk();  // must run after recovery merges any orphaned file in
 
   // Load device identity (device_id, institution_id, device_secret, display_name)
   if (!loadDeviceIdentity()) {
@@ -2495,6 +2758,21 @@ void setup() {
   }
 
   WiFi.mode(WIFI_STA);
+
+  // Phase 6: the STA MAC is a fixed hardware value, readable as soon as the
+  // interface is up -- populate once here (single-threaded, before tasks
+  // exist) rather than each place that used to compute it locally (see
+  // registerDevice()). It's the key the dashboard uses to identify an
+  // unassigned device, shown on the awaiting-assignment/rejected screens.
+  {
+    uint8_t mac[6];
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    char macStr[18];
+    sprintf(macStr, "%02X:%02X:%02X:%02X:%02X:%02X",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    deviceMac = macStr;
+  }
+
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   wifi_config_t conf;
@@ -2540,6 +2818,13 @@ void setup() {
   BaseType_t ok3 = xTaskCreatePinnedToCore(EnrollmentTask,  "EnrollmentTask",  12288, NULL, 1, &hEnrollment,  0);
   if (ok1 != pdPASS || ok2 != pdPASS || ok3 != pdPASS) {
     Serial.println("Failed to create tasks");
+    // displayMutex is guaranteed to exist here (we passed the RTOS-primitives
+    // check above), so the normal mailbox is safe to use -- unlike that
+    // earlier fatal path. If FingerprintTask (ok1) succeeded before a later
+    // task failed, it's already running and will pick this up on its own; if
+    // it didn't, this silently goes unrendered (no crash either way) --
+    // Serial still reports the failure for field debugging via USB.
+    postDisplayState(TIER_TAKEOVER, 0, "INIT FAIL", "Task error", "");
     while (1) delay(1000);
   }
   Serial.println("Tasks created; main loop will idle");
