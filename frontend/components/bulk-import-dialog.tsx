@@ -52,8 +52,8 @@ function normalizeHeader(h: string) {
   return h.trim().toLowerCase().replace(/[\s_]+/g, '')
 }
 
-function findColumn(headers: string[], key: keyof typeof HEADER_ALIASES): number {
-  return headers.findIndex((h) => HEADER_ALIASES[key].includes(h))
+function findColumn(headers: string[], key: keyof typeof HEADER_ALIASES, extraAliases: string[] = []): number {
+  return headers.findIndex((h) => HEADER_ALIASES[key].includes(h) || extraAliases.includes(h))
 }
 
 export function BulkImportDialog({ open, onOpenChange, devices, institutions, isPlatformAdmin, labels, onImport }: Props) {
@@ -109,7 +109,7 @@ export function BulkImportDialog({ open, onOpenChange, devices, institutions, is
     const headers = headerRow.map(normalizeHeader)
     const sidIdx = findColumn(headers, 'sid')
     const nameIdx = findColumn(headers, 'fullname')
-    const unitIdx = findColumn(headers, 'unit')
+    const unitIdx = findColumn(headers, 'unit', [normalizeHeader(labels.label_unit)])
 
     if (sidIdx === -1 || nameIdx === -1 || unitIdx === -1) {
       setParseError(`The CSV must have "sid", "fullname", and "${labels.label_unit.toLowerCase()}" columns. Download the template below to see the expected format.`)
