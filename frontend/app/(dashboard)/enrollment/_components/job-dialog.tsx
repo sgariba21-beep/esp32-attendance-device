@@ -147,7 +147,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   }
 
   async function confirmOverwrite() {
-    if (!pendingJob || pendingJob.command !== 'register') return
+    if (!pendingJob || (pendingJob.command !== 'register' && pendingJob.command !== 'register-master')) return
     setConfirming(true)
     setError(null)
     const result = await createEnrollmentJob({ ...pendingJob, confirmOverwrite: true })

@@ -177,10 +177,10 @@ export default async function AttendancePage({
 
   // The records table spans every tracked member type, so its member-column header
   // reflects all of them (e.g. "Student / Teacher") rather than a single type.
-  const memberHeaderParts = [institution.label_member]
-  if (institution.track_students && institution.track_staff) {
-    memberHeaderParts.push(institution.label_staff)
-  }
+  const memberHeaderParts: string[] = []
+  if (institution.track_students) memberHeaderParts.push(institution.label_member)
+  if (institution.track_staff) memberHeaderParts.push(institution.label_staff)
+  if (memberHeaderParts.length === 0) memberHeaderParts.push(institution.label_member)
   const memberHeader = memberHeaderParts.join(' / ')
 
   return (
