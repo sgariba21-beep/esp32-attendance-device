@@ -213,13 +213,16 @@ Deno.serve(async (req: Request) => {
     if (scanMode === "time_in_out") {
       const { data: existing } = await supabase
         .from("attendance")
-        .select("scan_type")
+        .select("scan_type, status")
         .eq("member_id", member.id)
         .eq("date", date)
         .in("scan_type", ["time_in", "time_out"]);
 
-      const hasTimeIn = existing?.some((r) => r.scan_type === "time_in") ?? false;
-      const hasTimeOut = existing?.some((r) => r.scan_type === "time_out") ?? false;
+      // Only rows with status "present" are real scans. A "absent" row with
+      // this scan_type is a mark-absent placeholder (M14) -- it must not
+      // count as an already-completed time_in/time_out.
+      const hasTimeIn = existing?.some((r) => r.scan_type === "time_in" && r.status === "present") ?? false;
+      const hasTimeOut = existing?.some((r) => r.scan_type === "time_out" && r.status === "present") ?? false;
 
       if (hasTimeIn && hasTimeOut) {
         return json({ message: "Already fully logged for today — scan ignored" });
@@ -247,6 +250,41 @@ Deno.serve(async (req: Request) => {
 
     if (insertError) {
       if (insertError.code === "23505") {
+        // Conflict on (member_id, date, scan_type). This is either a genuine
+        // repeat scan, or a late-arriving offline scan landing after
+        // mark-absent already wrote an absent placeholder (status "absent",
+        // scan_id null) for the same key. Only the latter should be
+        // overwritten -- a real "present" row is a true duplicate.
+        const { data: conflicting } = await supabase
+          .from("attendance")
+          .select("id, status")
+          .eq("member_id", member.id)
+          .eq("date", date)
+          .eq("scan_type", scan_type)
+          .maybeSingle();
+
+        if (conflicting && conflicting.status === "absent") {
+          const { error: updateError } = await supabase
+            .from("attendance")
+            .update({
+              period_id: period?.id ?? null,
+              device_id: effectiveDeviceId,
+              time,
+              status: "present",
+              scan_id,
+            })
+            .eq("id", conflicting.id);
+
+          if (updateError) {
+            if (updateError.code === "23505") {
+              return json({ message: "Duplicate scan ignored" });
+            }
+            return json({ error: updateError.message }, 500);
+          }
+
+          return json({ message: "Attendance logged (overwrote absent placeholder)", scan_type });
+        }
+
         return json({ message: "Duplicate scan ignored" });
       }
       return json({ error: insertError.message }, 500);
