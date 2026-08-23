@@ -23,10 +23,11 @@ export async function GET(req: NextRequest) {
   // columns (no longer hardcoded to GHS / Accra now that tenants can differ).
   const { data: inst } = await admin
     .from('institutions')
-    .select('currency, timezone')
+    .select('currency, timezone, label_staff')
     .eq('id', institutionId ?? '')
     .single()
   const currency = inst?.currency ?? 'GHS'
+  const labelStaff = inst?.label_staff ?? 'Staff'
 
   const p = req.nextUrl.searchParams
   const from = p.get('from') ?? undefined
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   const escape = (v: string | number | null | undefined) =>
     `"${String(v ?? '').replace(/"/g, '""')}"`
 
-  const headers = ['Date', 'Time', 'Client', 'Phone', 'Stylist', `Total (${currency})`, 'Note']
+  const headers = ['Date', 'Time', 'Client', 'Phone', labelStaff, `Total (${currency})`, 'Note']
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const csvRows = (rows ?? []).map((r: any) => {

@@ -32,12 +32,13 @@ type Props = {
   staff: SaleStaff[]
   currency: string
   preselectedClientId?: string
+  labelStaff: string
 }
 
 const nextId = (() => { let n = 0; return () => String(++n) })()
 const emptyItem = (): LineItem => ({ localId: nextId(), entry: null, unitPrice: '', quantity: '1' })
 
-export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, currency, preselectedClientId }: Props) {
+export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, currency, preselectedClientId, labelStaff }: Props) {
   const [clientId, setClientId] = useState('')
   const [staffId, setStaffId] = useState('')
   const [note, setNote] = useState('')
@@ -173,11 +174,11 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
             />
           </div>
 
-          {/* Stylist */}
+          {/* Staff */}
           {staff.length > 0 && (
             <div className="space-y-2">
               <Label htmlFor="sale-staff">
-                Stylist
+                {labelStaff}
                 <span className="ml-1.5 text-xs font-normal text-muted-foreground">(optional)</span>
               </Label>
               <SingleSelect
@@ -186,7 +187,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
                 value={staffId}
                 onChange={setStaffId}
                 placeholder="None"
-                searchPlaceholder="Search stylist…"
+                searchPlaceholder={`Search ${labelStaff.toLowerCase()}…`}
               />
             </div>
           )}

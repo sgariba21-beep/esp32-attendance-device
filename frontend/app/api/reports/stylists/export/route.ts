@@ -21,10 +21,11 @@ export async function GET(_req: NextRequest) {
 
   const { data: inst } = await admin
     .from('institutions')
-    .select('currency')
+    .select('currency, label_staff')
     .eq('id', institutionId ?? '')
     .single()
   const currency = inst?.currency ?? 'GHS'
+  const labelStaff = inst?.label_staff ?? 'Staff'
 
   const { data: rows } = await admin
     .from('transactions')
@@ -51,7 +52,7 @@ export async function GET(_req: NextRequest) {
   const escape = (v: string | number | null | undefined) =>
     `"${String(v ?? '').replace(/"/g, '""')}"`
 
-  const headers = ['Stylist', 'Sales', `Total revenue (${currency})`]
+  const headers = [labelStaff, 'Sales', `Total revenue (${currency})`]
   const csvRows = sorted.map((r) =>
     [r.name, r.count, r.total.toFixed(2)].map(escape).join(',')
   )

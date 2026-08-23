@@ -33,6 +33,7 @@ type Props = {
   rewardsIssued: RewardIssued[]
   role: UserRole
   currency: string
+  labelStaff: string
 }
 
 // Display a plain date string (YYYY-MM-DD) without UTC-shift: construct as UTC midnight.
@@ -86,6 +87,7 @@ export function ReportsView({
   lowStock,
   rewardsIssued,
   currency,
+  labelStaff,
 }: Props) {
   const [takingsView, setTakingsView] = useState<'daily' | 'weekly'>('daily')
 
@@ -97,7 +99,7 @@ export function ReportsView({
         <TabsList>
           <TabsTrigger value="takings">Takings</TabsTrigger>
           <TabsTrigger value="clients">By client ({clientRevenue.length})</TabsTrigger>
-          <TabsTrigger value="stylists">By stylist ({stylistRevenue.length})</TabsTrigger>
+          <TabsTrigger value="stylists">By {labelStaff.toLowerCase()} ({stylistRevenue.length})</TabsTrigger>
           <TabsTrigger value="items">Items ({popularItems.length})</TabsTrigger>
           <TabsTrigger value="visits">Visits</TabsTrigger>
           <TabsTrigger value="low-stock">
@@ -240,7 +242,7 @@ export function ReportsView({
                   <TableHeader>
                     <TableRow>
                       <TableHead>#</TableHead>
-                      <TableHead>Stylist</TableHead>
+                      <TableHead>{labelStaff}</TableHead>
                       <TableHead className="text-right">Sales</TableHead>
                       <TableHead className="text-right">Total revenue</TableHead>
                     </TableRow>

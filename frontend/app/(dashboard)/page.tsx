@@ -155,7 +155,7 @@ export default async function OverviewPage() {
           />
         </div>
 
-        <ShopRecentSales rows={recentSaleRows} timezone={tz} currency={institution.currency} />
+        <ShopRecentSales rows={recentSaleRows} timezone={tz} currency={institution.currency} labelStaff={institution.label_staff} />
 
         <ManageLink href="/reports" label="View reports" />
       </div>
@@ -309,7 +309,7 @@ type ShopSaleRow = {
   members: { fullname: string } | null
 }
 
-function ShopRecentSales({ rows, timezone, currency }: { rows: ShopSaleRow[]; timezone: string; currency: string }) {
+function ShopRecentSales({ rows, timezone, currency, labelStaff }: { rows: ShopSaleRow[]; timezone: string; currency: string; labelStaff: string }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
@@ -324,7 +324,7 @@ function ShopRecentSales({ rows, timezone, currency }: { rows: ShopSaleRow[]; ti
               <TableRow>
                 <TableHead>Client</TableHead>
                 <TableHead>Time</TableHead>
-                <TableHead>Stylist</TableHead>
+                <TableHead>{labelStaff}</TableHead>
                 <TableHead className="text-right">Total</TableHead>
               </TableRow>
             </TableHeader>

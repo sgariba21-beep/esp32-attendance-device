@@ -81,6 +81,7 @@ export default async function SalesPage({
       role={role}
       currency={institution.currency}
       initialClientId={initialClientId}
+      labelStaff={institution.label_staff}
     />
   )
 }

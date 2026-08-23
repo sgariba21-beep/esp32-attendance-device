@@ -34,6 +34,7 @@ type Props = {
   role: UserRole
   currency: string
   initialClientId?: string
+  labelStaff: string
 }
 
 function formatSaleDateTime(isoString: string, tz: string): string {
@@ -45,7 +46,7 @@ function formatSaleDateTime(isoString: string, tz: string): string {
   })
 }
 
-export function SalesView({ sales, clients, allCatalog, staff, timezone, role, currency, initialClientId }: Props) {
+export function SalesView({ sales, clients, allCatalog, staff, timezone, role, currency, initialClientId, labelStaff }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [preselectedClientId, setPreselectedClientId] = useState<string | undefined>(undefined)
   const [page, setPage] = useState(1)
@@ -95,7 +96,7 @@ export function SalesView({ sales, clients, allCatalog, staff, timezone, role, c
                   <TableHead>Client</TableHead>
                   <TableHead className="hidden sm:table-cell">Date & time</TableHead>
                   <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="hidden md:table-cell">Stylist</TableHead>
+                  <TableHead className="hidden md:table-cell">{labelStaff}</TableHead>
                   <TableHead className="hidden lg:table-cell">Note</TableHead>
                 </TableRow>
               </TableHeader>
@@ -148,6 +149,7 @@ export function SalesView({ sales, clients, allCatalog, staff, timezone, role, c
         staff={staff}
         currency={currency}
         preselectedClientId={preselectedClientId}
+        labelStaff={labelStaff}
       />
     </div>
   )
