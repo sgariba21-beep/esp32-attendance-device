@@ -20,7 +20,7 @@ export type StylistRevenue = { stylistId: string | null; name: string; total: nu
 export type PopularItem   = { name: string; type: 'service' | 'product'; qty: number; revenue: number }
 export type VisitFreq     = { name: string; count: number; lastVisit: string }
 export type LowStockItem  = { id: string; name: string; stock: number; price: number }
-export type RewardIssued  = { name: string; count: number; lastIssued: string }
+export type RewardIssued  = { name: string; count: number; redeemed: number; outstanding: number; lastIssued: string }
 
 type Props = {
   dailyTakings: DailyTakings[]
@@ -31,6 +31,7 @@ type Props = {
   visitFreq: VisitFreq[]
   lowStock: LowStockItem[]
   rewardsIssued: RewardIssued[]
+  rewardsOutstanding: number
   role: UserRole
   currency: string
   labelStaff: string
@@ -86,6 +87,7 @@ export function ReportsView({
   visitFreq,
   lowStock,
   rewardsIssued,
+  rewardsOutstanding,
   currency,
   labelStaff,
 }: Props) {
@@ -382,7 +384,14 @@ export function ReportsView({
         {/* ── Rewards issued ───────────────────────────────────────────── */}
         <TabsContent value="rewards">
           <div className="mt-4 space-y-4">
-            <p className="text-xs text-muted-foreground">Total issuances per reward rule, all time</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">Issuances per reward rule, all time</p>
+              {rewardsOutstanding > 0 && (
+                <Badge variant="warning">
+                  {rewardsOutstanding} outstanding — earned, not yet redeemed
+                </Badge>
+              )}
+            </div>
             {rewardsIssued.length === 0 ? (
               <EmptyState icon={BarChart3} message="No rewards issued yet." />
             ) : (
@@ -391,7 +400,8 @@ export function ReportsView({
                   <TableHeader>
                     <TableRow>
                       <TableHead>Reward</TableHead>
-                      <TableHead className="text-right">Times issued</TableHead>
+                      <TableHead className="text-right">Redeemed</TableHead>
+                      <TableHead className="text-right">Outstanding</TableHead>
                       <TableHead className="text-right">Last issued</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -399,7 +409,10 @@ export function ReportsView({
                     {rewardsIssued.map((r, i) => (
                       <TableRow key={i}>
                         <TableCell className="font-medium">{r.name}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">{r.count}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">{r.redeemed}</TableCell>
+                        <TableCell className={cn('text-right tabular-nums', r.outstanding > 0 ? 'text-warning-foreground font-medium' : 'text-muted-foreground')}>
+                          {r.outstanding}
+                        </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {fmtShortDate(r.lastIssued.slice(0, 10))}
                         </TableCell>

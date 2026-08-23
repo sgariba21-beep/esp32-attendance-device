@@ -329,7 +329,6 @@ export function ClientsView({ clients, role, loyaltyEnabled }: Props) {
         open={loyaltyClient !== null}
         onOpenChange={(v) => { if (!v) setLoyaltyClient(null) }}
         client={loyaltyClient}
-        canIssue={canWrite}
       />
 
       <ConfirmDialog

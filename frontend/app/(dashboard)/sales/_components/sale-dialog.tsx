@@ -5,13 +5,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SingleSelect } from '@/components/ui/single-select'
-import { Trash2 } from 'lucide-react'
+import { Loader2, Trash2 } from 'lucide-react'
 import { formatMoney, displayPhone } from '@/lib/utils'
-import { createSale } from '../_actions'
+import { createSale, getClientRewardOffers } from '../_actions'
+import type { RewardOffer } from '../_actions'
 
 export type SaleClient = { id: string; name: string; phone: string }
 export type SaleCatalogEntry = { id: string; kind: 'product' | 'service'; name: string; price: number }
@@ -22,6 +24,17 @@ type LineItem = {
   entry: SaleCatalogEntry | null
   unitPrice: string
   quantity: string
+  rewardId: string | null   // set when this line is a reward redemption (free item)
+}
+
+// Tracks what Apply did, so Undo (or switching clients) can precisely
+// reverse it — restore the exact price a line had, or remove a line that
+// didn't exist before.
+type AppliedReward = {
+  offer: RewardOffer
+  lineLocalId?: string
+  addedNewLine?: boolean
+  previousUnitPrice?: string
 }
 
 type Props = {
@@ -36,7 +49,7 @@ type Props = {
 }
 
 const nextId = (() => { let n = 0; return () => String(++n) })()
-const emptyItem = (): LineItem => ({ localId: nextId(), entry: null, unitPrice: '', quantity: '1' })
+const emptyItem = (): LineItem => ({ localId: nextId(), entry: null, unitPrice: '', quantity: '1', rewardId: null })
 
 export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, currency, preselectedClientId, labelStaff }: Props) {
   const [clientId, setClientId] = useState('')
@@ -47,6 +60,10 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
   const [warnings, setWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
+  const [offers, setOffers] = useState<RewardOffer[]>([])
+  const [offersLoading, setOffersLoading] = useState(false)
+  const [applied, setApplied] = useState<AppliedReward[]>([])
+
   useEffect(() => {
     if (open) {
       setClientId(preselectedClientId ?? '')
@@ -55,8 +72,27 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
       setItems([emptyItem()])
       setError(null)
       setWarnings([])
+      setOffers([])
+      setApplied([])
     }
   }, [open, preselectedClientId])
+
+  // Refetch this client's reward offers whenever the selected client changes
+  // (including on open, if preselected). Reverting stale applied rewards
+  // from a PREVIOUS client happens in handleClientChange below — a discrete
+  // reaction to the user's own action, not something to infer from a
+  // dependency-array effect.
+  useEffect(() => {
+    if (!open || !clientId) { setOffers([]); return }
+    let active = true
+    setOffersLoading(true)
+    getClientRewardOffers(clientId).then((res) => {
+      if (!active) return
+      setOffersLoading(false)
+      setOffers(res.error ? [] : res.offers)
+    })
+    return () => { active = false }
+  }, [open, clientId])
 
   // Pre-build option lists once per render (props are stable between opens).
   const clientOptions = useMemo(
@@ -72,6 +108,26 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
     ...allCatalog.filter(c => c.kind === 'service').map(c => ({ value: c.id, label: `${c.name} — ${formatMoney(c.price, currency)}` })),
     ...allCatalog.filter(c => c.kind === 'product').map(c => ({ value: c.id, label: `${c.name} — ${formatMoney(c.price, currency)}` })),
   ], [allCatalog, currency])
+
+  // Undo one applied reward — restores the line it touched to exactly the
+  // state Apply found it in, or removes the line Apply added.
+  function revertApplied(a: AppliedReward, currentItems: LineItem[]): LineItem[] {
+    if (!a.lineLocalId) return currentItems
+    if (a.addedNewLine) return currentItems.filter((x) => x.localId !== a.lineLocalId)
+    return currentItems.map((x) =>
+      x.localId === a.lineLocalId ? { ...x, unitPrice: a.previousUnitPrice ?? '', rewardId: null } : x
+    )
+  }
+
+  function handleClientChange(newClientId: string) {
+    // Rewards are per-client — a free line staged for the previous client
+    // makes no sense once a different person is selected. Revert them all.
+    if (applied.length > 0) {
+      setItems((prev) => applied.reduce((acc, a) => revertApplied(a, acc), prev))
+      setApplied([])
+    }
+    setClientId(newClientId)
+  }
 
   function handleCatalogChange(localId: string, catalogId: string) {
     const entry = allCatalog.find(c => c.id === catalogId) ?? null
@@ -91,6 +147,12 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
   }
 
   function removeItem(localId: string) {
+    const removed = items.find((it) => it.localId === localId)
+    // Removing a reward-tagged line also un-applies the reward it belonged
+    // to, so the offer panel and the cart never drift out of sync.
+    if (removed?.rewardId) {
+      setApplied((prev) => prev.filter((a) => a.lineLocalId !== localId))
+    }
     setItems(prev => prev.filter(it => it.localId !== localId))
   }
 
@@ -98,11 +160,63 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
     setItems(prev => [...prev, emptyItem()])
   }
 
-  const total = items.reduce((acc, it) => {
+  function applyOffer(offer: RewardOffer) {
+    if (applied.some((a) => a.offer.key === offer.key)) return
+
+    if (offer.rewardKind === 'discount') {
+      setApplied((prev) => [...prev, { offer }])
+      return
+    }
+    if (offer.rewardKind === 'custom') {
+      setApplied((prev) => [...prev, { offer }])
+      if (offer.description) {
+        setNote((prev) => (prev.trim() ? `${prev} · ${offer.description}` : offer.description!))
+      }
+      return
+    }
+
+    // free_product / free_service — apply to a matching existing line if
+    // there is one, otherwise add one. Either way the line locks to qty 1 /
+    // price 0 so it can't drift away from what the reward actually grants.
+    const targetId = offer.rewardKind === 'free_product' ? offer.rewardProductId : offer.rewardServiceId
+    if (!targetId) return
+
+    const existing = items.find((it) => it.entry?.id === targetId && !it.rewardId)
+    if (existing) {
+      setApplied((prev) => [...prev, {
+        offer, lineLocalId: existing.localId, addedNewLine: false, previousUnitPrice: existing.unitPrice,
+      }])
+      setItems((prev) => prev.map((x) =>
+        x.localId === existing.localId ? { ...x, unitPrice: '0', quantity: '1', rewardId: offer.rewardId } : x
+      ))
+    } else {
+      const entry = allCatalog.find((c) => c.id === targetId)
+      if (!entry) return  // reward targets an item this shop no longer sells
+      const newItem: LineItem = { localId: nextId(), entry, unitPrice: '0', quantity: '1', rewardId: offer.rewardId }
+      setApplied((prev) => [...prev, { offer, lineLocalId: newItem.localId, addedNewLine: true }])
+      setItems((prev) => {
+        const withoutBlankFirst = prev.length === 1 && !prev[0].entry ? [] : prev
+        return [...withoutBlankFirst, newItem]
+      })
+    }
+  }
+
+  function undoOffer(offer: RewardOffer) {
+    const a = applied.find((x) => x.offer.key === offer.key)
+    if (!a) return
+    setApplied((prev) => prev.filter((x) => x.offer.key !== offer.key))
+    setItems((prev) => revertApplied(a, prev))
+  }
+
+  const itemsSubtotal = items.reduce((acc, it) => {
     const p = parseFloat(it.unitPrice)
     const q = parseInt(it.quantity, 10)
     return acc + (isNaN(p) || isNaN(q) ? 0 : p * q)
   }, 0)
+  const discountFromApplied = applied
+    .filter((a) => a.offer.rewardKind === 'discount')
+    .reduce((sum, a) => sum + (a.offer.rewardValue ?? 0), 0)
+  const total = Math.max(0, itemsSubtotal - discountFromApplied)
 
   function lineTotal(it: LineItem): string {
     const p = parseFloat(it.unitPrice)
@@ -138,6 +252,12 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
         itemName: it.entry!.name,
         unitPrice: parseFloat(it.unitPrice),
         quantity: parseInt(it.quantity, 10),
+        rewardId: it.rewardId,
+      })),
+      redemptions: applied.map((a) => ({
+        origin: a.offer.origin,
+        rewardId: a.offer.rewardId,
+        logId: a.offer.logId,
       })),
     })
 
@@ -168,11 +288,61 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
               id="sale-client"
               options={clientOptions}
               value={clientId}
-              onChange={setClientId}
+              onChange={handleClientChange}
               placeholder="Select client…"
               searchPlaceholder="Search by name or phone…"
             />
           </div>
+
+          {/* Rewards — what has this client earned, and is it ready to use? */}
+          {clientId && (offersLoading || offers.length > 0) && (
+            <div className="space-y-2">
+              <Label>Rewards</Label>
+              {offersLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking rewards…
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {offers.map((offer) => {
+                    const isApplied = applied.some((a) => a.offer.key === offer.key)
+                    return (
+                      <div
+                        key={offer.key}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border p-2.5"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{offer.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {offer.summary}
+                            {offer.origin === 'pending' ? ' · already earned' : ''}
+                          </p>
+                        </div>
+                        {isApplied ? (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge variant="success">Applied</Badge>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => undoOffer(offer)}>
+                              Undo
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => applyOffer(offer)}
+                          >
+                            Apply
+                          </Button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Staff */}
           {staff.length > 0 && (
@@ -213,6 +383,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
                         onChange={(id) => handleCatalogChange(it.localId, id)}
                         placeholder="Select…"
                         searchPlaceholder="Search services & products…"
+                        disabled={!!it.rewardId}
                       />
                     </div>
 
@@ -226,6 +397,7 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
                         value={it.quantity}
                         onChange={(e) => updateItem(it.localId, 'quantity', e.target.value)}
                         required
+                        disabled={!!it.rewardId}
                       />
                     </div>
 
@@ -239,7 +411,8 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
                         value={it.unitPrice}
                         onChange={(e) => updateItem(it.localId, 'unitPrice', e.target.value)}
                         required
-                        title="Edit to apply a discount"
+                        disabled={!!it.rewardId}
+                        title={it.rewardId ? 'Locked — this line is a reward redemption' : 'Edit to apply a discount'}
                       />
                     </div>
 
@@ -258,6 +431,12 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
+
+                    {it.rewardId && (
+                      <div className="col-span-4 -mt-1.5">
+                        <Badge variant="outline" className="text-[10px]">Free — reward redemption</Badge>
+                      </div>
+                    )}
                   </div>
                 ))}
 
@@ -318,8 +497,15 @@ export function SaleDialog({ open, onOpenChange, clients, allCatalog, staff, cur
           )}
 
           <DialogFooter className="flex items-center justify-between sm:justify-between">
-            <div className="text-sm font-semibold tabular-nums">
-              Total: {formatMoney(total, currency)}
+            <div className="text-sm">
+              {discountFromApplied > 0 && (
+                <div className="text-xs text-muted-foreground tabular-nums">
+                  Subtotal {formatMoney(itemsSubtotal, currency)} − reward {formatMoney(Math.min(discountFromApplied, itemsSubtotal), currency)}
+                </div>
+              )}
+              <div className="font-semibold tabular-nums">
+                Total: {formatMoney(total, currency)}
+              </div>
             </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

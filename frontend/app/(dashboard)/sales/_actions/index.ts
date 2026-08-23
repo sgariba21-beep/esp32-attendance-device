@@ -2,7 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole } from '@/lib/supabase/dal'
+import { requireRole, getInstitution } from '@/lib/supabase/dal'
+import { evaluateReward } from '@/lib/loyalty/eligibility'
+import { loadClientLoyaltyBundle } from '@/lib/loyalty/loader'
+import { describeReward } from '@/lib/loyalty/describe'
 
 type SaleItem = {
   productId: string | null
@@ -10,18 +13,134 @@ type SaleItem = {
   itemName: string
   unitPrice: number
   quantity: number
+  rewardId: string | null   // set when this line is a reward redemption (free item)
 }
+
+// A redemption the client wants applied to this sale.
+//   'new'     — the client just became eligible; issue the reward and redeem
+//               it against this sale in the same step.
+//   'pending' — the client already holds an unredeemed grant (an IOU from an
+//               earlier visit, or a standalone issuance) — redeem that
+//               specific row rather than writing a new one.
+type SaleRedemption = { origin: 'new' | 'pending'; rewardId: string; logId: string | null }
 
 type CreateSaleInput = {
   clientId: string
   staffId: string | null
   note: string
   items: SaleItem[]
+  redemptions: SaleRedemption[]
+}
+
+// ── Reward offers for the Sales dialog ──────────────────────────────────
+// What can this client redeem right now? Two sources, both surfaced
+// together so the cashier sees the full picture in one place:
+//   - freshly eligible (evaluateReward says so, nothing issued yet)
+//   - already granted, still unredeemed (rewards_log.transaction_id IS NULL)
+export type RewardOffer = {
+  key: string
+  origin: 'new' | 'pending'
+  rewardId: string
+  logId: string | null
+  name: string
+  rewardKind: 'free_product' | 'free_service' | 'discount' | 'custom'
+  rewardProductId: string | null
+  rewardServiceId: string | null
+  rewardValue: number | null
+  description: string | null
+  summary: string
+}
+
+export async function getClientRewardOffers(clientId: string): Promise<{ error: string | null; offers: RewardOffer[] }> {
+  const session = await requireRole('super_admin', 'admin', 'cashier')
+  const { institutionId, role } = session
+
+  const supabase = createAdminClient()
+  const { data: client } = await supabase.from('clients').select('institution_id, active').eq('id', clientId).single()
+  if (!client) return { error: 'Client not found.', offers: [] }
+  if (role !== 'platform_admin' && (!institutionId || client.institution_id !== institutionId)) {
+    return { error: 'Not found.', offers: [] }
+  }
+
+  const instId = client.institution_id as string
+  const institution = await getInstitution(instId)
+
+  // Loyalty master switch: no offers when the shop has it off. Not an error
+  // — the Sales dialog just shows no reward panel.
+  if (institution.type === 'shop' && !institution.loyalty_enabled && role !== 'platform_admin') {
+    return { error: null, offers: [] }
+  }
+
+  const { rewards, events, issuances, productNames, serviceNames } = await loadClientLoyaltyBundle(supabase, instId, clientId)
+  const currency = institution.currency
+  const now = new Date()
+
+  const offers: RewardOffer[] = []
+
+  for (const reward of rewards) {
+    const progress = evaluateReward(reward, events, issuances, now)
+    if (!progress.eligible) continue
+    offers.push({
+      key: `new:${reward.id}`,
+      origin: 'new',
+      rewardId: reward.id,
+      logId: null,
+      name: reward.name,
+      rewardKind: reward.reward_kind,
+      rewardProductId: reward.reward_product_id,
+      rewardServiceId: reward.reward_service_id,
+      rewardValue: reward.reward_value,
+      description: reward.description,
+      summary: describeReward(reward, productNames, serviceNames, currency),
+    })
+  }
+
+  const { data: pendingRows } = await supabase
+    .from('rewards_log')
+    .select('id, reward_id, issued_at, rewards(name, reward_kind, reward_product_id, reward_service_id, reward_value, description, active)')
+    .eq('institution_id', instId)
+    .eq('client_id', clientId)
+    .is('transaction_id', null)
+    .order('issued_at', { ascending: true })
+
+  for (const row of (pendingRows ?? []) as unknown as {
+    id: string
+    reward_id: string
+    rewards: {
+      name: string
+      reward_kind: RewardOffer['rewardKind']
+      reward_product_id: string | null
+      reward_service_id: string | null
+      reward_value: number | null
+      description: string | null
+      active: boolean
+    } | null
+  }[]) {
+    // A reward archived after being granted is still honoured — it was
+    // earned under the old rule — but skip if the reward row is gone
+    // entirely (shouldn't happen; NO ACTION FK keeps it, defensive only).
+    if (!row.rewards) continue
+    offers.push({
+      key: `pending:${row.id}`,
+      origin: 'pending',
+      rewardId: row.reward_id,
+      logId: row.id,
+      name: row.rewards.name,
+      rewardKind: row.rewards.reward_kind,
+      rewardProductId: row.rewards.reward_product_id,
+      rewardServiceId: row.rewards.reward_service_id,
+      rewardValue: row.rewards.reward_value,
+      description: row.rewards.description,
+      summary: describeReward(row.rewards, productNames, serviceNames, currency),
+    })
+  }
+
+  return { error: null, offers }
 }
 
 export async function createSale(input: CreateSaleInput) {
   const session = await requireRole('super_admin', 'admin', 'cashier')
-  const { institutionId, role } = session
+  const { institutionId, role, user } = session
 
   if (input.items.length === 0) return { error: 'A sale must have at least one item.', id: null }
 
@@ -87,6 +206,113 @@ export async function createSale(input: CreateSaleInput) {
     }
   }
 
+  // ── Reward redemptions — re-validated here, not trusted from the client ──
+  // A stale "eligible" badge in the browser is not sufficient grounds to
+  // write a reward or charge a reward's discount. Everything the client
+  // proposes is re-checked against fresh data in this same request.
+  type ValidatedRedemption = {
+    origin: 'new' | 'pending'
+    rewardId: string
+    logId: string | null
+    rewardKind: 'free_product' | 'free_service' | 'discount' | 'custom'
+    rewardProductId: string | null
+    rewardServiceId: string | null
+    rewardValue: number | null
+  }
+  const validated: ValidatedRedemption[] = []
+
+  if (input.redemptions.length > 0) {
+    const rewardIds = [...new Set(input.redemptions.map((r) => r.rewardId))]
+    const { data: rewardRows } = await supabase
+      .from('rewards')
+      .select(
+        'id, institution_id, active, name, condition_type, condition_product_id, condition_service_id, condition_value, window_type, rolling_days, repeatable, reward_kind, reward_product_id, reward_service_id, reward_value',
+      )
+      .in('id', rewardIds)
+
+    const rewardById = new Map((rewardRows ?? []).map((r) => [r.id as string, r]))
+
+    // Loaded once, reused for every 'new' redemption's eligibility check —
+    // a sale can apply several rewards at once.
+    let bundle: Awaited<ReturnType<typeof loadClientLoyaltyBundle>> | null = null
+
+    for (const r of input.redemptions) {
+      const reward = rewardById.get(r.rewardId)
+      if (!reward || reward.institution_id !== effectiveInstitutionId) {
+        return { error: 'One or more rewards are not available.', id: null }
+      }
+      if (!reward.active) {
+        return { error: `"${reward.name}" is no longer active.`, id: null }
+      }
+
+      if (r.origin === 'new') {
+        if (!bundle) bundle = await loadClientLoyaltyBundle(supabase, effectiveInstitutionId, input.clientId)
+        const progress = evaluateReward(reward, bundle.events, bundle.issuances, new Date())
+        if (!progress.eligible) {
+          return { error: `This client has not earned "${reward.name}" yet.`, id: null }
+        }
+      } else {
+        if (!r.logId) return { error: 'Missing reward record reference.', id: null }
+        const { data: logRow } = await supabase
+          .from('rewards_log')
+          .select('id, institution_id, client_id, reward_id, transaction_id')
+          .eq('id', r.logId)
+          .single()
+        if (
+          !logRow ||
+          logRow.institution_id !== effectiveInstitutionId ||
+          logRow.client_id !== input.clientId ||
+          logRow.reward_id !== r.rewardId ||
+          logRow.transaction_id !== null
+        ) {
+          return { error: `"${reward.name}" has already been redeemed or is no longer available.`, id: null }
+        }
+      }
+
+      validated.push({
+        origin: r.origin,
+        rewardId: reward.id as string,
+        logId: r.logId,
+        rewardKind: reward.reward_kind as ValidatedRedemption['rewardKind'],
+        rewardProductId: reward.reward_product_id as string | null,
+        rewardServiceId: reward.reward_service_id as string | null,
+        rewardValue: reward.reward_value as number | null,
+      })
+    }
+  }
+
+  const validatedByRewardId = new Map(validated.map((v) => [v.rewardId, v]))
+
+  // A line tagged as a reward redemption must reference a reward that was
+  // actually validated above, and its target/price must match — otherwise a
+  // tampered request could mark a full-price item "free via reward" and
+  // hide real revenue from reporting.
+  for (const item of input.items) {
+    if (!item.rewardId) continue
+    const v = validatedByRewardId.get(item.rewardId)
+    if (!v || (v.rewardKind !== 'free_product' && v.rewardKind !== 'free_service')) {
+      return { error: 'A reward-tagged item does not match an applied reward.', id: null }
+    }
+    const targetMatches =
+      (v.rewardKind === 'free_product' && item.productId === v.rewardProductId) ||
+      (v.rewardKind === 'free_service' && item.serviceId === v.rewardServiceId)
+    if (!targetMatches || item.unitPrice !== 0) {
+      return { error: 'A reward-tagged item does not match an applied reward.', id: null }
+    }
+  }
+
+  // Server computes the discount total from validated reward data — never
+  // from a client-supplied number.
+  const discountTotal = validated
+    .filter((v) => v.rewardKind === 'discount')
+    .reduce((sum, v) => sum + (v.rewardValue ?? 0), 0)
+
+  const redemptionsPayload = validated.map((v) =>
+    v.origin === 'new'
+      ? { kind: 'new', reward_id: v.rewardId, value_snapshot: v.rewardValue, issued_by: user.id, note: null }
+      : { kind: 'existing', log_id: v.logId, note: null },
+  )
+
   // Fetch institution timezone for the attendance date computation in the RPC.
   const { data: inst } = await supabase
     .from('institutions')
@@ -96,7 +322,8 @@ export async function createSale(input: CreateSaleInput) {
 
   const tz = (inst?.timezone as string | null) ?? 'Africa/Accra'
 
-  // Call the atomic RPC — does all four writes in one Postgres transaction.
+  // Call the atomic RPC — one Postgres transaction does the sale, the stock
+  // decrements, the client_attendance upsert, AND every reward redemption.
   const { data: txId, error } = await supabase.rpc('create_sale', {
     p_institution_id: effectiveInstitutionId,
     p_client_id:      input.clientId,
@@ -108,8 +335,11 @@ export async function createSale(input: CreateSaleInput) {
       item_name:  i.itemName,
       unit_price: i.unitPrice,
       quantity:   i.quantity,
+      reward_id:  i.rewardId ?? null,
     })),
     p_tz: tz,
+    p_discount_total: discountTotal,
+    p_redemptions: redemptionsPayload,
   })
 
   if (error) return { error: error.message, id: null }
@@ -126,18 +356,19 @@ export async function createSale(input: CreateSaleInput) {
   if (soldProductIds.length > 0) {
     const { data: lowStock } = await supabase
       .from('products')
-      .select('name, stock_quantity')
+      .select('name, stock')
       .in('id', soldProductIds)
-      .lt('stock_quantity', 0)
+      .lt('stock', 0)
 
     for (const p of lowStock ?? []) {
       warnings.push(
-        `"${p.name}" is now at ${p.stock_quantity} units — stock is negative. Restock when possible.`
+        `"${p.name}" is now at ${p.stock} units — stock is negative. Restock when possible.`
       )
     }
   }
 
   revalidatePath('/sales')
   revalidatePath('/clients')
+  revalidatePath('/rewards')
   return { error: null, id: txId as string, warnings }
 }

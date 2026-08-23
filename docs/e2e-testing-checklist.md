@@ -124,9 +124,11 @@ Mark each ✅ as it passes. Tests are grouped by area and ordered by dependency.
 - [ ] **Password whitespace (T22):** create a password that starts with a space (e.g.
   `" MyPassword"`). Verify login succeeds — the password is NOT trimmed before submission.
 
-- [ ] **Low-stock warning (T23):** sell a product that has `stock_quantity = 1`. After the
+- [ ] **Low-stock warning (T23):** sell a product that has `stock = 1`. After the
   sale, the dialog should stay open and show a warning about negative/zero stock. Clicking
-  "Close" dismisses it. The sale record IS created despite the warning.
+  "Close" dismisses it. The sale record IS created despite the warning. (This warning was
+  silently dead until the rewards-redemption pass — the query selected a nonexistent
+  `stock_quantity` column instead of `stock`; confirm it now actually fires.)
 
 ---
 
@@ -175,4 +177,62 @@ Mark each ✅ as it passes. Tests are grouped by area and ordered by dependency.
 
 ---
 
-*Last updated: 2026-06-28. Run this checklist on each significant release.*
+## 10. Rewards redemption (applies migrations `20260823130000`, `20260823130100`)
+
+- [ ] **Free service, existing line:** build a rule a client has already earned (e.g. visit
+  count). Open Sales, pick that client, add the target service to the cart at its normal
+  price, then press **Apply** on the offer. The line's price should zero out and lock —
+  quantity and price fields become uneditable, catalog select becomes uneditable.
+
+- [ ] **Free service, no existing line:** same as above but do NOT add the service first.
+  Apply should add a new locked line at qty 1 / price 0.
+
+- [ ] **Undo:** after Apply (either path above), press **Undo**. A line that existed before
+  should return to its original editable price; a line Apply added should disappear entirely.
+
+- [ ] **Discount:** apply a discount-kind reward. Verify the footer shows "Subtotal X − reward Y"
+  above the final total, and the final total is subtotal minus the reward value (never below
+  zero if the reward exceeds the subtotal).
+
+- [ ] **Custom reward:** apply a custom-kind reward. Verify its description text is appended to
+  the sale Note field.
+
+- [ ] **Record the sale.** After submit, confirm in Supabase:
+  - `transactions.discount_total` matches the discount applied (0 if none).
+  - `transaction_items` for the free line has `reward_id` set to the reward's id and
+    `unit_price = 0`.
+  - `rewards_log` has a new row (or an existing row updated) with `transaction_id` set to the
+    new transaction's id.
+
+- [ ] **Reward disappears after redemption:** reopen Sales for the same client. The
+  just-redeemed reward should no longer appear as an offer (unless the client re-earned it).
+
+- [ ] **Pending / IOU redemption:** issue a reward standalone from the Clients page (not via a
+  sale) so `rewards_log.transaction_id` is null. Open Sales for that client — the offer should
+  appear labelled "already earned." Apply and record a sale. Confirm the SAME `rewards_log` row
+  got `transaction_id` set (no duplicate row was created).
+
+- [ ] **Double-redeem guard:** attempt to redeem the same pending IOU from two sales in quick
+  succession (two browser tabs, or two rapid submits). Only one should succeed; the second
+  should fail with a clear error, not silently double-write.
+
+- [ ] **Cashier can issue and apply:** log in as a `cashier` role user. Confirm they can press
+  "Issue reward" from the Clients page Loyalty dialog, and Apply a reward in Sales — both
+  without an admin.
+
+- [ ] **Ineligible client blocked:** attempt to issue a reward (via the Rules-tab Issue dialog)
+  to a client who has NOT earned it. That client should not appear in the picker at all.
+
+- [ ] **Rolling-window repeatable rule doesn't over-issue (bug fix):** build a repeatable
+  `rolling_days` rule (e.g. "spend 500 in any 30 days"). Have a client hit the threshold once,
+  issue it, then confirm they read as NOT eligible again the same day, even though the
+  qualifying spend is still inside the 30-day window. They should only become eligible again
+  after NEW spend past the issuance date.
+
+- [ ] **Reports — redeemed vs outstanding:** after a mix of redeemed and standalone (unredeemed)
+  issuances, open Reports → Rewards. Confirm the Redeemed and Outstanding columns match reality,
+  and the outstanding-count badge above the table is correct.
+
+---
+
+*Last updated: 2026-08-23. Run this checklist on each significant release.*

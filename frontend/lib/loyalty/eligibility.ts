@@ -70,6 +70,13 @@ export type RewardProgress = {
 
 const DAY_MS = 86_400_000
 
+// Money sums are floats; three GHS 33.33 lines total 99.99999999999999, which
+// misses a GHS 100 threshold the customer can see they've hit. Round to the
+// cent before any comparison.
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100
+}
+
 export function describeWindowLabel(window: WindowType, rollingDays: number | null): string {
   switch (window) {
     case 'lifetime': return 'all time'
@@ -102,7 +109,7 @@ export function evaluateReward(
   const isAmount = rule.condition_type === 'total_amount_spent'
 
   const relevant = events.filter((e) => eventMatches(rule, e))
-  const lifetimeValue = relevant.reduce((sum, e) => sum + e.value, 0)
+  const lifetimeValue = round2(relevant.reduce((sum, e) => sum + e.value, 0))
 
   const mine = issuances
     .filter((i) => i.reward_id === rule.id)
@@ -111,15 +118,26 @@ export function evaluateReward(
   const lastIssuedAt = issuedCount > 0 ? mine[issuedCount - 1].issued_at : null
 
   // Window cutoff (ms since epoch). null = no lower bound (count everything).
+  //
+  // For a REPEATABLE rolling_days rule, the cutoff is the LATER of the
+  // rolling boundary and the last issuance. Without the issuance half, the
+  // same spend/visits stay inside the sliding window after being rewarded —
+  // e.g. "spend 500 in any 30 days" issued once on day 1 would still read
+  // eligible every day for the following 29, off that same GHS 500, letting
+  // it be issued repeatedly for a single burst of spend. Anchoring the
+  // cutoff to the last issuance forces each new reward to be earned from
+  // events that happened AFTER the previous one was granted.
   let cutoff: number | null = null
   if (rule.window_type === 'rolling_days' && rule.rolling_days) {
-    cutoff = now.getTime() - rule.rolling_days * DAY_MS
+    const windowCutoff = now.getTime() - rule.rolling_days * DAY_MS
+    const issuanceCutoff = rule.repeatable && lastIssuedAt ? new Date(lastIssuedAt).getTime() : null
+    cutoff = issuanceCutoff !== null ? Math.max(windowCutoff, issuanceCutoff) : windowCutoff
   } else if (rule.window_type === 'since_last_issuance') {
     cutoff = lastIssuedAt ? new Date(lastIssuedAt).getTime() : null
   }
   const windowValue = cutoff === null
     ? lifetimeValue
-    : relevant.reduce((sum, e) => (new Date(e.at).getTime() > cutoff! ? sum + e.value : sum), 0)
+    : round2(relevant.reduce((sum, e) => (new Date(e.at).getTime() > cutoff! ? sum + e.value : sum), 0))
 
   let eligible = false
   let pending = 0
@@ -138,12 +156,16 @@ export function evaluateReward(
     }
   } else if (rule.window_type === 'lifetime') {
     // Repeatable lifetime card: total ÷ threshold, minus what's been issued.
-    const earned = threshold > 0 ? Math.floor(lifetimeValue / threshold) : 0
+    // The tiny epsilon guards a boundary case a non-round threshold (e.g.
+    // 33.33) can hit: exact-in-decimal division comes out just under the
+    // next whole number in binary float, which would floor a genuinely
+    // earned card down to the one before it.
+    const earned = threshold > 0 ? Math.floor(lifetimeValue / threshold + 1e-9) : 0
     pending = Math.max(0, earned - issuedCount)
     eligible = pending > 0
     progress = pending > 0
-      ? threshold                              // a full card is waiting
-      : lifetimeValue - earned * threshold     // leftover toward the next card
+      ? threshold                                    // a full card is waiting
+      : round2(lifetimeValue - earned * threshold)   // leftover toward the next card
   } else {
     // rolling_days / since_last_issuance: the window itself does the resetting.
     progress = Math.min(windowValue, threshold)

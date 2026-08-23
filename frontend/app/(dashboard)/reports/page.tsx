@@ -37,7 +37,7 @@ type TxRow = {
 type ItemRow = { item_name: string; product_id: string | null; service_id: string | null; quantity: number; line_total: number }
 type VisitRow = { client_id: string; date: string; clients: { name: string } | null }
 type ProductRow = { id: string; name: string; stock: number; price: number }
-type RewardLogRow = { reward_id: string; issued_at: string; rewards: { name: string } | null }
+type RewardLogRow = { reward_id: string; issued_at: string; transaction_id: string | null; rewards: { name: string } | null }
 
 export default async function ReportsPage() {
   const session = await requireRole('super_admin', 'admin')
@@ -75,7 +75,7 @@ export default async function ReportsPage() {
       .order('stock', { ascending: true }),
     supabase
       .from('rewards_log')
-      .select('reward_id, issued_at, rewards(name)')
+      .select('reward_id, issued_at, transaction_id, rewards(name)')
       .eq('institution_id', institutionId)
       .order('issued_at', { ascending: false })
       .limit(500),
@@ -196,23 +196,32 @@ export default async function ReportsPage() {
     price: Number(p.price),
   }))
 
-  // Rewards issued — all-time (capped at 500 rows; sufficient for single-shop scale)
-  const rewardStatsMap = new Map<string, { name: string; count: number; lastIssued: string }>()
+  // Rewards issued — all-time (capped at 500 rows; sufficient for single-shop scale).
+  // Split redeemed (transaction_id set — actually used) from outstanding
+  // (still an open IOU) so the owner can see what's still owed, not just
+  // what's been handed out historically.
+  const rewardStatsMap = new Map<string, { name: string; count: number; redeemed: number; outstanding: number; lastIssued: string }>()
   for (const log of rewardsLog) {
+    const redeemed = log.transaction_id !== null
     const existing = rewardStatsMap.get(log.reward_id)
     if (existing) {
       existing.count++
+      if (redeemed) existing.redeemed++
+      else existing.outstanding++
       if (log.issued_at > existing.lastIssued) existing.lastIssued = log.issued_at
     } else {
       rewardStatsMap.set(log.reward_id, {
         name: log.rewards?.name ?? '—',
         count: 1,
+        redeemed: redeemed ? 1 : 0,
+        outstanding: redeemed ? 0 : 1,
         lastIssued: log.issued_at,
       })
     }
   }
   const rewardsIssued: RewardIssued[] = [...rewardStatsMap.values()]
     .sort((a, b) => b.count - a.count)
+  const rewardsOutstanding = rewardsIssued.reduce((sum, r) => sum + r.outstanding, 0)
 
   return (
     <ReportsView
@@ -224,6 +233,7 @@ export default async function ReportsPage() {
       visitFreq={visitFreq}
       lowStock={lowStock}
       rewardsIssued={rewardsIssued}
+      rewardsOutstanding={rewardsOutstanding}
       role={role}
       currency={institution.currency}
       labelStaff={institution.label_staff}

@@ -9,7 +9,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn, formatMoney } from '@/lib/utils'
-import { describeCondition, describeReward, type Reward } from '../../rewards/_components/rewards-view'
+import { describeCondition, describeReward } from '@/lib/loyalty/describe'
+import type { LoyaltyRewardRow as Reward } from '@/lib/loyalty/loader'
 import { issueReward } from '../../rewards/_actions'
 import { getClientLoyalty } from '../_actions'
 import type { ClientLoyalty } from '../_actions'
@@ -18,14 +19,13 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   client: { id: string; name: string } | null
-  canIssue: boolean
 }
 
 function fmt(value: number, isAmount: boolean, currency: string): string {
   return isAmount ? formatMoney(value, currency) : String(Math.round(value))
 }
 
-export function ClientLoyaltyDialog({ open, onOpenChange, client, canIssue }: Props) {
+export function ClientLoyaltyDialog({ open, onOpenChange, client }: Props) {
   const [data, setData] = useState<ClientLoyalty | null>(null)
   const [loading, setLoading] = useState(false)
   const [issuingId, setIssuingId] = useState<string | null>(null)
@@ -108,13 +108,10 @@ export function ClientLoyaltyDialog({ open, onOpenChange, client, canIssue }: Pr
                           <span className="text-xs tabular-nums text-muted-foreground">
                             {fmt(progress.progress, progress.isAmount, data.currency)} / {fmt(progress.threshold, progress.isAmount, data.currency)}
                           </span>
-                          {progress.eligible && canIssue && (
+                          {progress.eligible && (
                             <Button size="sm" disabled={issuingId === reward.id} onClick={() => handleIssue(reward.id)}>
                               {issuingId === reward.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Issue reward'}
                             </Button>
-                          )}
-                          {progress.eligible && !canIssue && (
-                            <span className="text-xs text-muted-foreground">Ask an admin to issue</span>
                           )}
                         </div>
                       </>

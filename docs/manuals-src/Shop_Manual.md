@@ -133,11 +133,12 @@ Product stock counts down automatically each time the product is sold. Stock is 
 This is the main daily task. Go to **Sales** and press the button to record a new sale.
 
 1. **Client** -- required. Start typing to find them, or add the client first if they are new.
-2. **Stylist / staff** -- optional. Set this if you want **Reports -> By stylist** to attribute the work.
-3. **Items** -- add a line for each product or service. Set the quantity.
-4. **Discount** -- to discount a line, edit its price directly on that line.
-5. **Note** -- optional, e.g. *"Client paid in cash"*.
-6. Press save.
+2. **Rewards** -- if this client has earned anything, it appears here automatically. See section 7.3.
+3. **Stylist / staff** -- optional. Set this if you want **Reports -> By stylist** to attribute the work.
+4. **Items** -- add a line for each product or service. Set the quantity.
+5. **Discount** -- to discount a line by hand (not through a reward), edit its price directly on that line.
+6. **Note** -- optional, e.g. *"Client paid in cash"*.
+7. Press save.
 
 Recording a sale does three things at once: it stores the sale, it counts today as a visit for that client, and it reduces stock for any products sold.
 
@@ -145,7 +146,7 @@ Recording a sale does three things at once: it stores the sale, it counts today 
 
 ## 7. Loyalty rewards
 
-**Loyalty** lets you define reward rules and see who has earned what. It is a punch-card system: you set a target, the system counts towards it from real sales and visits, and tells you when a client qualifies.
+**Loyalty** lets you define reward rules. It is a punch-card system: you set a target, the system counts towards it from real sales and visits, and tells you when a client qualifies. Once a client qualifies, the reward is applied where the sale happens -- the **Sales** screen -- not filled in from memory.
 
 ### 7.1 Building a rule
 
@@ -172,11 +173,28 @@ Then set the target number, and the **counting window**:
 
 **Reward -- what do they get?** Choose a free service, a free product, a discount amount, or *Custom* with a free-text description.
 
-### 7.2 Issuing a reward
+### 7.2 Where a reward shows up
 
-Rules do not apply themselves to a sale. When a client qualifies you issue the reward, and it is logged against them under the **History** tab.
+A reward becomes available to a client the moment their history clears the target -- there is nothing to run, and nobody has to check for it. It shows up in two places:
 
-Every reward is issued by hand. Nothing is issued automatically, and nothing is ever applied to a sale for you -- somebody still gives the customer the free wash and records it here.
+- **On the client's row on the Clients page** -- press **Loyalty progress** to see how close they are to every rule, and issue anything they have already earned even if they are not buying today.
+- **In the Sales dialog, the moment you pick that client** -- this is where it matters most, because it is where the free item or discount actually gets used.
+
+### 7.3 Applying a reward at the till
+
+Pick the client in **Sales**. If they have earned anything, a **Rewards** panel appears listing it, with an **Apply** button.
+
+- **Free service / free product** -- Apply either zeroes the matching line already in the cart, or adds a new free line if it is not there yet. That line locks -- you cannot retype its price or item by accident, because the reward already fixed what it is.
+- **Discount** -- Apply subtracts the reward amount from the sale total. You will see the subtotal and the reward deduction shown separately, above the final total.
+- **Custom** -- Apply drops the reward's description into the sale note, since a free-text reward cannot be priced automatically. Give it to the client yourself and record what you gave in the note.
+
+Applying is not final until you press **Record sale** -- press **Undo** on the reward beforehand if you picked the wrong one. Once the sale is recorded, the reward is marked used and will not appear again for that client until they earn it a second time.
+
+> [!TIP] A reward earned on an earlier visit and never used still shows up here on the client's next visit, labelled *"already earned"* -- nothing is lost if they do not redeem it the same day they qualify.
+
+### 7.4 Who can apply and issue rewards
+
+Cashiers can apply rewards at the till and issue them from the Clients page, the same as an admin. The system only ever lets a reward be given to someone who has genuinely earned it -- that check happens every time, regardless of who presses the button, so there is no need to route it through an admin first.
 
 > [!TIP] Check **Loyalty progress** on the client's row while they are still in the shop. That is the moment to tell them they are two visits from a free treatment.
 
@@ -192,7 +210,7 @@ Every reward is issued by hand. Nothing is issued automatically, and nothing is 
 | **Items** | What sells most? |
 | **Visits** | How often do clients come back? |
 | **Low stock** | What do I need to reorder? (5 units or fewer) |
-| **Rewards** | Which rewards have been issued, and when? |
+| **Rewards** | Which rewards have been redeemed, and how many are still outstanding? |
 
 Stylist figures only count sales where somebody filled in the stylist field, so make that a habit at the till if you want that tab to be meaningful.
 
@@ -218,14 +236,15 @@ If somebody both clocks in with a fingerprint *and* logs in to record sales, you
 | Record a sale | Yes | Yes | Yes |
 | Add and edit clients | Yes | Yes | Yes |
 | View and edit catalog | Yes | Yes | Yes |
-| Loyalty rules and issuing | Yes | Yes | No |
+| Apply / issue a reward the client has earned | Yes | Yes | Yes |
+| Build or edit loyalty rules | Yes | Yes | No |
 | Reports | Yes | Yes | No |
 | Staff roster and attendance | Yes | Yes | No |
 | Devices and enrollment | Yes | No | No |
 | Accounts | Yes | View only | No |
 | Settings | Yes | No | No |
 
-**Cashier** is the till role: clients, sales, and catalog, and nothing else. Give your counter staff this role. It keeps takings reports, staff attendance, and settings out of reach without getting in the way of serving customers.
+**Cashier** is the till role: clients, sales, and catalog, and nothing else. Give your counter staff this role. It keeps takings reports, staff attendance, and settings out of reach without getting in the way of serving customers. They can still give out a reward a client has genuinely earned -- the system checks eligibility itself, so this never depends on the cashier's judgement.
 
 ## 11. Device quick reference
 

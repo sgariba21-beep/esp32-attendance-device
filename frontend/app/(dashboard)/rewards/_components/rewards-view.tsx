@@ -14,31 +14,16 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { cn, formatMoney, displayPhone } from '@/lib/utils'
+import { cn, displayPhone } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
+import { describeCondition, describeWindow, describeReward } from '@/lib/loyalty/describe'
 import { RewardDialog } from './reward-dialog'
 import { IssueDialog } from './issue-dialog'
 import { setRewardActive } from '../_actions'
 
-export type Reward = {
-  id: string
-  institution_id: string
-  name: string
-  condition_type: 'service_count' | 'product_count' | 'visit_count' | 'total_amount_spent'
-  condition_product_id: string | null
-  condition_service_id: string | null
-  condition_value: number
-  window_type: 'lifetime' | 'rolling_days' | 'since_last_issuance'
-  rolling_days: number | null
-  repeatable: boolean
-  reward_kind: 'free_product' | 'free_service' | 'discount' | 'custom'
-  reward_product_id: string | null
-  reward_service_id: string | null
-  reward_value: number | null
-  active: boolean
-  description: string | null
-  created_at: string
-}
+import type { LoyaltyRewardRow as Reward } from '@/lib/loyalty/loader'
+export type { Reward }
+export { describeCondition, describeWindow, describeReward }
 
 export type CatalogLite = { id: string; name: string; price: number }
 export type ClientLite = { id: string; name: string; phone: string }
@@ -68,45 +53,6 @@ type Props = {
 }
 
 type StatusFilter = 'active' | 'archived' | 'all'
-
-export function describeCondition(r: Reward, productNames: Record<string, string>, serviceNames: Record<string, string>, currency: string): string {
-  const n = r.condition_type === 'total_amount_spent' ? r.condition_value : Math.round(r.condition_value)
-  switch (r.condition_type) {
-    case 'visit_count':
-      return `${n} visit${n !== 1 ? 's' : ''}`
-    case 'service_count':
-      return r.condition_service_id
-        ? `${n} × ${serviceNames[r.condition_service_id] ?? 'service'}`
-        : `${n} service${n !== 1 ? 's' : ''}`
-    case 'product_count':
-      return r.condition_product_id
-        ? `${n} × ${productNames[r.condition_product_id] ?? 'product'}`
-        : `${n} product${n !== 1 ? 's' : ''}`
-    case 'total_amount_spent':
-      return `Spend ${formatMoney(r.condition_value, currency)}`
-  }
-}
-
-export function describeWindow(r: Reward): string {
-  switch (r.window_type) {
-    case 'lifetime': return 'all time'
-    case 'rolling_days': return `last ${r.rolling_days} days`
-    case 'since_last_issuance': return 'since last issued'
-  }
-}
-
-export function describeReward(r: Reward, productNames: Record<string, string>, serviceNames: Record<string, string>, currency: string): string {
-  switch (r.reward_kind) {
-    case 'free_product':
-      return `Free ${r.reward_product_id ? (productNames[r.reward_product_id] ?? 'product') : 'product'}`
-    case 'free_service':
-      return `Free ${r.reward_service_id ? (serviceNames[r.reward_service_id] ?? 'service') : 'service'}`
-    case 'discount':
-      return `${formatMoney(r.reward_value ?? 0, currency)} off`
-    case 'custom':
-      return r.description || 'Custom reward'
-  }
-}
 
 const LOG_PAGE_SIZE = 50
 
