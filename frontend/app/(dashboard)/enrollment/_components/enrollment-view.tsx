@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useTransition } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
 import { ClipboardList } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { NativeSelect } from '@/components/ui/native-select'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
+import { Toolbar, ToolbarField } from '@/components/ui/toolbar'
 import { JobDialog } from './job-dialog'
 import type { EnrollmentJob } from '../page'
 import type { Device } from '@/lib/types'
@@ -20,6 +23,8 @@ type Props = {
   labelMember: string
   labelMembers: string
   showInstitution?: boolean
+  institutions?: { id: string; name: string }[]
+  institutionFilter?: string
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -65,10 +70,29 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
   )
 }
 
-export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution }: Props) {
+export function EnrollmentView({
+  initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution,
+  institutions = [], institutionFilter = '',
+}: Props) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const [, startTransition] = useTransition()
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
+
+  // Institution filter (platform_admin) re-requests the page with a new
+  // ?institution= param; jobs/devices arrive scoped from the server, so sync
+  // local state from the fresh prop rather than only seeding it on mount.
+  useEffect(() => {
+    setJobs(initialJobs)
+  }, [initialJobs])
+
+  function handleInstitutionChange(value: string) {
+    startTransition(() => {
+      router.push(value ? `${pathname}?institution=${value}` : pathname)
+    })
+  }
 
   useEffect(() => {
     const source = new EventSource('/api/enrollment-stream')
@@ -129,6 +153,24 @@ export function EnrollmentView({ initialJobs, devices, labelUnit, labelMember, l
         subtitle={<SseStatusBadge status={sseStatus} />}
         actions={<Button onClick={() => setDialogOpen(true)}>New job</Button>}
       />
+
+      {showInstitution && institutions.length > 0 && (
+        <Toolbar>
+          <ToolbarField label="Institution" htmlFor="institution-filter">
+            <NativeSelect
+              id="institution-filter"
+              value={institutionFilter}
+              onChange={(e) => handleInstitutionChange(e.target.value)}
+              className="w-56"
+            >
+              <option value="">All institutions</option>
+              {institutions.map((inst) => (
+                <option key={inst.id} value={inst.id}>{inst.name}</option>
+              ))}
+            </NativeSelect>
+          </ToolbarField>
+        </Toolbar>
+      )}
 
       {jobs.length === 0 ? (
         <EmptyState

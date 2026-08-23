@@ -202,7 +202,12 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
             <Label htmlFor="device_id">Device</Label>
             <SingleSelect
               id="device_id"
-              options={devices.map((d) => ({ value: d.id, label: `${d.group_name} ${d.unit_name}` }))}
+              options={devices.map((d) => ({
+                value: d.id,
+                label: d.institution?.name
+                  ? `${d.institution.name} — ${d.group_name} ${d.unit_name}`
+                  : `${d.group_name} ${d.unit_name}`,
+              }))}
               value={form.device_id}
               onChange={(v) => { set('device_id', v); set('student_id', '') }}
               placeholder="Select a device…"

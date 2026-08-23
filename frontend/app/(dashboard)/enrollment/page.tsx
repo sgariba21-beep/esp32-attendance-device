@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole, getInstitution } from '@/lib/supabase/dal'
+import { requireRole, getInstitution, resolveInstitutionScope } from '@/lib/supabase/dal'
 import { EnrollmentView } from './_components/enrollment-view'
 import type { Device } from '@/lib/types'
 
@@ -18,11 +18,23 @@ export type EnrollmentJob = {
   institution: { name: string } | null
 }
 
-export default async function EnrollmentPage() {
-  const { role, institutionId } = await requireRole('super_admin', 'platform_admin')
+export default async function EnrollmentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+}) {
+  const session = await requireRole('super_admin', 'platform_admin')
+  const { role, institutionId } = session
   const institution = await getInstitution(institutionId)
   const isPlatformAdmin = role === 'platform_admin'
   const supabase = createAdminClient()
+
+  const params = await searchParams
+  const institutionFilter = typeof params.institution === 'string' ? params.institution : undefined
+
+  // T6: platform_admin may scope the page to one institution via ?institution=;
+  // every other role is always pinned to its own institution.
+  const effectiveInstitutionId = resolveInstitutionScope(session, institutionFilter)
 
   let jobsQ = supabase
     .from('enrollment_jobs')
@@ -35,17 +47,25 @@ export default async function EnrollmentPage() {
     .order('created_at', { ascending: false })
     .limit(100)
 
+  // Cross-tenant device list (platform_admin, no institution selected) shows devices
+  // from many institutions side by side, so join institution name to disambiguate
+  // group/unit labels that collide across tenants.
   let devicesQ = supabase
     .from('devices')
-    .select('id, group_name, unit_name, display_name')
+    .select('id, group_name, unit_name, display_name, institution:institution_id(id, name)')
     .not('institution_id', 'is', null)
     .order('group_name')
     .order('unit_name')
 
-  if (institutionId) {
-    jobsQ = jobsQ.eq('institution_id', institutionId)
-    devicesQ = devicesQ.eq('institution_id', institutionId)
+  if (effectiveInstitutionId) {
+    jobsQ = jobsQ.eq('institution_id', effectiveInstitutionId)
+    devicesQ = devicesQ.eq('institution_id', effectiveInstitutionId)
   }
+
+  // Institution picker options for platform_admin.
+  const allInstitutions = isPlatformAdmin
+    ? (await supabase.from('institutions').select('id, name').order('name')).data ?? []
+    : []
 
   const [jobsRes, devicesRes] = await Promise.all([jobsQ, devicesQ])
 
@@ -66,11 +86,13 @@ export default async function EnrollmentPage() {
   return (
     <EnrollmentView
       initialJobs={(jobsRes.data ?? []) as unknown as EnrollmentJob[]}
-      devices={(devicesRes.data ?? []) as Device[]}
+      devices={(devicesRes.data ?? []) as unknown as Device[]}
       labelUnit={institution.label_unit}
       labelMember={labelMemberSingular}
       labelMembers={labelMemberPlural}
       showInstitution={isPlatformAdmin}
+      institutions={allInstitutions}
+      institutionFilter={institutionFilter ?? ''}
     />
   )
 }
