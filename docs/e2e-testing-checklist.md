@@ -216,6 +216,28 @@ Mark each ✅ as it passes. Tests are grouped by area and ordered by dependency.
   succession (two browser tabs, or two rapid submits). Only one should succeed; the second
   should fail with a clear error, not silently double-write.
 
+- [ ] **Losing a redemption race doesn't still charge the discount (bug fix):** this is the
+  scenario the guard above exists to prevent — confirm specifically that the FAILED sale in that
+  test was not recorded at all (no `transactions` row, no stock decrement), not just that the
+  reward wasn't double-attached. Before the fix, the losing side's sale still completed at the
+  discounted price even though its reward redemption silently failed to attach.
+
+- [ ] **Non-repeatable reward can't be double-granted (bug fix):** for a non-repeatable reward,
+  fire two `issueReward` calls for the same client in quick succession (two tabs on the Clients
+  Loyalty dialog). Only one should succeed; the second should get a clear "already issued"
+  error, not a second `rewards_log` row.
+
+- [ ] **Sales panel hides an offer whose catalog target is archived (bug fix):** build a
+  free_product/free_service reward, have a client earn it (fresh eligibility, or issue it
+  standalone so it's pending), then archive the target product/service in Catalog. Reopen Sales
+  for that client — the offer should NOT appear, in neither the freshly-eligible nor the
+  "already earned" list. Un-archive the item and confirm it reappears.
+
+- [ ] **Sales panel hides a pending IOU whose rule was archived (bug fix):** issue a reward
+  standalone (pending, unredeemed), then archive the reward rule itself in Loyalty. Reopen Sales
+  for that client — the IOU should not appear. It should still count toward Reports' Outstanding
+  figure even while hidden from the till.
+
 - [ ] **Cashier can issue and apply:** log in as a `cashier` role user. Confirm they can press
   "Issue reward" from the Clients page Loyalty dialog, and Apply a reward in Sales — both
   without an admin.

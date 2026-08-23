@@ -61,6 +61,10 @@ export async function getClientRewardOffers(clientId: string): Promise<{ error: 
   if (role !== 'platform_admin' && (!institutionId || client.institution_id !== institutionId)) {
     return { error: 'Not found.', offers: [] }
   }
+  // Not directly reachable today (the Sales dialog's own client picker is
+  // already filtered to active clients), but this action shouldn't compute
+  // offers for an archived client even if called some other way.
+  if (!client.active) return { error: null, offers: [] }
 
   const instId = client.institution_id as string
   const institution = await getInstitution(instId)
@@ -75,11 +79,33 @@ export async function getClientRewardOffers(clientId: string): Promise<{ error: 
   const currency = institution.currency
   const now = new Date()
 
+  // A reward can point at a product/service that's been archived SINCE the
+  // rule was created — catalogRefsValid() only checks that the id belongs
+  // to this institution at save time, never that it's still active, and
+  // archiving is a soft-delete that doesn't touch the reward's FK. Without
+  // this check, a free_product/free_service offer can show as "eligible"
+  // while Apply is silently unable to do anything (it can only zero an
+  // existing cart line or add one from the active catalog — neither is
+  // possible for an item that's no longer sellable).
+  const [activeProductsRes, activeServicesRes] = await Promise.all([
+    supabase.from('products').select('id').eq('institution_id', instId).eq('active', true),
+    supabase.from('services').select('id').eq('institution_id', instId).eq('active', true),
+  ])
+  const activeProductIds = new Set((activeProductsRes.data ?? []).map((p) => p.id as string))
+  const activeServiceIds = new Set((activeServicesRes.data ?? []).map((s) => s.id as string))
+
+  function isCurrentlyRedeemable(kind: RewardOffer['rewardKind'], productId: string | null, serviceId: string | null): boolean {
+    if (kind === 'free_product') return !!productId && activeProductIds.has(productId)
+    if (kind === 'free_service') return !!serviceId && activeServiceIds.has(serviceId)
+    return true  // discount / custom carry no catalog target
+  }
+
   const offers: RewardOffer[] = []
 
   for (const reward of rewards) {
     const progress = evaluateReward(reward, events, issuances, now)
     if (!progress.eligible) continue
+    if (!isCurrentlyRedeemable(reward.reward_kind, reward.reward_product_id, reward.reward_service_id)) continue
     offers.push({
       key: `new:${reward.id}`,
       origin: 'new',
@@ -116,10 +142,13 @@ export async function getClientRewardOffers(clientId: string): Promise<{ error: 
       active: boolean
     } | null
   }[]) {
-    // A reward archived after being granted is still honoured — it was
-    // earned under the old rule — but skip if the reward row is gone
-    // entirely (shouldn't happen; NO ACTION FK keeps it, defensive only).
-    if (!row.rewards) continue
+    if (!row.rewards) continue  // reward row gone entirely — shouldn't happen, NO ACTION FK; defensive only
+    // Archived since it was granted, or its target is no longer sellable —
+    // either way it can't actually be redeemed at the till right now. It's
+    // still a real outstanding grant (Reports' Outstanding column still
+    // counts it), just not something this panel can offer to apply today.
+    if (!row.rewards.active) continue
+    if (!isCurrentlyRedeemable(row.rewards.reward_kind, row.rewards.reward_product_id, row.rewards.reward_service_id)) continue
     offers.push({
       key: `pending:${row.id}`,
       origin: 'pending',
