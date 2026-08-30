@@ -159,12 +159,17 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
     row.student_id = data.student_id
     row.finger_slot = data.finger_slot
     row.fid = data.fid
+    // Reaches this point only if the slot looked free OR the operator
+    // confirmed the overwrite. Forward that decision to the device, which
+    // does its own sensor-truth check before storing.
+    row.allow_overwrite = data.confirmOverwrite === true
   } else if (data.command === 'delete') {
     row.student_id = data.student_id
     row.finger_slot = data.finger_slot
   } else if (data.command === 'register-master') {
     row.fid = data.fid
     row.note = data.name.trim()
+    row.allow_overwrite = data.confirmOverwrite === true
   } else if (data.command === 'delete-master') {
     row.fid = data.fid
   }

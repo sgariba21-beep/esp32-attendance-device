@@ -39,7 +39,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.8.0"         // increment on each flash (1.8.0: persistent/degraded state display cards)
+#define FIRMWARE_VERSION  "1.9.0"         // increment on each flash (1.9.0: refuse to overwrite an occupied sensor slot unless approved)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -230,6 +230,7 @@ struct EnrollJob {
   String fingerSlot;
   String command;
   int    requestedFid;
+  bool   allowOverwrite;   // operator approved clobbering an occupied sensor slot
 };
 volatile bool enrollmentJobPending = false;
 EnrollJob currentEnrollJob;
@@ -1659,6 +1660,28 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
                     fidToUse, fidMap[fidToUse].c_str());
   }
 
+  // Sensor-truth overwrite guard. The dashboard's occupancy check works off
+  // members.fin1/fin2 + master-job history and can miss a slot that is
+  // occupied on the physical sensor but not reflected there (orphaned model
+  // from a failed delete, an out-of-band enrollment). Probe the sensor
+  // itself: loadModel() returning OK means a real template lives in that
+  // page. Only FingerprintTask touches the sensor and it runs this whole
+  // job without yielding to any other sensor user, so there is no
+  // check-then-store race. Refuse unless the operator explicitly approved
+  // the overwrite (job.allowOverwrite, from enrollment_jobs.allow_overwrite).
+  if (!job.allowOverwrite) {
+    int lp = finger.loadModel(fidToUse);
+    if (lp == FINGERPRINT_OK) {
+      Serial.printf("Enrollment refused: sensor slot %d already holds a template "
+                    "and overwrite was not approved.\n", fidToUse);
+      pendingScanId = "";
+      postDisplayState(TIER_INTERACTION, 2500, "OCCUPIED", job.name, "Slot not overwritten");
+      renderDisplayIfDirty();
+      reportEnrollUpdate(job.id, "failed", fidToUse, "slot-occupied", job.fingerSlot, job.studentId);
+      return;
+    }
+  }
+
   setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_PURPLE);
   int resFid = enrollID_toFid(job, fidToUse);
   if (resFid > 0) {
@@ -2380,13 +2403,14 @@ void EnrollmentTask(void *pvParameters) {
           JsonObject jobObj = doc["job"];
           if (!jobObj.isNull()) {
             EnrollJob job;
-            job.id           = jobObj["id"]          | "";
-            job.command      = jobObj["command"]     | "";
-            job.fingerSlot   = jobObj["finger_slot"] | "";
-            job.studentId    = jobObj["student_id"]  | "";
-            job.uniqueId     = jobObj["sid"]         | "";
-            job.name         = jobObj["fullname"]    | "";
-            job.requestedFid = jobObj["fid"]         | 0;
+            job.id            = jobObj["id"]              | "";
+            job.command       = jobObj["command"]         | "";
+            job.fingerSlot    = jobObj["finger_slot"]     | "";
+            job.studentId     = jobObj["student_id"]      | "";
+            job.uniqueId      = jobObj["sid"]             | "";
+            job.name          = jobObj["fullname"]        | "";
+            job.requestedFid  = jobObj["fid"]             | 0;
+            job.allowOverwrite = jobObj["allow_overwrite"] | false;
 
             if (job.id.length() > 0 && job.command.length() > 0) {
               xSemaphoreTake(enrollMutex, portMAX_DELAY);

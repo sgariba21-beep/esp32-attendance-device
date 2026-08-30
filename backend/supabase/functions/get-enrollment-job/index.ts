@@ -134,7 +134,7 @@ Deno.serve(async (req: Request) => {
   const { data: job, error } = await supabase
     .from("enrollment_jobs")
     .select(`
-      id, command, fid, finger_slot, note,
+      id, command, fid, finger_slot, note, allow_overwrite,
       member:student_id(id, sid, fullname)
     `)
     .eq("device_id", device.id)
@@ -170,6 +170,10 @@ Deno.serve(async (req: Request) => {
       sid: member?.sid ?? "",
       fullname: isMaster ? (job.note ?? "Master") : (member?.fullname ?? ""),
       unit_name: device.display_name ?? "",
+      // Whether the operator approved overwriting an already-occupied sensor
+      // slot. The device probes the sensor before enrolling and refuses to
+      // clobber an occupied slot unless this is true.
+      allow_overwrite: job.allow_overwrite ?? false,
     },
     ...deviceConfig,
   });

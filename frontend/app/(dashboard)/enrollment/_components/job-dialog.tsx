@@ -39,6 +39,10 @@ const empty = {
   finger_slot: 'fin1' as FingerSlot,
   fid: 1,
   master_name: '',
+  // Escape hatch: skip the "is the slot free?" check and tell the device it
+  // may overwrite. Needed when records show the slot free but the device
+  // rejected it as already in use (orphaned template on the sensor).
+  force_overwrite: false,
 }
 
 export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers }: Props) {
@@ -110,6 +114,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
         student_id: form.student_id,
         finger_slot: form.finger_slot,
         fid: Number(form.fid),
+        ...(form.force_overwrite ? { confirmOverwrite: true } : {}),
       }
     } else if (form.command === 'delete') {
       jobData = {
@@ -124,6 +129,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
         device_id: form.device_id,
         fid: Number(form.fid),
         name: form.master_name.trim(),
+        ...(form.force_overwrite ? { confirmOverwrite: true } : {}),
       }
     } else {
       jobData = {
@@ -287,6 +293,25 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
               <p className="text-xs text-muted-foreground">
                 The slot number to store the template in on the R503 sensor.
               </p>
+            </div>
+          )}
+
+          {/* Force-overwrite escape hatch (register / register-master) */}
+          {(form.command === 'register' || form.command === 'register-master') && (
+            <div className="flex items-start gap-3">
+              <input
+                id="force_overwrite"
+                type="checkbox"
+                checked={form.force_overwrite}
+                onChange={(e) => set('force_overwrite', e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+              />
+              <div className="space-y-1">
+                <Label htmlFor="force_overwrite" className="cursor-pointer">Allow overwriting an occupied slot</Label>
+                <p className="text-xs text-muted-foreground">
+                  Enable only if the device rejected this slot as already in use. Replaces whatever fingerprint is stored there — this cannot be undone.
+                </p>
+              </div>
             </div>
           )}
 
