@@ -27,7 +27,7 @@ function localTime(instant: Date, timeZone: string): string {
 const BATCH_SIZE = 8;
 
 async function processInstitution(inst: {
-  id: string; status: string; skip_weekends: boolean; timezone: string;
+  id: string; status: string; tracked_weekdays: number[] | null; timezone: string;
   track_students: boolean; track_staff: boolean;
   student_scan_mode: string; staff_scan_mode: string;
 }): Promise<string> {
@@ -39,14 +39,20 @@ async function processInstitution(inst: {
   const todayInTz = now.toLocaleDateString("en-CA", { timeZone: inst.timezone });
   const currentTime = localTime(now, inst.timezone || "UTC");
 
-  if (inst.skip_weekends) {
-    const weekday = new Intl.DateTimeFormat("en-US", {
-      timeZone: inst.timezone,
-      weekday: "short",
-    }).format(now);
-    if (weekday === "Sun" || weekday === "Sat") {
-      return `${inst.id}: weekend — skipped`;
-    }
+  // tracked_weekdays holds ISO weekday numbers (1 = Mon … 7 = Sun). No absent
+  // rows are generated for a day the institution does not track.
+  const isoWeekday: Record<string, number> = {
+    Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+  };
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: inst.timezone,
+    weekday: "short",
+  }).format(now);
+  const trackedWeekdays = Array.isArray(inst.tracked_weekdays)
+    ? inst.tracked_weekdays
+    : [1, 2, 3, 4, 5];
+  if (!trackedWeekdays.includes(isoWeekday[weekday])) {
+    return `${inst.id}: day not tracked — skipped`;
   }
 
   // H3 consistency: fetch holidays and match in code (non-recurring and recurring).
@@ -177,7 +183,7 @@ Deno.serve(async (req: Request) => {
     const { data: institutions, error: instError } = await supabase
       .from("institutions")
       .select(
-        "id, status, skip_weekends, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
+        "id, status, tracked_weekdays, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
       );
 
     if (instError || !institutions || institutions.length === 0) {

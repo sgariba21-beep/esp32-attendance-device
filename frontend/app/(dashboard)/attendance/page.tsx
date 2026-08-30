@@ -118,7 +118,7 @@ export default async function AttendancePage({
   let query = supabase
     .from('attendance')
     .select(`
-      id, date, time, status, scan_type, scan_id,
+      id, date, time, status, scan_type, punctuality, scan_id,
       student:member_id(id, fullname, sid),
       academic:period_id(id, term, year),
       device:device_id(id, group_name, unit_name),
@@ -203,6 +203,7 @@ export default async function AttendancePage({
         track_students={institution.track_students}
         track_staff={institution.track_staff}
         institutionType={institution.type}
+        timeFormat={institution.time_format}
         teacherNoDevice={noTeacherMatch}
         labels={{
           label_member: memberHeader,

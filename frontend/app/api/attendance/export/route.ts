@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
   let query: any = admin
     .from('attendance')
     .select(`
-      id, date, time, status, scan_type,
+      id, date, time, status, scan_type, punctuality,
       student:member_id(fullname, sid),
       academic:period_id(term, year),
       device:device_id(group_name, unit_name),
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
   const { data: records } = teacherNoMatch ? { data: [] } : await query
 
   const isPlatformAdmin = role === 'platform_admin'
-  const headers = ['Date', 'Name', 'ID', 'Unit', 'Period', 'Time', 'Status', 'Scan Type']
+  const headers = ['Date', 'Name', 'ID', 'Unit', 'Period', 'Time', 'Status', 'Scan Type', 'Punctuality']
   if (isPlatformAdmin) headers.push('Institution')
 
   const escape = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -117,6 +117,7 @@ export async function GET(req: NextRequest) {
       r.time ?? '',
       r.status ?? '',
       r.scan_type ?? 'present',
+      r.punctuality ?? '',
     ]
     if (isPlatformAdmin) row.push(r.institution?.name ?? '')
     return row.map(escape).join(',')

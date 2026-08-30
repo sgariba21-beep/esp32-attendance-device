@@ -56,6 +56,25 @@ export function formatMoney(amount: number | string, currency: string = 'GHS'): 
   return new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(Number(amount))
 }
 
+/**
+ * Render a stored wall-clock time in the institution's chosen clock format.
+ * Input is the raw "HH:MM" or "HH:MM:SS" string kept on attendance rows
+ * (always 24h, seconds dropped on display). `format` comes from
+ * institutions.time_format: '24h' → "13:30", '12h' → "1:30 PM".
+ * Returns the input unchanged if it isn't a parseable time.
+ */
+export function formatClockTime(value: string, format: '12h' | '24h' = '24h'): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(value?.trim() ?? '')
+  if (!m) return value
+  const hours = Number(m[1])
+  const minutes = m[2]
+  if (hours > 23 || Number(minutes) > 59) return value
+  if (format === '24h') return `${String(hours).padStart(2, '0')}:${minutes}`
+  const period = hours >= 12 ? 'PM' : 'AM'
+  const h12 = hours % 12 || 12
+  return `${h12}:${minutes} ${period}`
+}
+
 export function indefiniteArticle(word: string): string {
   const w = word.trim().toLowerCase()
   // "yoo"-sound words take "a" despite a leading vowel: a Unit, a University, a User.

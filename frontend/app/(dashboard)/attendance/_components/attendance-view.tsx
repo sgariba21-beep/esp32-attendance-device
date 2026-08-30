@@ -22,7 +22,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { Pagination } from '@/components/ui/pagination'
 import { Toolbar, ToolbarField, ToolbarSeparator } from '@/components/ui/toolbar'
 import { MultiSelect } from './multi-select'
-import { pluralize } from '@/lib/utils'
+import { pluralize, formatClockTime } from '@/lib/utils'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
 
 type MemberOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
@@ -75,6 +75,7 @@ type Props = {
   track_students: boolean
   track_staff: boolean
   institutionType: 'school' | 'office' | 'shop'
+  timeFormat: '12h' | '24h'
   memberStats: MemberStat[]
   teacherNoDevice?: boolean
 }
@@ -100,14 +101,6 @@ function formatShortDate(iso: string) {
   })
 }
 
-function formatTime(time: string) {
-  const [h, m] = time.split(':')
-  const hour = parseInt(h)
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const h12 = hour % 12 || 12
-  return `${h12}:${m} ${ampm}`
-}
-
 function memberRateColor(rate: number | null): string {
   if (rate === null) return 'text-muted-foreground'
   if (rate >= 80) return 'text-success-foreground'
@@ -124,6 +117,8 @@ type PairedRow = {
   academic: AttendanceRecord['academic']
   timeIn: string | null
   timeOut: string | null
+  lateIn: boolean
+  earlyOut: boolean
   isAbsent: boolean
 }
 
@@ -140,7 +135,7 @@ function pairRecords(records: AttendanceRecord[]): PairedRow[] {
       map.set(k, {
         id: r.id, date: r.date, institution: r.institution,
         student: r.student, device: r.device, academic: r.academic,
-        timeIn: null, timeOut: null, isAbsent: true,
+        timeIn: null, timeOut: null, lateIn: false, earlyOut: false, isAbsent: true,
       })
       order.push(k)
       continue
@@ -151,14 +146,21 @@ function pairRecords(records: AttendanceRecord[]): PairedRow[] {
       map.set(k, {
         id: r.id, date: r.date, institution: r.institution,
         student: r.student, device: r.device, academic: r.academic,
-        timeIn: null, timeOut: null, isAbsent: false,
+        timeIn: null, timeOut: null, lateIn: false, earlyOut: false, isAbsent: false,
       })
       order.push(k)
     }
     const row = map.get(k)!
-    if (r.scan_type === 'time_in') row.timeIn = r.time
-    else if (r.scan_type === 'time_out') row.timeOut = r.time
-    else row.timeIn = r.time  // present_absent record in a mixed dataset
+    if (r.scan_type === 'time_in') {
+      row.timeIn = r.time
+      row.lateIn = r.punctuality === 'late'
+    } else if (r.scan_type === 'time_out') {
+      row.timeOut = r.time
+      row.earlyOut = r.punctuality === 'early_leave'
+    } else {
+      row.timeIn = r.time  // present_absent record in a mixed dataset
+      row.lateIn = r.punctuality === 'late'
+    }
   }
 
   return order.map((k) => map.get(k)!)
@@ -202,8 +204,9 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
 export function AttendanceView({
   records, students, staffMembers, devices, academic, filters, page, pageSize,
   totalCount, role, assignedUnit, labels, institutions,
-  track_students, track_staff, institutionType, memberStats, teacherNoDevice,
+  track_students, track_staff, institutionType, timeFormat, memberStats, teacherNoDevice,
 }: Props) {
+  const fmtTime = (t: string) => formatClockTime(t, timeFormat)
   const isTeacher = role === 'teacher' || role === 'staff'
 
   if (isTeacher && teacherNoDevice) {
@@ -545,10 +548,16 @@ export function AttendanceView({
                           {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
                         </TableCell>
                         <TableCell className="whitespace-nowrap tabular-nums">
-                          {r.timeIn ? formatTime(r.timeIn) : <span className="text-muted-foreground">—</span>}
+                          <span className="inline-flex items-center gap-1.5">
+                            {r.timeIn ? fmtTime(r.timeIn) : <span className="text-muted-foreground">—</span>}
+                            {r.lateIn && <Badge variant="warning">Late</Badge>}
+                          </span>
                         </TableCell>
                         <TableCell className="whitespace-nowrap tabular-nums">
-                          {r.timeOut ? formatTime(r.timeOut) : <span className="text-muted-foreground">—</span>}
+                          <span className="inline-flex items-center gap-1.5">
+                            {r.timeOut ? fmtTime(r.timeOut) : <span className="text-muted-foreground">—</span>}
+                            {r.earlyOut && <Badge variant="warning">Early</Badge>}
+                          </span>
                         </TableCell>
                         <TableCell>
                           {r.isAbsent
@@ -590,7 +599,13 @@ export function AttendanceView({
                         <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
                           {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap">{formatTime(r.time)}</TableCell>
+                        <TableCell className="whitespace-nowrap tabular-nums">
+                          <span className="inline-flex items-center gap-1.5">
+                            {fmtTime(r.time)}
+                            {r.punctuality === 'late' && <Badge variant="warning">Late</Badge>}
+                            {r.punctuality === 'early_leave' && <Badge variant="warning">Early</Badge>}
+                          </span>
+                        </TableCell>
                         <TableCell>
                           {r.status === 'absent'
                             ? <Badge variant="destructive">Absent</Badge>

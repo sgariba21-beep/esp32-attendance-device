@@ -8,7 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { CalendarDays, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight, TrendingUp, Scissors, Package, ShoppingBag } from 'lucide-react'
-import { formatMoney } from '@/lib/utils'
+import { formatMoney, formatClockTime } from '@/lib/utils'
 import { LOW_STOCK_THRESHOLD } from './reports/page'
 
 export const dynamic = 'force-dynamic'
@@ -21,13 +21,6 @@ function todayIn(tz: string): string {
   }
 }
 
-function formatTime(time: string) {
-  const [h, m] = time.split(':')
-  const hour = parseInt(h)
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const h12 = hour % 12 || 12
-  return `${h12}:${m} ${ampm}`
-}
 
 type RecentRow = {
   id: string
@@ -75,7 +68,7 @@ export default async function OverviewPage() {
           <StatCard label="Scans today" value={(scansToday.count ?? 0).toLocaleString()} icon={Activity} tone="primary" />
         </div>
 
-        <RecentActivity rows={recent} showInstitution />
+        <RecentActivity rows={recent} showInstitution timeFormat={institution.time_format} />
 
         <ManageLink href="/institutions" label="Manage institutions" />
       </div>
@@ -240,7 +233,7 @@ export default async function OverviewPage() {
         )}
       </div>
 
-      <RecentActivity rows={recent} unitLabel={institution.label_unit} />
+      <RecentActivity rows={recent} unitLabel={institution.label_unit} timeFormat={institution.time_format} />
 
       <ManageLink href="/attendance" label="View all attendance" />
     </div>
@@ -251,10 +244,12 @@ function RecentActivity({
   rows,
   showInstitution = false,
   unitLabel = 'Unit',
+  timeFormat = '24h',
 }: {
   rows: RecentRow[]
   showInstitution?: boolean
   unitLabel?: string
+  timeFormat?: '12h' | '24h'
 }) {
   return (
     <div>
@@ -285,7 +280,7 @@ function RecentActivity({
                   <TableCell className="text-muted-foreground">
                     {r.device ? `${r.device.group_name} ${r.device.unit_name}` : '—'}
                   </TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">{formatTime(r.time)}</TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">{formatClockTime(r.time, timeFormat)}</TableCell>
                   <TableCell className="text-right">
                     {r.status === 'present'
                       ? <Badge variant="success">Present</Badge>

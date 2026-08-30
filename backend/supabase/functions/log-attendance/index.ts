@@ -115,7 +115,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: institution, error: instError } = await supabase
         .from("institutions")
-        .select("device_secret, status, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode")
+        .select("device_secret, status, timezone, tracked_weekdays, track_students, track_staff, student_scan_mode, staff_scan_mode")
         .eq("id", institution_id)
         .single();
 
@@ -134,7 +134,11 @@ Deno.serve(async (req: Request) => {
     // Load institution config (shared by both auth paths).
     const { data: institution, error: instError } = await supabase
       .from("institutions")
-      .select("status, timezone, skip_weekends, track_students, track_staff, student_scan_mode, staff_scan_mode")
+      .select(
+        "status, timezone, tracked_weekdays, track_students, track_staff, student_scan_mode, staff_scan_mode, " +
+        "track_lateness, expected_start_time, late_grace_minutes, " +
+        "track_early_leaving, expected_end_time, early_leave_grace_minutes"
+      )
       .eq("id", institution_id)
       .single();
 
@@ -149,10 +153,16 @@ Deno.serve(async (req: Request) => {
     const tz = institution.timezone || "UTC";
     const { date, time, weekday } = zonedParts(instant, tz);
 
-    if (institution.skip_weekends) {
-      if (weekday === "Sun" || weekday === "Sat") {
-        return json({ message: "Weekend — scan ignored" });
-      }
+    // tracked_weekdays holds ISO weekday numbers (1 = Mon … 7 = Sun); zonedParts
+    // gives an en-US short name. A day not in the set is not tracked at all.
+    const isoWeekday: Record<string, number> = {
+      Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+    };
+    const trackedWeekdays: number[] = Array.isArray(institution.tracked_weekdays)
+      ? institution.tracked_weekdays
+      : [1, 2, 3, 4, 5];
+    if (!trackedWeekdays.includes(isoWeekday[weekday])) {
+      return json({ message: "Day not tracked — scan ignored" });
     }
 
     const { data: holiday } = await supabase
@@ -233,6 +243,33 @@ Deno.serve(async (req: Request) => {
       scan_type = "present";
     }
 
+    // Punctuality verdict, fixed at scan time from the institution's thresholds.
+    // `time` is the local wall-clock "HH:MM:SS" already computed for this row.
+    // Late applies to the arrival scan (present / time_in); early-leave applies
+    // to the departure scan (time_out). NULL when the relevant tracking flag or
+    // its expected time is not configured.
+    const minutesOfDay = (t: string): number => {
+      const [h, m] = t.split(":");
+      return (parseInt(h, 10) || 0) * 60 + (parseInt(m, 10) || 0);
+    };
+    let punctuality: "on_time" | "late" | "early_leave" | null = null;
+    const scanMinutes = minutesOfDay(time);
+    if (scan_type === "time_out") {
+      if (institution.track_early_leaving && institution.expected_end_time) {
+        const cutoff =
+          minutesOfDay(institution.expected_end_time) -
+          (institution.early_leave_grace_minutes ?? 0);
+        punctuality = scanMinutes < cutoff ? "early_leave" : "on_time";
+      }
+    } else {
+      if (institution.track_lateness && institution.expected_start_time) {
+        const cutoff =
+          minutesOfDay(institution.expected_start_time) +
+          (institution.late_grace_minutes ?? 0);
+        punctuality = scanMinutes > cutoff ? "late" : "on_time";
+      }
+    }
+
     // Use the authenticated device_id (new path) or fall back to member.device_id (legacy).
     const effectiveDeviceId = authenticatedDeviceId ?? member.device_id;
 
@@ -246,6 +283,7 @@ Deno.serve(async (req: Request) => {
       status: "present",
       scan_type,
       scan_id,
+      punctuality,
     });
 
     if (insertError) {
@@ -272,6 +310,7 @@ Deno.serve(async (req: Request) => {
               time,
               status: "present",
               scan_id,
+              punctuality,
             })
             .eq("id", conflicting.id);
 

@@ -50,7 +50,8 @@ export async function createInstitutionWithAdmin(data: OnboardingFormData) {
       label_period:       data.institution_type === 'office' ? 'Quarter'    : data.institution_type === 'shop' ? shopLabels.label_period       : 'Term',
       label_staff:        data.institution_type === 'office' ? 'Staff'      : data.institution_type === 'shop' ? shopLabels.label_staff        : 'Teacher',
       label_staff_plural: data.institution_type === 'office' ? 'Staff'      : data.institution_type === 'shop' ? shopLabels.label_staff_plural : 'Teachers',
-      skip_weekends: true,
+      // tracked_weekdays / time_format / punctuality all take their column
+      // defaults (Mon–Fri, 24h, tracking off) — tuned later in Settings.
       // T17: use the timezone chosen in the form rather than hardcoding UTC.
       timezone: data.timezone || 'Africa/Accra',
       track_students:    data.track_students,

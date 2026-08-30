@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 import { brandColumns } from '@/lib/theme'
-import type { SettingsFormData } from '../../settings/_actions'
+import { attendanceConfigColumns, type SettingsFormData } from '../../settings/_actions/columns'
 
 export async function deleteInstitution(id: string): Promise<{ error: string | null }> {
   await requireRole('platform_admin')
@@ -106,7 +106,6 @@ export async function updateInstitutionSettingsById(
       label_period: data.label_period.trim() || 'Period',
       label_staff: data.label_staff.trim() || 'Staff',
       label_staff_plural: data.label_staff_plural.trim() || 'Staff',
-      skip_weekends: data.skip_weekends,
       timezone: data.timezone.trim() || 'UTC',
       currency: data.currency.trim().toUpperCase() || 'GHS',
       track_students: data.track_students,
@@ -116,6 +115,7 @@ export async function updateInstitutionSettingsById(
       sell_products: data.sell_products,
       sell_services: data.sell_services,
       loyalty_enabled: data.loyalty_enabled,
+      ...attendanceConfigColumns(data),
       ...brandColumns(data),
     })
     .eq('id', id)

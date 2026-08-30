@@ -98,7 +98,7 @@ export const getInstitution = cache(async (institutionId: string | null): Promis
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('institutions')
-    .select('id, name, type, logo_url, label_member, label_members, label_group, label_unit, label_period, label_staff, label_staff_plural, skip_weekends, timezone, member_name_display, currency, track_students, track_staff, student_scan_mode, staff_scan_mode, sell_products, sell_services, loyalty_enabled, status, theme_primary, theme_preset')
+    .select('id, name, type, logo_url, label_member, label_members, label_group, label_unit, label_period, label_staff, label_staff_plural, tracked_weekdays, timezone, time_format, track_lateness, expected_start_time, late_grace_minutes, track_early_leaving, expected_end_time, early_leave_grace_minutes, member_name_display, currency, track_students, track_staff, student_scan_mode, staff_scan_mode, sell_products, sell_services, loyalty_enabled, status, theme_primary, theme_preset')
     .eq('id', institutionId)
     .single()
   return (data ?? DEFAULT_INSTITUTION) as InstitutionConfig
