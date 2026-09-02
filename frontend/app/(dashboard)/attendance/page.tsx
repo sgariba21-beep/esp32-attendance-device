@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole, getInstitution, resolveInstitutionScope } from '@/lib/supabase/dal'
+import { requireRole, getInstitution, resolveInstitutionScope, resolveDeviceScope } from '@/lib/supabase/dal'
 import { AttendanceView } from './_components/attendance-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
@@ -74,22 +74,16 @@ export default async function AttendancePage({
   const [membersRes, devicesRes, periodsRes] = await Promise.all([membersQ, devicesQ, periodsQ])
 
   const allDevices = (devicesRes.data ?? []) as Device[]
+
+  // Device scoping: teacher/staff always, admin when bound to a device. Unbound
+  // admin / super_admin / platform_admin => whole institution ('all').
+  const scope = await resolveDeviceScope(session)
+  const deviceLocked = scope.mode === 'device'
+  const noScopeMatch = scope.mode === 'none'
+  const scopedDeviceId = scope.mode === 'device' ? scope.deviceId : null
   let effectiveDeviceIds = deviceIds
-  const isTeacherRole = role === 'teacher' || role === 'staff'
-  let teacherDeviceId: string | null = null
-  if (isTeacherRole) {
-    // T8: prefer the FK (assigned_device_id) over the legacy string-match.
-    // verifySession now also returns assignedDeviceId from the profile row.
-    const profileDeviceId = (session as { assignedDeviceId?: string | null }).assignedDeviceId ?? null
-    if (profileDeviceId) {
-      teacherDeviceId = profileDeviceId
-    } else if (assignedUnit) {
-      // Fallback: match via legacy concatenated string (for profiles not yet backfilled)
-      const match = allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
-      teacherDeviceId = match?.id ?? null
-    }
-    effectiveDeviceIds = teacherDeviceId ? [teacherDeviceId] : ['__no_match__']
-  }
+  if (deviceLocked) effectiveDeviceIds = [scopedDeviceId!]
+  else if (noScopeMatch) effectiveDeviceIds = ['__no_match__']
 
   // Split fetched members into students (non-staff) and staff for the view's filter dropdowns
   type MemberRow = { id: string; sid: string; fullname: string; group_name: string; device_id: string; member_type: string }
@@ -97,14 +91,14 @@ export default async function AttendancePage({
   const allStudents = allMembersList.filter((m) => m.member_type !== 'staff')
   const allStaffMembers = allMembersList.filter((m) => m.member_type === 'staff')
 
-  // Apply teacher restriction (teacher sees only their unit's members)
-  const noTeacherMatch = isTeacherRole && !teacherDeviceId
-  const visibleStudents = isTeacherRole && !noTeacherMatch
-    ? allStudents.filter((s) => s.device_id === teacherDeviceId)
-    : noTeacherMatch ? [] : allStudents
-  const visibleStaff = isTeacherRole && !noTeacherMatch
-    ? allStaffMembers.filter((s) => s.device_id === teacherDeviceId)
-    : noTeacherMatch ? [] : allStaffMembers
+  // A device-locked session sees only its device's members; a teacher/staff
+  // whose assignment can't be resolved sees nothing.
+  const visibleStudents = deviceLocked
+    ? allStudents.filter((s) => s.device_id === scopedDeviceId)
+    : noScopeMatch ? [] : allStudents
+  const visibleStaff = deviceLocked
+    ? allStaffMembers.filter((s) => s.device_id === scopedDeviceId)
+    : noScopeMatch ? [] : allStaffMembers
 
   // If type filter active, resolve member IDs of that type first
   let typeMemberIds: string[] | null = null
@@ -204,7 +198,8 @@ export default async function AttendancePage({
         track_staff={institution.track_staff}
         institutionType={institution.type}
         timeFormat={institution.time_format}
-        teacherNoDevice={noTeacherMatch}
+        teacherNoDevice={noScopeMatch}
+        deviceLocked={deviceLocked}
         labels={{
           label_member: memberHeader,
           label_members: institution.label_members,

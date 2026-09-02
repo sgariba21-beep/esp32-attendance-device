@@ -9,7 +9,7 @@ export default async function UsersPage() {
   const isPlatformAdmin = currentUserRole === 'platform_admin'
   const admin = createAdminClient()
 
-  let profilesQ = admin.from('profiles').select('id, role, assigned_unit, institution_id, member_id')
+  let profilesQ = admin.from('profiles').select('id, role, assigned_unit, assigned_device_id, institution_id, member_id')
   if (institutionId) profilesQ = profilesQ.eq('institution_id', institutionId)
 
   // #7: staff members a cashier account can be linked to (shop tenants only).
@@ -82,6 +82,7 @@ export default async function UsersPage() {
         created_at:       u.created_at,
         role:             (profileMap.get(u.id)?.role ?? 'super_admin') as UserRole,
         assigned_unit:    profileMap.get(u.id)?.assigned_unit ?? null,
+        assigned_device_id: profileMap.get(u.id)?.assigned_device_id ?? null,
         institution_id:   instId,
         institution_name: instId ? (institutionNames.get(instId) ?? null) : null,
         member_id:        memberId,

@@ -78,6 +78,8 @@ type Props = {
   timeFormat: '12h' | '24h'
   memberStats: MemberStat[]
   teacherNoDevice?: boolean
+  /** Session is pinned to a single device (teacher/staff always, admin when bound). */
+  deviceLocked?: boolean
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -205,9 +207,14 @@ export function AttendanceView({
   records, students, staffMembers, devices, academic, filters, page, pageSize,
   totalCount, role, assignedUnit, labels, institutions,
   track_students, track_staff, institutionType, timeFormat, memberStats, teacherNoDevice,
+  deviceLocked: deviceLockedProp,
 }: Props) {
   const fmtTime = (t: string) => formatClockTime(t, timeFormat)
   const isTeacher = role === 'teacher' || role === 'staff'
+  // Pinned to one device: teacher/staff always, admin when bound. Drives the
+  // "scoped to X" banner and hides the device filter — but NOT the
+  // misconfigured-teacher empty state below, which is role-specific.
+  const deviceLocked = deviceLockedProp ?? isTeacher
 
   if (isTeacher && teacherNoDevice) {
     return (
@@ -441,7 +448,7 @@ export function AttendanceView({
 
         <ToolbarSeparator />
 
-        {isTeacher && assignedUnit && (
+        {deviceLocked && assignedUnit && (
           <div className="flex h-8 items-center gap-1.5 self-end rounded-lg border border-border bg-muted/40 px-3 text-sm text-muted-foreground">
             <Lock className="h-3 w-3 shrink-0" />
             {assignedUnit}
@@ -478,8 +485,8 @@ export function AttendanceView({
           </ToolbarField>
         )}
 
-        {/* Unit filter */}
-        {!isTeacher && (
+        {/* Unit filter — hidden when the session is pinned to one device */}
+        {!deviceLocked && (
           <ToolbarField label={pluralize(labels.label_unit)}>
             <MultiSelect
               options={classOptions}

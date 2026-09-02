@@ -66,6 +66,46 @@ export async function requireRole(...roles: UserRole[]) {
   return session
 }
 
+export type DeviceScope =
+  | { mode: 'all' }                        // sees the whole institution
+  | { mode: 'device'; deviceId: string }   // pinned to one device
+  | { mode: 'none' }                        // must be pinned but isn't → sees nothing
+
+/**
+ * The single device a session is scoped to, if any.
+ *
+ * - teacher / staff: ALWAYS device-scoped. An unresolved assignment means
+ *   "see nothing" (mode: 'none'), never "see everything".
+ * - admin: device binding is OPTIONAL. Bound → scoped to that device (records
+ *   and enrolment); unbound → whole institution, unchanged.
+ * - everyone else (super_admin, platform_admin, cashier): mode 'all'.
+ *
+ * Prefers profiles.assigned_device_id (the FK); falls back to matching the
+ * legacy assigned_unit string against the institution's devices for profiles
+ * that predate the FK backfill.
+ */
+export const resolveDeviceScope = cache(async (session: Session): Promise<DeviceScope> => {
+  const mustPin = session.role === 'teacher' || session.role === 'staff'
+  const canPin = mustPin || session.role === 'admin'
+  if (!canPin) return { mode: 'all' }
+
+  if (session.assignedDeviceId) return { mode: 'device', deviceId: session.assignedDeviceId }
+
+  if (session.assignedUnit && session.institutionId) {
+    const supabase = createAdminClient()
+    const { data } = await supabase
+      .from('devices')
+      .select('id, group_name, unit_name')
+      .eq('institution_id', session.institutionId)
+    const match = (data ?? []).find(
+      (d) => `${d.group_name} ${d.unit_name}` === session.assignedUnit,
+    )
+    if (match) return { mode: 'device', deviceId: match.id }
+  }
+
+  return mustPin ? { mode: 'none' } : { mode: 'all' }
+})
+
 /**
  * T6 — Tenant scope resolver (closes the fail-open anti-pattern).
  *

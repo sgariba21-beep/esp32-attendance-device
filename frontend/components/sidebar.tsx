@@ -48,7 +48,12 @@ const ROLE_LABELS: Record<UserRole, string> = {
   cashier: 'Cashier',
 }
 
-function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[] {
+function buildNavItems(institution: InstitutionConfig, role: UserRole, deviceBoundAdmin: boolean): NavItem[] {
+  // A device-bound admin gets the (device-scoped) enrolment page too.
+  const enrollmentRoles: UserRole[] = deviceBoundAdmin
+    ? ['super_admin', 'admin', 'platform_admin']
+    : ['super_admin', 'platform_admin']
+
   const items: NavItem[] = [
     { href: '/attendance', label: 'Attendance', icon: CalendarDays, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
   ]
@@ -83,7 +88,7 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
 
   items.push(
     { href: '/devices',    label: 'Devices',    icon: Cpu,           group: 'manage', roles: ['super_admin', 'platform_admin'] },
-    { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, group: 'manage', roles: ['super_admin', 'platform_admin'] },
+    { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, group: 'manage', roles: enrollmentRoles },
     // Periods & holidays: schools get 'Academic', offices get 'Periods & Holidays',
     // shops get 'Closed Days' (holidays only; feeds mark-absent for stylists — A-9).
     {
@@ -114,10 +119,10 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole): NavItem[
 
 const GROUP_ORDER: NavGroup[] = ['records', 'retail', 'manage', 'platform']
 
-export function Sidebar({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
+export function Sidebar({ role, institution, deviceBoundAdmin = false }: { role: UserRole; institution: InstitutionConfig; deviceBoundAdmin?: boolean }) {
   const pathname = usePathname()
   const [logoError, setLogoError] = useState(false)
-  const navItems = buildNavItems(institution, role)
+  const navItems = buildNavItems(institution, role, deviceBoundAdmin)
   const visible = navItems.filter((item) => (item.roles as UserRole[]).includes(role))
 
   async function handleSignOut() {

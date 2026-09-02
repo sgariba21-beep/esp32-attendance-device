@@ -23,8 +23,11 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { role, institutionId } = await verifySession()
+  const session = await verifySession()
+  const { role, institutionId } = session
   const institution = await getInstitution(institutionId)
+  // A device-bound admin gets the (device-scoped) enrolment nav entry.
+  const deviceBoundAdmin = role === 'admin' && !!session.assignedDeviceId
 
   // Inject the institution's brand colour as CSS variables for the whole shell.
   // Tailwind's @theme inline maps --color-primary → var(--primary), so this
@@ -35,14 +38,14 @@ export default async function DashboardLayout({
       className="flex h-screen overflow-hidden"
     >
       <NavigationLoader />
-      <Sidebar role={role} institution={institution} />
+      <Sidebar role={role} institution={institution} deviceBoundAdmin={deviceBoundAdmin} />
       <div className="flex flex-1 flex-col overflow-hidden bg-background">
         <SessionManager />
         <MobileHeader institution={institution} />
         <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-20 md:pb-8">
           <div className="mx-auto w-full max-w-[1400px]">{children}</div>
         </main>
-        <MobileBottomNav role={role} institution={institution} />
+        <MobileBottomNav role={role} institution={institution} deviceBoundAdmin={deviceBoundAdmin} />
       </div>
     </div>
   )

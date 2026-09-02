@@ -2,8 +2,26 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole } from '@/lib/supabase/dal'
+import { requireRole, resolveDeviceScope } from '@/lib/supabase/dal'
+import type { Session } from '@/lib/supabase/dal'
 import { ownsRecord } from '@/lib/supabase/ownership'
+
+// A device-bound admin may only act on their own device, and only via
+// register / delete. Non-admins (and unrestricted roles) pass straight through.
+async function adminDeviceGuard(
+  session: Session,
+  deviceId: string,
+  command?: string,
+): Promise<{ error: string } | { ok: true }> {
+  if (session.role !== 'admin') return { ok: true }
+  const scope = await resolveDeviceScope(session)
+  if (scope.mode !== 'device') return { error: 'Your account is not assigned to a device.' }
+  if (deviceId !== scope.deviceId) return { error: 'You can only manage your assigned device.' }
+  if (command && command !== 'register' && command !== 'delete') {
+    return { error: 'This command is not available for your account.' }
+  }
+  return { ok: true }
+}
 
 export type StudentOption = {
   id: string
@@ -13,9 +31,11 @@ export type StudentOption = {
 }
 
 export async function getStudentsByDevice(deviceId: string): Promise<StudentOption[]> {
-  const session = await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
   // Tenant guard (C2): do not enumerate another institution's members.
   if (!(await ownsRecord('devices', deviceId, session))) return []
+  const guard = await adminDeviceGuard(session, deviceId)
+  if ('error' in guard) return []
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('members')
@@ -73,12 +93,16 @@ async function getMasterOccupant(
 }
 
 export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobResult> {
-  const session = await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
   const supabase = createAdminClient()
 
   // Tenant guard (C2/C3): the device — and therefore every command sent to it,
   // including the destructive clearall/delete — must belong to your institution.
   if (!(await ownsRecord('devices', data.device_id, session))) return { error: 'Not found.' }
+
+  // A device-bound admin is limited to register / delete on their own device.
+  const guard = await adminDeviceGuard(session, data.device_id, data.command)
+  if ('error' in guard) return { error: guard.error }
 
   // Derive institution_id from the device so the job is correctly scoped
   const { data: device } = await supabase
@@ -199,7 +223,7 @@ export async function retryEnrollmentJob(
   jobId: string,
   opts: { withOverwrite?: boolean } = {},
 ): Promise<{ error: string | null }> {
-  const session = await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
   if (!(await ownsRecord('enrollment_jobs', jobId, session))) return { error: 'Not found.' }
   const supabase = createAdminClient()
 
@@ -210,6 +234,8 @@ export async function retryEnrollmentJob(
     .single()
 
   if (!job) return { error: 'Not found.' }
+  const guard = await adminDeviceGuard(session, job.device_id as string, job.command as string)
+  if ('error' in guard) return { error: guard.error }
   if (job.status !== 'failed' && job.status !== 'in_progress') {
     return { error: 'Only failed or stuck jobs can be re-queued.' }
   }
@@ -245,17 +271,19 @@ export async function retryEnrollmentJob(
 
 /** Mark a pending or stuck job failed so it stops being dispatched. */
 export async function cancelEnrollmentJob(jobId: string): Promise<{ error: string | null }> {
-  const session = await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
   if (!(await ownsRecord('enrollment_jobs', jobId, session))) return { error: 'Not found.' }
   const supabase = createAdminClient()
 
   const { data: job } = await supabase
     .from('enrollment_jobs')
-    .select('status')
+    .select('status, device_id, command')
     .eq('id', jobId)
     .single()
 
   if (!job) return { error: 'Not found.' }
+  const guard = await adminDeviceGuard(session, job.device_id as string, job.command as string)
+  if ('error' in guard) return { error: guard.error }
   if (job.status !== 'pending' && job.status !== 'in_progress') {
     return { error: 'Only pending or in-progress jobs can be cancelled.' }
   }

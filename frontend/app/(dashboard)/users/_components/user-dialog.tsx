@@ -61,7 +61,7 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
   const [email, setEmail]             = useState('')
   const [password, setPassword]       = useState('')
   const [role, setRole]               = useState<UserRole>(unitScopedRole)
-  const [assignedUnit, setAssignedUnit] = useState('')
+  const [assignedDeviceId, setAssignedDeviceId] = useState('')
   const [institutionId, setInstitutionId] = useState('')
   const [memberId, setMemberId]       = useState('')
   const [error, setError]             = useState<string | null>(null)
@@ -77,7 +77,9 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
     roles.push({ value: user.role, label: ROLE_DISPLAY[user.role] })
   }
 
-  const isUnitScoped = role === 'teacher' || role === 'staff'
+  // teacher/staff are always device-scoped; admin binding is optional.
+  const isDeviceScoped = role === 'teacher' || role === 'staff' || role === 'admin'
+  const deviceOptional = role === 'admin'
   // #7: a cashier account may optionally be linked to a staff member (the same
   // person who clocks in). Only meaningful in a shop with staff on record.
   const showMemberLink = institutionType === 'shop' && role === 'cashier' && members.length > 0
@@ -88,7 +90,7 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
       setEmail('')
       setPassword('')
       setRole(user?.role ?? unitScopedRole)
-      setAssignedUnit(user?.assigned_unit ?? '')
+      setAssignedDeviceId(user?.assigned_device_id ?? '')
       setInstitutionId('')
       setMemberId(user?.member_id ?? '')
     }
@@ -102,9 +104,10 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
     setError(null)
 
     const linkedMember = role === 'cashier' ? (memberId || null) : null
+    const linkedDevice = isDeviceScoped ? (assignedDeviceId || null) : null
     const result = user
-      ? await updateUserRole(user.id, role, assignedUnit || null, linkedMember)
-      : await createUser({ email, password, role, assigned_unit: assignedUnit || null, institution_id: institutionId || null, member_id: linkedMember })
+      ? await updateUserRole(user.id, role, linkedDevice, linkedMember)
+      : await createUser({ email, password, role, assigned_device_id: linkedDevice, institution_id: institutionId || null, member_id: linkedMember })
 
     setLoading(false)
     if (result.error) { setError(result.error); return }
@@ -174,27 +177,38 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
                 id="institution_id"
                 options={institutions.map((i) => ({ value: i.id, label: i.name }))}
                 value={institutionId}
-                onChange={(v) => { setInstitutionId(v); setAssignedUnit('') }}
+                onChange={(v) => { setInstitutionId(v); setAssignedDeviceId('') }}
                 placeholder="Select institution…"
                 searchPlaceholder="Search institutions…"
               />
             </div>
           )}
 
-          {isUnitScoped && (
+          {isDeviceScoped && (
             <div className="space-y-2">
-              <Label>Assigned {labelUnit.toLowerCase()}</Label>
+              <Label>
+                Assigned {labelUnit.toLowerCase()}
+                {deviceOptional && (
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">(optional)</span>
+                )}
+              </Label>
               <SingleSelect
                 options={(needsInstitution ? devices.filter((d) => d.institution_id === institutionId) : devices)
                   .slice()
                   .sort((a, b) => a.group_name.localeCompare(b.group_name, undefined, { numeric: true }) || a.unit_name.localeCompare(b.unit_name))
-                  .map((d) => ({ value: `${d.group_name} ${d.unit_name}`, label: `${d.group_name} ${d.unit_name}` }))}
-                value={assignedUnit}
-                onChange={setAssignedUnit}
-                placeholder={`Select ${indefiniteArticle(labelUnit)} ${labelUnit.toLowerCase()}…`}
+                  .map((d) => ({ value: d.id, label: `${d.group_name} ${d.unit_name}` }))}
+                value={assignedDeviceId}
+                onChange={setAssignedDeviceId}
+                placeholder={
+                  deviceOptional
+                    ? `Whole institution (no ${labelUnit.toLowerCase()})`
+                    : `Select ${indefiniteArticle(labelUnit)} ${labelUnit.toLowerCase()}…`
+                }
               />
               <p className="text-xs text-muted-foreground">
-                This account only sees attendance records for the assigned {labelUnit.toLowerCase()}.
+                {deviceOptional
+                  ? `Leave blank for full access. When set, this admin only sees and manages records and enrolment for this ${labelUnit.toLowerCase()}.`
+                  : `This account only sees attendance records for the assigned ${labelUnit.toLowerCase()}.`}
               </p>
             </div>
           )}

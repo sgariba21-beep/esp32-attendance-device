@@ -30,11 +30,33 @@ async function memberInInstitution(
   return !!data && data.institution_id === institutionId
 }
 
+// Roles that can be pinned to a single device (profiles.assigned_device_id).
+// teacher/staff are always scoped; admin binding is optional (null = whole
+// institution). See resolveDeviceScope in lib/supabase/dal.ts.
+const DEVICE_SCOPED_ROLES: UserRole[] = ['teacher', 'staff', 'admin']
+
+// Validate a chosen device belongs to the account's institution, and return the
+// human-readable "group unit" string kept in assigned_unit for display/legacy.
+async function resolveAssignedDevice(
+  admin: ReturnType<typeof createAdminClient>,
+  deviceId: string,
+  institutionId: string | null,
+): Promise<{ ok: boolean; unitString: string | null }> {
+  if (!institutionId) return { ok: false, unitString: null }
+  const { data } = await admin
+    .from('devices')
+    .select('institution_id, group_name, unit_name')
+    .eq('id', deviceId)
+    .single()
+  if (!data || data.institution_id !== institutionId) return { ok: false, unitString: null }
+  return { ok: true, unitString: `${data.group_name} ${data.unit_name}` }
+}
+
 export async function createUser(data: {
   email: string
   password: string
   role: UserRole
-  assigned_unit: string | null
+  assigned_device_id: string | null
   institution_id?: string | null
   member_id?: string | null
 }) {
@@ -75,6 +97,17 @@ export async function createUser(data: {
     memberLink = data.member_id
   }
 
+  // Device binding — teacher/staff/admin only. assigned_unit is kept in sync
+  // as the human-readable label; assigned_device_id (FK) is the source of truth.
+  let assignedDeviceId: string | null = null
+  let assignedUnit: string | null = null
+  if (DEVICE_SCOPED_ROLES.includes(data.role) && data.assigned_device_id) {
+    const chk = await resolveAssignedDevice(admin, data.assigned_device_id, targetInstitutionId)
+    if (!chk.ok) return { error: 'The selected device is not in this institution.' }
+    assignedDeviceId = data.assigned_device_id
+    assignedUnit = chk.unitString
+  }
+
   const { data: authData, error } = await admin.auth.admin.createUser({
     email: data.email.trim(),
     password: data.password,
@@ -86,7 +119,8 @@ export async function createUser(data: {
   const { error: profileError } = await admin.from('profiles').insert({
     id: authData.user.id,
     role: data.role,
-    assigned_unit: data.assigned_unit || null,
+    assigned_unit: assignedUnit,
+    assigned_device_id: assignedDeviceId,
     institution_id: targetInstitutionId,
     member_id: memberLink,
   })
@@ -120,7 +154,7 @@ async function superAdminCount(institutionId: string | null) {
 export async function updateUserRole(
   id: string,
   role: UserRole,
-  assigned_unit: string | null,
+  assigned_device_id: string | null,
   member_id: string | null = null,
 ) {
   const session = await requireRole('super_admin')
@@ -158,9 +192,19 @@ export async function updateUserRole(
     memberLink = member_id
   }
 
+  // Device binding — teacher/staff/admin only; cleared for any other role.
+  let assignedDeviceId: string | null = null
+  let assignedUnit: string | null = null
+  if (DEVICE_SCOPED_ROLES.includes(role) && assigned_device_id) {
+    const chk = await resolveAssignedDevice(admin, assigned_device_id, current.institution_id as string | null)
+    if (!chk.ok) return { error: 'The selected device is not in this institution.' }
+    assignedDeviceId = assigned_device_id
+    assignedUnit = chk.unitString
+  }
+
   const { error } = await admin
     .from('profiles')
-    .update({ role, assigned_unit: assigned_unit || null, member_id: memberLink })
+    .update({ role, assigned_unit: assignedUnit, assigned_device_id: assignedDeviceId, member_id: memberLink })
     .eq('id', id)
 
   if (error) {

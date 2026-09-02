@@ -1,11 +1,12 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole, getInstitution } from '@/lib/supabase/dal'
+import { requireRole, getInstitution, resolveDeviceScope } from '@/lib/supabase/dal'
 import { MembersView } from './_components/members-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device } from '@/lib/types'
 
 export default async function MembersPage() {
-  const { role, assignedUnit, institutionId } = await requireRole('super_admin', 'admin', 'teacher', 'staff', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'teacher', 'staff', 'platform_admin')
+  const { role, institutionId } = session
   const supabase = createAdminClient()
   const institution = await getInstitution(institutionId)
   const isPlatformAdmin = role === 'platform_admin'
@@ -41,16 +42,13 @@ export default async function MembersPage() {
   const allMembers = (membersRes.data ?? []) as unknown as MemberWithDevice[]
   const institutions = (institutionsRes.data ?? []) as { id: string; name: string }[]
 
-  const visibleMembers = role === 'teacher' || role === 'staff'
-    ? (() => {
-        const teacherDevice = assignedUnit
-          ? allDevices.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)
-          : null
-        return teacherDevice
-          ? allMembers.filter((m) => m.device_id === teacherDevice.id)
-          : []
-      })()
-    : allMembers
+  // Device scoping — teacher/staff always, admin when bound to a device.
+  const scope = await resolveDeviceScope(session)
+  const visibleMembers = scope.mode === 'device'
+    ? allMembers.filter((m) => m.device_id === scope.deviceId)
+    : scope.mode === 'none'
+      ? []
+      : allMembers
 
   return (
     <>

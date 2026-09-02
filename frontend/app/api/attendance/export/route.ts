@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server'
 import { createAuthClient, createAdminClient } from '@/lib/supabase/server'
-import { resolveInstitutionScope } from '@/lib/supabase/dal'
+import { resolveInstitutionScope, resolveDeviceScope } from '@/lib/supabase/dal'
 import type { Session } from '@/lib/supabase/dal'
 
 export async function GET(req: NextRequest) {
@@ -44,26 +44,13 @@ export async function GET(req: NextRequest) {
   }
   const effectiveInstitutionId = resolveInstitutionScope(session, institutionParam)
 
-  // T8: teacher/staff use assigned_device_id FK, fall back to string-match for
-  // profiles not yet backfilled by T19.
+  // Device scoping — teacher/staff always, admin when bound. resolveDeviceScope
+  // does the FK-first / assigned_unit-fallback resolution.
+  const deviceScope = await resolveDeviceScope(session)
   let effectiveDeviceIds = deviceIds
   let teacherNoMatch = false
-  if (role === 'teacher' || role === 'staff') {
-    if (assignedDeviceId) {
-      effectiveDeviceIds = [assignedDeviceId]
-    } else if (assignedUnit) {
-      let devQ = admin.from('devices').select('id, group_name, unit_name')
-      if (effectiveInstitutionId) devQ = devQ.eq('institution_id', effectiveInstitutionId)
-      const { data: devs } = await devQ
-      const match = (devs ?? []).find((d: { id: string; group_name: string; unit_name: string }) =>
-        `${d.group_name} ${d.unit_name}` === assignedUnit
-      )
-      if (match) effectiveDeviceIds = [match.id]
-      else teacherNoMatch = true
-    } else {
-      teacherNoMatch = true
-    }
-  }
+  if (deviceScope.mode === 'device') effectiveDeviceIds = [deviceScope.deviceId]
+  else if (deviceScope.mode === 'none') teacherNoMatch = true
 
   let typeMemberIds: string[] | null = null
   if (typeFilter) {

@@ -43,6 +43,8 @@ type Props = {
   showInstitution?: boolean
   institutions?: { id: string; name: string }[]
   institutionFilter?: string
+  /** Device-bound admin: one device, register/delete only, no master/clearall. */
+  restrictedToDevice?: boolean
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -90,7 +92,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
 
 export function EnrollmentView({
   initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution,
-  institutions = [], institutionFilter = '',
+  institutions = [], institutionFilter = '', restrictedToDevice = false,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -353,6 +355,7 @@ export function EnrollmentView({
         labelUnit={labelUnit}
         labelMember={labelMember}
         labelMembers={labelMembers}
+        restrictedToDevice={restrictedToDevice}
       />
     </div>
   )

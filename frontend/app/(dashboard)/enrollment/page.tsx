@@ -1,5 +1,6 @@
+import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
-import { requireRole, getInstitution, resolveInstitutionScope } from '@/lib/supabase/dal'
+import { requireRole, getInstitution, resolveInstitutionScope, resolveDeviceScope } from '@/lib/supabase/dal'
 import { EnrollmentView } from './_components/enrollment-view'
 import type { Device } from '@/lib/types'
 
@@ -26,11 +27,17 @@ export default async function EnrollmentPage({
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }) {
-  const session = await requireRole('super_admin', 'platform_admin')
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
   const { role, institutionId } = session
   const institution = await getInstitution(institutionId)
   const isPlatformAdmin = role === 'platform_admin'
   const supabase = createAdminClient()
+
+  // A device-bound admin may run register / delete jobs for their own device
+  // only. An admin with no device assignment has no enrolment access.
+  const deviceScope = await resolveDeviceScope(session)
+  const adminDeviceId = role === 'admin' && deviceScope.mode === 'device' ? deviceScope.deviceId : null
+  if (role === 'admin' && !adminDeviceId) redirect('/unauthorized')
 
   const params = await searchParams
   const institutionFilter = typeof params.institution === 'string' ? params.institution : undefined
@@ -65,6 +72,12 @@ export default async function EnrollmentPage({
     devicesQ = devicesQ.eq('institution_id', effectiveInstitutionId)
   }
 
+  // Device-bound admin: everything on this page is pinned to their one device.
+  if (adminDeviceId) {
+    jobsQ = jobsQ.eq('device_id', adminDeviceId)
+    devicesQ = devicesQ.eq('id', adminDeviceId)
+  }
+
   // Institution picker options for platform_admin.
   const allInstitutions = isPlatformAdmin
     ? (await supabase.from('institutions').select('id, name').order('name')).data ?? []
@@ -96,6 +109,7 @@ export default async function EnrollmentPage({
       showInstitution={isPlatformAdmin}
       institutions={allInstitutions}
       institutionFilter={institutionFilter ?? ''}
+      restrictedToDevice={!!adminDeviceId}
     />
   )
 }

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { verifySession, getInstitution } from '@/lib/supabase/dal'
+import { verifySession, getInstitution, resolveDeviceScope } from '@/lib/supabase/dal'
 import { createAdminClient } from '@/lib/supabase/server'
 import { StatCard } from '@/components/ui/stat-card'
 import { Badge } from '@/components/ui/badge'
@@ -32,7 +32,8 @@ type RecentRow = {
 }
 
 export default async function OverviewPage() {
-  const { role, assignedUnit, institutionId } = await verifySession()
+  const session = await verifySession()
+  const { role, assignedUnit, institutionId } = session
   const institution = await getInstitution(institutionId)
   const supabase = createAdminClient()
   const isPlatform = role === 'platform_admin'
@@ -157,17 +158,12 @@ export default async function OverviewPage() {
 
   // ─────────────────────────────────────────── Institution overview ──
   const today = todayIn(institution.timezone)
-  const isUnitScoped = role === 'teacher' || role === 'staff'
 
-  let scopeDeviceId: string | null = null
-  if (isUnitScoped) {
-    const { data: devs } = await supabase
-      .from('devices')
-      .select('id, group_name, unit_name')
-      .eq('institution_id', institutionId)
-    scopeDeviceId =
-      devs?.find((d) => `${d.group_name} ${d.unit_name}` === assignedUnit)?.id ?? '__none__'
-  }
+  // Device scoping — teacher/staff always, admin when bound to a device.
+  const scope = await resolveDeviceScope(session)
+  const isUnitScoped = scope.mode !== 'all'
+  const scopeDeviceId: string | null =
+    scope.mode === 'device' ? scope.deviceId : scope.mode === 'none' ? '__none__' : null
 
   let membersQ = supabase
     .from('members')

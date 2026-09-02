@@ -46,6 +46,7 @@ export type UserRow = {
   created_at: string
   role: UserRole
   assigned_unit: string | null
+  assigned_device_id: string | null
   institution_id: string | null
   institution_name: string | null
   member_id: string | null

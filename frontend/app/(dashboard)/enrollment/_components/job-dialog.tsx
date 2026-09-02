@@ -25,6 +25,8 @@ type Props = {
   labelUnit: string
   labelMember: string
   labelMembers: string
+  /** Device-bound admin: lock to the one device, offer register/delete only. */
+  restrictedToDevice?: boolean
 }
 
 const FINGER_SLOTS: { value: FingerSlot; label: string }[] = [
@@ -45,16 +47,21 @@ const empty = {
   force_overwrite: false,
 }
 
-export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers }: Props) {
+export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers, restrictedToDevice = false }: Props) {
   const member = labelMember.toLowerCase()
   const article = indefiniteArticle(labelMember)
-  const COMMANDS: { value: Command; label: string; description: string }[] = [
+  const ALL_COMMANDS: { value: Command; label: string; description: string }[] = [
     { value: 'register',        label: 'Register',      description: `Enroll a fingerprint for ${article} ${member}.` },
     { value: 'delete',          label: 'Delete',        description: `Remove ${article} ${member}'s fingerprint from the device.` },
     { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
     { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
     { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
   ]
+  // A device-bound admin gets register / delete only — no master fingerprints,
+  // no clear-all.
+  const COMMANDS = restrictedToDevice
+    ? ALL_COMMANDS.filter((c) => c.value === 'register' || c.value === 'delete')
+    : ALL_COMMANDS
 
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
@@ -188,15 +195,17 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
                   {label}
                 </Button>
               ))}
-              <Button
-                type="button"
-                variant={form.command === 'clearall' ? 'default' : 'outline'}
-                size="sm"
-                className="col-span-2"
-                onClick={() => set('command', 'clearall')}
-              >
-                Clear all
-              </Button>
+              {!restrictedToDevice && (
+                <Button
+                  type="button"
+                  variant={form.command === 'clearall' ? 'default' : 'outline'}
+                  size="sm"
+                  className="col-span-2"
+                  onClick={() => set('command', 'clearall')}
+                >
+                  Clear all
+                </Button>
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
               {COMMANDS.find((c) => c.value === form.command)?.description}
@@ -218,6 +227,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
               onChange={(v) => { set('device_id', v); set('student_id', '') }}
               placeholder="Select a device…"
               searchPlaceholder="Search devices…"
+              disabled={restrictedToDevice}
             />
           </div>
 

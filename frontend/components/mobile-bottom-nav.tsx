@@ -53,7 +53,10 @@ function buildPrimaryNav(institution: InstitutionConfig, role: UserRole): NavIte
   return items
 }
 
-function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[] {
+function buildMoreNav(institution: InstitutionConfig, role: UserRole, deviceBoundAdmin: boolean): NavItem[] {
+  const enrollmentRoles: UserRole[] = deviceBoundAdmin
+    ? ['super_admin', 'admin', 'platform_admin']
+    : ['super_admin', 'platform_admin']
   const items: NavItem[] = []
   // The roster not already shown in the primary bar.
   if (institution.track_students && (institution.track_staff || role === 'platform_admin')) {
@@ -87,7 +90,7 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
       icon: BookOpen,
       roles: ['super_admin', 'admin', 'platform_admin'],
     },
-    { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: ['super_admin', 'platform_admin'] },
+    { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: enrollmentRoles },
   )
   if (institution.type === 'school') {
     items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
@@ -101,12 +104,12 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole): NavItem[]
   return items
 }
 
-export function MobileBottomNav({ role, institution }: { role: UserRole; institution: InstitutionConfig }) {
+export function MobileBottomNav({ role, institution, deviceBoundAdmin = false }: { role: UserRole; institution: InstitutionConfig; deviceBoundAdmin?: boolean }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
 
   const primaryNav = buildPrimaryNav(institution, role)
-  const moreNav = buildMoreNav(institution, role)
+  const moreNav = buildMoreNav(institution, role, deviceBoundAdmin)
 
   const visiblePrimary = primaryNav.filter((item) => (item.roles as UserRole[]).includes(role))
   const visibleMore = moreNav.filter((item) => (item.roles as UserRole[]).includes(role))
