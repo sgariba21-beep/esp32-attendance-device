@@ -193,7 +193,16 @@ export function UserDialog({ open, onOpenChange, user, devices, labelUnit, label
                 )}
               </Label>
               <SingleSelect
-                options={(needsInstitution ? devices.filter((d) => d.institution_id === institutionId) : devices)
+                options={devices
+                  // Only this account's institution: the picked one when a
+                  // platform admin is creating a tenant account, otherwise the
+                  // edited account's own. (For a super_admin the `devices` prop
+                  // is already institution-scoped by the page, so the null
+                  // fallback is a no-op.)
+                  .filter((d) => {
+                    const instId = needsInstitution ? institutionId : (user?.institution_id ?? null)
+                    return !instId || d.institution_id === instId
+                  })
                   .slice()
                   .sort((a, b) => a.group_name.localeCompare(b.group_name, undefined, { numeric: true }) || a.unit_name.localeCompare(b.unit_name))
                   .map((d) => ({ value: d.id, label: `${d.group_name} ${d.unit_name}` }))}
