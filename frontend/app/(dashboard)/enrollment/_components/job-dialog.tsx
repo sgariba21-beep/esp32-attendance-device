@@ -10,8 +10,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SingleSelect } from '@/components/ui/single-select'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { createEnrollmentJob, getStudentsByDevice } from '../_actions'
-import type { StudentOption } from '../_actions'
+import { createEnrollmentJob, getMembersByDevice } from '../_actions'
+import type { MemberOption } from '../_actions'
 import type { Device } from '@/lib/types'
 import { indefiniteArticle } from '@/lib/utils'
 
@@ -37,7 +37,7 @@ const FINGER_SLOTS: { value: FingerSlot; label: string }[] = [
 const empty = {
   command: 'register' as Command,
   device_id: '',
-  student_id: '',
+  member_id: '',
   finger_slot: 'fin1' as FingerSlot,
   fid: 1,
   master_name: '',
@@ -66,8 +66,8 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [deviceStudents, setDeviceStudents] = useState<StudentOption[]>([])
-  const [loadingStudents, setLoadingStudents] = useState(false)
+  const [deviceMembers, setDeviceMembers] = useState<MemberOption[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(false)
   // M8: overwrite warning state (second confirmation before clobbering a slot).
   const [overwriteMsg, setOverwriteMsg] = useState<string | null>(null)
   const [pendingJob, setPendingJob] = useState<Parameters<typeof createEnrollmentJob>[0] | null>(null)
@@ -76,24 +76,24 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   useEffect(() => {
     if (open) {
       setError(null)
-      setDeviceStudents([])
+      setDeviceMembers([])
       setOverwriteMsg(null)
       setPendingJob(null)
       setForm({ ...empty, device_id: devices[0]?.id ?? '' })
     }
   }, [open, devices])
 
-  const needsStudent = form.command === 'register' || form.command === 'delete'
+  const needsMember = form.command === 'register' || form.command === 'delete'
 
   useEffect(() => {
-    if (!form.device_id || !needsStudent) { setDeviceStudents([]); return }
+    if (!form.device_id || !needsMember) { setDeviceMembers([]); return }
     let cancelled = false
-    setLoadingStudents(true)
-    getStudentsByDevice(form.device_id).then((data) => {
-      if (!cancelled) { setDeviceStudents(data); setLoadingStudents(false) }
+    setLoadingMembers(true)
+    getMembersByDevice(form.device_id).then((data) => {
+      if (!cancelled) { setDeviceMembers(data); setLoadingMembers(false) }
     })
     return () => { cancelled = true }
-  }, [form.device_id, needsStudent])
+  }, [form.device_id, needsMember])
 
   function set<K extends keyof typeof empty>(field: K, value: (typeof empty)[K]) {
     setForm((f) => ({ ...f, [field]: value }))
@@ -104,7 +104,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.device_id) { setError('Please select a device.'); return }
-    if (needsStudent && !form.student_id) { setError(`Please select ${article} ${member}.`); return }
+    if (needsMember && !form.member_id) { setError(`Please select ${article} ${member}.`); return }
     if (needsMasterName && !form.master_name.trim()) { setError('Please enter a name for the master.'); return }
 
     setLoading(true)
@@ -118,7 +118,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
       jobData = {
         command: 'register',
         device_id: form.device_id,
-        student_id: form.student_id,
+        member_id: form.member_id,
         finger_slot: form.finger_slot,
         fid: Number(form.fid),
         ...(form.force_overwrite ? { confirmOverwrite: true } : {}),
@@ -127,7 +127,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
       jobData = {
         command: 'delete',
         device_id: form.device_id,
-        student_id: form.student_id,
+        member_id: form.member_id,
         finger_slot: form.finger_slot,
       }
     } else if (form.command === 'register-master') {
@@ -224,7 +224,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
                   : `${d.group_name} ${d.unit_name}`,
               }))}
               value={form.device_id}
-              onChange={(v) => { set('device_id', v); set('student_id', '') }}
+              onChange={(v) => { set('device_id', v); set('member_id', '') }}
               placeholder="Select a device…"
               searchPlaceholder="Search devices…"
               disabled={restrictedToDevice}
@@ -249,26 +249,26 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
           )}
 
           {/* Member (register / delete only) */}
-          {needsStudent && (
+          {needsMember && (
             <div className="space-y-2">
-              <Label htmlFor="student_id">{labelMember}</Label>
+              <Label htmlFor="member_id">{labelMember}</Label>
               <SingleSelect
-                id="student_id"
-                options={deviceStudents.map((s) => ({ value: s.id, label: `${s.fullname} (${s.sid})` }))}
-                value={form.student_id}
-                onChange={(v) => set('student_id', v)}
-                placeholder={loadingStudents ? 'Loading…' : `Select ${article} ${member}…`}
+                id="member_id"
+                options={deviceMembers.map((s) => ({ value: s.id, label: `${s.fullname} (${s.sid})` }))}
+                value={form.member_id}
+                onChange={(v) => set('member_id', v)}
+                placeholder={loadingMembers ? 'Loading…' : `Select ${article} ${member}…`}
                 searchPlaceholder={`Search ${labelMembers.toLowerCase()}…`}
-                disabled={loadingStudents || !form.device_id}
+                disabled={loadingMembers || !form.device_id}
               />
-              {!loadingStudents && form.device_id && deviceStudents.length === 0 && (
+              {!loadingMembers && form.device_id && deviceMembers.length === 0 && (
                 <p className="text-xs text-muted-foreground">No active {labelMembers.toLowerCase()} in this {labelUnit.toLowerCase()}.</p>
               )}
             </div>
           )}
 
           {/* Finger slot (register / delete only) */}
-          {needsStudent && (
+          {needsMember && (
             <div className="space-y-2">
               <Label>Finger slot</Label>
               <div className="flex gap-2">

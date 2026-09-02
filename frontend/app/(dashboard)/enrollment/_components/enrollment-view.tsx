@@ -23,10 +23,13 @@ import type { Device } from '@/lib/types'
 // manual retry/cancel too.
 const STUCK_AFTER_MS = 2 * 60 * 1000
 
-function jobIsStuck(job: EnrollmentJob): boolean {
-  if (job.status !== 'in_progress') return false
+/** Whole minutes an in_progress job has been waiting, or null if not stuck.
+ *  `now` is passed in so nothing impure runs during render. */
+function jobStuckMinutes(job: EnrollmentJob, now: number): number | null {
+  if (job.status !== 'in_progress') return null
   const t = Date.parse(job.dispatched_at ?? job.created_at)
-  return Number.isFinite(t) && Date.now() - t > STUCK_AFTER_MS
+  if (!Number.isFinite(t) || now - t <= STUCK_AFTER_MS) return null
+  return Math.round((now - t) / 60000)
 }
 
 function jobSlotOccupied(job: EnrollmentJob): boolean {
@@ -102,6 +105,13 @@ export function EnrollmentView({
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
   const [actionError, setActionError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // Drives the "stuck for Nm" label; the interval keeps it roughly live without
+  // calling anything impure directly in render.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   async function runAction(jobId: string, fn: () => Promise<{ error: string | null }>) {
     setBusyId(jobId)
@@ -155,7 +165,7 @@ export function EnrollmentView({
             created_at: payload.new.created_at as string,
             dispatched_at: (payload.new.dispatched_at as string) ?? null,
             device: devices.find((d) => d.id === payload.new.device_id) ?? null,
-            student: null,
+            member: null,
             institution: null,
           }
           return [newJob, ...prev]
@@ -244,7 +254,8 @@ export function EnrollmentView({
                     ? (job.last_error ?? job.note ?? '—')
                     : (job.note ?? '—')
                 const noteTruncated = noteText.length > 40 ? noteText.slice(0, 40) + '…' : noteText
-                const stuck = jobIsStuck(job)
+                const stuckMinutes = jobStuckMinutes(job, now)
+                const stuck = stuckMinutes !== null
                 const canOverwriteRetry =
                   jobSlotOccupied(job) && (job.command === 'register' || job.command === 'register-master')
                 return (
@@ -275,7 +286,7 @@ export function EnrollmentView({
                         ? <span className="text-xs text-muted-foreground italic">{job.note ?? 'master'}</span>
                         : (job.command === 'delete-master' || job.command === 'clearall')
                           ? <span className="text-xs text-muted-foreground">—</span>
-                          : job.student?.fullname ?? '—'}
+                          : job.member?.fullname ?? '—'}
                     </TableCell>
                     <TableCell>
                       <Badge variant={badge.variant}>{badge.label}</Badge>
@@ -297,7 +308,7 @@ export function EnrollmentView({
                       )}
                       {stuck && (
                         <span className="block text-xs text-warning-foreground">
-                          No response for {Math.round((Date.now() - Date.parse(job.dispatched_at ?? job.created_at)) / 60000)}m
+                          No response for {stuckMinutes}m
                           {job.attempts > 1 ? ` · ${job.attempts} attempts` : ''}
                         </span>
                       )}

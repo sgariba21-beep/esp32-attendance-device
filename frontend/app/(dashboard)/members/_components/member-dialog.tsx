@@ -76,7 +76,7 @@ function FingerEnrollRow({ label, slot, memberId, deviceId, defaultFid }: Finger
     const result = await createEnrollmentJob({
       command: 'register',
       device_id: deviceId,
-      student_id: memberId,
+      member_id: memberId,
       finger_slot: slot,
       fid: fidNum,
     })
@@ -145,7 +145,7 @@ function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: Fin
     const result = await createEnrollmentJob({
       command: 'delete',
       device_id: deviceId,
-      student_id: memberId,
+      member_id: memberId,
       finger_slot: slot,
     })
     setDeleting(false)

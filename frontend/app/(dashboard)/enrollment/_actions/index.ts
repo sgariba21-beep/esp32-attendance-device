@@ -23,14 +23,14 @@ async function adminDeviceGuard(
   return { ok: true }
 }
 
-export type StudentOption = {
+export type MemberOption = {
   id: string
   fullname: string
   sid: string
   device_id: string
 }
 
-export async function getStudentsByDevice(deviceId: string): Promise<StudentOption[]> {
+export async function getMembersByDevice(deviceId: string): Promise<MemberOption[]> {
   const session = await requireRole('super_admin', 'admin', 'platform_admin')
   // Tenant guard (C2): do not enumerate another institution's members.
   if (!(await ownsRecord('devices', deviceId, session))) return []
@@ -43,13 +43,13 @@ export async function getStudentsByDevice(deviceId: string): Promise<StudentOpti
     .eq('status', 'active')
     .eq('device_id', deviceId)
     .order('fullname')
-  return (data ?? []) as StudentOption[]
+  return (data ?? []) as MemberOption[]
 }
 
 export type JobFormData =
   | { command: 'clearall'; device_id: string }
-  | { command: 'register'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2'; fid: number; confirmOverwrite?: boolean }
-  | { command: 'delete'; device_id: string; student_id: string; finger_slot: 'fin1' | 'fin2' }
+  | { command: 'register'; device_id: string; member_id: string; finger_slot: 'fin1' | 'fin2'; fid: number; confirmOverwrite?: boolean }
+  | { command: 'delete'; device_id: string; member_id: string; finger_slot: 'fin1' | 'fin2' }
   | { command: 'register-master'; device_id: string; fid: number; name: string; confirmOverwrite?: boolean }
   | { command: 'delete-master'; device_id: string; fid: number }
 
@@ -115,25 +115,25 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   // The operator may proceed, but only after an explicit (second) confirmation.
   // T4f: validate that the student belongs to the device's institution and is
   // assigned to this specific device, before inserting any enrollment job.
-  if ((data.command === 'register' || data.command === 'delete') && data.student_id) {
-    const { data: studentCheck } = await supabase
+  if ((data.command === 'register' || data.command === 'delete') && data.member_id) {
+    const { data: memberCheck } = await supabase
       .from('members')
       .select('id, institution_id, device_id, status')
-      .eq('id', data.student_id)
+      .eq('id', data.member_id)
       .single()
 
-    if (!studentCheck) return { error: 'Member not found.' }
-    if (studentCheck.status !== 'active') return { error: 'Member is not active.' }
-    if (studentCheck.institution_id !== device?.institution_id) {
+    if (!memberCheck) return { error: 'Member not found.' }
+    if (memberCheck.status !== 'active') return { error: 'Member is not active.' }
+    if (memberCheck.institution_id !== device?.institution_id) {
       return { error: 'Member does not belong to this device\'s institution.' }
     }
-    if (studentCheck.device_id !== data.device_id) {
+    if (memberCheck.device_id !== data.device_id) {
       return { error: 'Member is not assigned to this device.' }
     }
   }
 
   if (data.command === 'register' && !data.confirmOverwrite) {
-    const memberConflict = await getMemberOccupant(supabase, data.device_id, data.fid, data.student_id)
+    const memberConflict = await getMemberOccupant(supabase, data.device_id, data.fid, data.member_id)
     if (memberConflict) {
       return {
         error: null,
@@ -180,7 +180,7 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   }
 
   if (data.command === 'register') {
-    row.student_id = data.student_id
+    row.member_id = data.member_id
     row.finger_slot = data.finger_slot
     row.fid = data.fid
     // Reaches this point only if the slot looked free OR the operator
@@ -188,7 +188,7 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
     // does its own sensor-truth check before storing.
     row.allow_overwrite = data.confirmOverwrite === true
   } else if (data.command === 'delete') {
-    row.student_id = data.student_id
+    row.member_id = data.member_id
     row.finger_slot = data.finger_slot
   } else if (data.command === 'register-master') {
     row.fid = data.fid
@@ -208,7 +208,7 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
 
 // Copyable columns for a re-queued job. `attempts` / `dispatched_at` /
 // `last_error` deliberately reset (fresh row), `status` back to 'pending'.
-const REQUEUE_COLUMNS = 'command, device_id, institution_id, student_id, finger_slot, fid, note' as const
+const REQUEUE_COLUMNS = 'command, device_id, institution_id, member_id, finger_slot, fid, note' as const
 
 /**
  * Re-queue a failed or stuck job as a NEW pending row. The status guard added
@@ -244,7 +244,7 @@ export async function retryEnrollmentJob(
     command: job.command,
     device_id: job.device_id,
     institution_id: job.institution_id,
-    student_id: job.student_id,
+    member_id: job.member_id,
     finger_slot: job.finger_slot,
     fid: job.fid,
     note: job.note,

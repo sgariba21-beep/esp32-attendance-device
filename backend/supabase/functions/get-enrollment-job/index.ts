@@ -141,7 +141,7 @@ Deno.serve(async (req: Request) => {
     .from("enrollment_jobs")
     .select(`
       id, command, fid, finger_slot, note, allow_overwrite, status, attempts,
-      member:student_id(id, sid, fullname)
+      member:member_id(id, sid, fullname)
     `)
     .eq("device_id", device.id)
     .eq("institution_id", device.institution_id)
@@ -199,6 +199,9 @@ Deno.serve(async (req: Request) => {
       command: job.command,
       fid: job.fid ?? 0,
       finger_slot: job.finger_slot ?? "",
+      // member_id is the current key; student_id kept transiently so firmware
+      // older than 1.10.0 (which reads student_id) keeps working.
+      member_id: member?.id ?? "",
       student_id: member?.id ?? "",
       sid: member?.sid ?? "",
       fullname: isMaster ? (job.note ?? "Master") : (member?.fullname ?? ""),

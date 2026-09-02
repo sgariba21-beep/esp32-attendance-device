@@ -24,6 +24,7 @@ Deno.serve(async (req: Request) => {
     fid?: number;
     note?: string;
     finger_slot?: string;
+    member_id?: string;
     student_id?: string;
   };
   try {
@@ -32,7 +33,9 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { id, device_id, institution_id: bodyInstitutionId, status, fid, note, finger_slot, student_id } = parsed;
+  const { id, device_id, institution_id: bodyInstitutionId, status, fid, note, finger_slot } = parsed;
+  // member_id is the current key; accept student_id from firmware older than 1.10.0.
+  const member_id = parsed.member_id ?? parsed.student_id;
 
   if (!id || !status) {
     return json({ error: "Missing required fields" }, 400);
@@ -98,7 +101,7 @@ Deno.serve(async (req: Request) => {
 
   // T4: scope the members update to institution_id so a device can never write
   // a foreign tenant's member record, even if it somehow has a valid job id.
-  if (status === "completed" && student_id && finger_slot) {
+  if (status === "completed" && member_id && finger_slot) {
     const command = job?.command;
 
     if (command === "register" && fid && fid > 0) {
@@ -109,7 +112,7 @@ Deno.serve(async (req: Request) => {
         await supabase
           .from("members")
           .update(memberUpdate)
-          .eq("id", student_id)
+          .eq("id", member_id)
           .eq("institution_id", institution_id); // T4: tenant-scoped write
       }
     } else if (command === "delete") {
@@ -120,7 +123,7 @@ Deno.serve(async (req: Request) => {
         await supabase
           .from("members")
           .update(memberUpdate)
-          .eq("id", student_id)
+          .eq("id", member_id)
           .eq("institution_id", institution_id); // T4: tenant-scoped write
       }
     }

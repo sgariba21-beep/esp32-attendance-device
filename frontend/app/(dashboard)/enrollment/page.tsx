@@ -4,7 +4,7 @@ import { requireRole, getInstitution, resolveInstitutionScope, resolveDeviceScop
 import { EnrollmentView } from './_components/enrollment-view'
 import type { Device } from '@/lib/types'
 
-export type { StudentOption } from './_actions'
+export type { MemberOption } from './_actions'
 
 export type EnrollmentJob = {
   id: string
@@ -18,7 +18,7 @@ export type EnrollmentJob = {
   created_at: string
   dispatched_at: string | null
   device: { id: string; group_name: string; unit_name: string } | null
-  student: { id: string; fullname: string; sid: string } | null
+  member: { id: string; fullname: string; sid: string } | null
   institution: { name: string } | null
 }
 
@@ -51,7 +51,7 @@ export default async function EnrollmentPage({
     .select(`
       id, command, status, finger_slot, fid, note, last_error, attempts, created_at, dispatched_at,
       device:device_id(id, group_name, unit_name),
-      student:student_id(id, fullname, sid),
+      member:member_id(id, fullname, sid),
       institution:institution_id(name)
     `)
     .order('created_at', { ascending: false })

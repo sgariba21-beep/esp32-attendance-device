@@ -224,7 +224,7 @@ std::vector<String> fidMapName;
 
 struct EnrollJob {
   String id;
-  String studentId;
+  String memberId;
   String uniqueId;
   String name;
   String fingerSlot;
@@ -279,7 +279,7 @@ void enrollment_doRegister(const EnrollJob &job, const String &role);
 void enrollment_doDeleteByFid(const EnrollJob &job, int fid);
 void enrollment_doDeleteByUnique(const EnrollJob &job);
 void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
-                        const String &note, const String &fingerSlot, const String &studentId);
+                        const String &note, const String &fingerSlot, const String &memberId);
 bool initRTC();
 void syncRTCFromNTP();
 String getRTCTimestamp();
@@ -1640,7 +1640,7 @@ bool pollAssignment() {
 
 /* ================== Enrollment support ================== */
 void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
-                        const String &note, const String &fingerSlot, const String &studentId) {
+                        const String &note, const String &fingerSlot, const String &memberId) {
   if (jobId.length() == 0) return;
 
   // T1e: include device_id so update-enrollment-job can authenticate via per-device secret.
@@ -1654,7 +1654,7 @@ void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
   if (fingerId > 0)        doc["fid"]         = fingerId;
   if (note.length())       doc["note"]        = note;
   if (fingerSlot.length()) doc["finger_slot"] = fingerSlot;
-  if (studentId.length())  doc["student_id"]  = studentId;
+  if (memberId.length())  doc["member_id"]   = memberId;
   String payload;
   serializeJson(doc, payload);
 
@@ -1796,7 +1796,7 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
       pendingScanId = "";
       postDisplayState(TIER_INTERACTION, 1500, "FULL", "No free slot", "");
       renderDisplayIfDirty();
-      reportEnrollUpdate(job.id, "failed", -1, "no-free-fid", job.fingerSlot, job.studentId);
+      reportEnrollUpdate(job.id, "failed", -1, "no-free-fid", job.fingerSlot, job.memberId);
       return;
     }
   } else {
@@ -1822,7 +1822,7 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
       pendingScanId = "";
       postDisplayState(TIER_INTERACTION, 2500, "OCCUPIED", job.name, "Slot not overwritten");
       renderDisplayIfDirty();
-      reportEnrollUpdate(job.id, "failed", fidToUse, "slot-occupied", job.fingerSlot, job.studentId);
+      reportEnrollUpdate(job.id, "failed", fidToUse, "slot-occupied", job.fingerSlot, job.memberId);
       return;
     }
   }
@@ -1841,7 +1841,7 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
     renderDisplayIfDirty();
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
-    reportEnrollUpdate(job.id, "completed", resFid, "", job.fingerSlot, job.studentId);
+    reportEnrollUpdate(job.id, "completed", resFid, "", job.fingerSlot, job.memberId);
   } else {
     setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
     // enrollID_toFid() already posted a specific card for the failure cause
@@ -1849,7 +1849,7 @@ void enrollment_doRegister(const EnrollJob &job, const String &role) {
     // with a generic one here.
     vTaskDelay(800 / portTICK_PERIOD_MS);
     showReadyState();
-    reportEnrollUpdate(job.id, "failed", -1, "enroll-failed", job.fingerSlot, job.studentId);
+    reportEnrollUpdate(job.id, "failed", -1, "enroll-failed", job.fingerSlot, job.memberId);
   }
 }
 
@@ -1858,7 +1858,7 @@ void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
   if (fid < 1 || fid > MAX_FID) {
     postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, "");
     renderDisplayIfDirty();
-    reportEnrollUpdate(job.id, "failed", -1, "invalid-fid", job.fingerSlot, job.studentId);
+    reportEnrollUpdate(job.id, "failed", -1, "invalid-fid", job.fingerSlot, job.memberId);
     return;
   }
   int p = finger.deleteModel(fid);
@@ -1867,12 +1867,12 @@ void enrollment_doDeleteByFid(const EnrollJob &job, int fid) {
     saveFidMapToFS();
     postDisplayState(TIER_INTERACTION, 1500, "REMOVED", job.name, "");
     renderDisplayIfDirty();
-    reportEnrollUpdate(job.id, "completed", fid, "", job.fingerSlot, job.studentId);
+    reportEnrollUpdate(job.id, "completed", fid, "", job.fingerSlot, job.memberId);
   } else {
     Serial.printf("deleteModel failed: %d\n", p);
     postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, "");
     renderDisplayIfDirty();
-    reportEnrollUpdate(job.id, "failed", fid, String(p), job.fingerSlot, job.studentId);
+    reportEnrollUpdate(job.id, "failed", fid, String(p), job.fingerSlot, job.memberId);
   }
 }
 
@@ -1882,7 +1882,7 @@ void enrollment_doDeleteByUnique(const EnrollJob &job) {
     pendingScanId = "";
     postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, "Not found");
     renderDisplayIfDirty();
-    reportEnrollUpdate(job.id, "failed", -1, "not-found", job.fingerSlot, job.studentId);
+    reportEnrollUpdate(job.id, "failed", -1, "not-found", job.fingerSlot, job.memberId);
     return;
   }
   enrollment_doDeleteByFid(job, fid);
@@ -2615,7 +2615,9 @@ void EnrollmentTask(void *pvParameters) {
             job.id            = jobObj["id"]              | "";
             job.command       = jobObj["command"]         | "";
             job.fingerSlot    = jobObj["finger_slot"]     | "";
-            job.studentId     = jobObj["student_id"]      | "";
+            // 1.10.0: server sends member_id; keep student_id as a fallback so a
+            // device flashed before the edge functions are updated still works.
+            job.memberId     = jobObj["member_id"] | jobObj["student_id"] | "";
             job.uniqueId      = jobObj["sid"]             | "";
             job.name          = jobObj["fullname"]        | "";
             job.requestedFid  = jobObj["fid"]             | 0;
@@ -2694,7 +2696,7 @@ void FingerprintTask(void *pvParameters) {
         } else if (job.command == "delete" || job.command == "delete-master") {
           if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
           else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);
-          else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.studentId);
+          else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.memberId);
         } else if (job.command == "clearall") {
           Serial.println("Performing clearAll on sensor and local map");
           pendingScanId = "";

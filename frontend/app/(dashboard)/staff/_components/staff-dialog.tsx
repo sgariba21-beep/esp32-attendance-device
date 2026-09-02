@@ -61,7 +61,7 @@ function FingerEnrollRow({ label, slot, memberId, deviceId, defaultFid }: {
     const fidNum = parseInt(fid, 10)
     if (!fidNum || fidNum < 1 || fidNum > 127) { setError('Enter a slot number between 1 and 127.'); return }
     setLoading(true); setError(null)
-    const result = await createEnrollmentJob({ command: 'register', device_id: deviceId, student_id: memberId, finger_slot: slot, fid: fidNum })
+    const result = await createEnrollmentJob({ command: 'register', device_id: deviceId, member_id: memberId, finger_slot: slot, fid: fidNum })
     setLoading(false)
     if (result?.error) { setError(result.error); return }
     setDone(true)
@@ -102,7 +102,7 @@ function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: {
 
   async function handleDelete() {
     setDeleting(true); setDeleteError(null)
-    const result = await createEnrollmentJob({ command: 'delete', device_id: deviceId, student_id: memberId, finger_slot: slot })
+    const result = await createEnrollmentJob({ command: 'delete', device_id: deviceId, member_id: memberId, finger_slot: slot })
     setDeleting(false)
     if (result?.error) { setDeleteError(result.error); return }
     setDeleted(true)
