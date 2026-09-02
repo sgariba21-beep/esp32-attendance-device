@@ -130,16 +130,22 @@ Deno.serve(async (req: Request) => {
     deviceConfig.device_config_name_display = institution?.member_name_display ?? "first";
   }
 
-  // Fetch oldest pending job for this device, scoped to institution.
+  // Dispatch the oldest actionable job for this device: a fresh `pending`, or
+  // one stuck `in_progress` past the re-delivery timeout (device rebooted, or
+  // its completion ack was lost). See 20260902120000_enrollment_jobs_reliability.
+  const MAX_DISPATCH_ATTEMPTS = 5;
+  const STALE_IN_PROGRESS_MS = 5 * 60 * 1000;
+  const staleCutoff = new Date(Date.now() - STALE_IN_PROGRESS_MS).toISOString();
+
   const { data: job, error } = await supabase
     .from("enrollment_jobs")
     .select(`
-      id, command, fid, finger_slot, note, allow_overwrite,
+      id, command, fid, finger_slot, note, allow_overwrite, status, attempts,
       member:student_id(id, sid, fullname)
     `)
     .eq("device_id", device.id)
     .eq("institution_id", device.institution_id)
-    .eq("status", "pending")
+    .or(`status.eq.pending,and(status.eq.in_progress,dispatched_at.lt.${staleCutoff})`)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -152,10 +158,37 @@ Deno.serve(async (req: Request) => {
     return json({ job: null, ...deviceConfig });
   }
 
-  await supabase
+  // A stuck job that has burned through its retry budget is failed, not
+  // dispatched again — the enrollment page shows it with last_error so an
+  // operator can re-queue it deliberately.
+  if ((job.attempts ?? 0) >= MAX_DISPATCH_ATTEMPTS) {
+    await supabase
+      .from("enrollment_jobs")
+      .update({ status: "failed", last_error: "exceeded max dispatch attempts" })
+      .eq("id", job.id)
+      .eq("status", "in_progress");
+    return json({ job: null, ...deviceConfig });
+  }
+
+  // Guarded claim (CAS): only take the job if it is still in the state we just
+  // read it in. If a concurrent poll — or the retry loop inside the firmware's
+  // POST helper re-issuing this non-idempotent GET — already claimed it, skip
+  // this cycle; the device polls again within seconds.
+  const { data: claimed } = await supabase
     .from("enrollment_jobs")
-    .update({ status: "in_progress" })
-    .eq("id", job.id);
+    .update({
+      status: "in_progress",
+      dispatched_at: new Date().toISOString(),
+      attempts: (job.attempts ?? 0) + 1,
+    })
+    .eq("id", job.id)
+    .eq("status", job.status)
+    .select("id")
+    .maybeSingle();
+
+  if (!claimed) {
+    return json({ job: null, ...deviceConfig });
+  }
 
   const member = job.member as { id: string; sid: string; fullname: string } | null;
   const isMaster = job.command === "register-master";

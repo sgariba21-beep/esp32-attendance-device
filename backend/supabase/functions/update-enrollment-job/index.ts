@@ -79,6 +79,12 @@ Deno.serve(async (req: Request) => {
   const jobUpdate: Record<string, unknown> = { status };
   if (note) jobUpdate.note = note;
   if (fid && fid > 0) jobUpdate.fid = fid;
+  // Keep last_error meaningful for the dashboard's stuck/failed view: set it
+  // from the device's failure note, clear it once the job completes. The DB
+  // status guard (20260902120000) ignores this write entirely if the job is
+  // already terminal, so a duplicate report can't churn it.
+  if (status === "failed") jobUpdate.last_error = note ?? "device reported failure";
+  if (status === "completed") jobUpdate.last_error = null;
 
   const { error: jobError } = await supabase
     .from("enrollment_jobs")
