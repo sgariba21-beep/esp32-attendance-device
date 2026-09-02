@@ -51,6 +51,7 @@ comment on column public.enrollment_jobs.last_error is
 create or replace function public.enrollment_jobs_status_guard()
 returns trigger
 language plpgsql
+set search_path = ''   -- no unqualified refs in the body; pin it anyway (Supabase linter 0011)
 as $$
 begin
   if old.status in ('completed', 'failed')
