@@ -3,6 +3,7 @@
 import { useState, useEffect, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { ClipboardList } from 'lucide-react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -13,8 +14,25 @@ import {
 } from '@/components/ui/table'
 import { Toolbar, ToolbarField } from '@/components/ui/toolbar'
 import { JobDialog } from './job-dialog'
+import { retryEnrollmentJob, cancelEnrollmentJob } from '../_actions'
 import type { EnrollmentJob } from '../page'
 import type { Device } from '@/lib/types'
+
+// An in_progress job older than this almost certainly means a lost completion
+// ack or a device reboot — the server re-delivers it, but the operator gets a
+// manual retry/cancel too.
+const STUCK_AFTER_MS = 2 * 60 * 1000
+
+function jobIsStuck(job: EnrollmentJob): boolean {
+  if (job.status !== 'in_progress') return false
+  const t = Date.parse(job.dispatched_at ?? job.created_at)
+  return Number.isFinite(t) && Date.now() - t > STUCK_AFTER_MS
+}
+
+function jobSlotOccupied(job: EnrollmentJob): boolean {
+  const s = `${job.last_error ?? ''} ${job.note ?? ''}`.toLowerCase()
+  return s.includes('slot-occupied') || s.includes('occupied')
+}
 
 type Props = {
   initialJobs: EnrollmentJob[]
@@ -80,6 +98,16 @@ export function EnrollmentView({
   const [jobs, setJobs] = useState<EnrollmentJob[]>(initialJobs)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting')
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  async function runAction(jobId: string, fn: () => Promise<{ error: string | null }>) {
+    setBusyId(jobId)
+    setActionError(null)
+    const res = await fn()
+    setBusyId(null)
+    if (res.error) setActionError(res.error)
+  }
 
   // Institution filter (platform_admin) re-requests the page with a new
   // ?institution= param; jobs/devices arrive scoped from the server, so sync
@@ -120,7 +148,10 @@ export function EnrollmentView({
             finger_slot: (payload.new.finger_slot as EnrollmentJob['finger_slot']) ?? null,
             fid: (payload.new.fid as number) ?? null,
             note: (payload.new.note as string) ?? null,
+            last_error: (payload.new.last_error as string) ?? null,
+            attempts: (payload.new.attempts as number) ?? 0,
             created_at: payload.new.created_at as string,
+            dispatched_at: (payload.new.dispatched_at as string) ?? null,
             device: devices.find((d) => d.id === payload.new.device_id) ?? null,
             student: null,
             institution: null,
@@ -135,7 +166,10 @@ export function EnrollmentView({
                   ...j,
                   status: payload.new.status as EnrollmentJob['status'],
                   note: (payload.new.note as string) ?? null,
+                  last_error: (payload.new.last_error as string) ?? null,
                   fid: (payload.new.fid as number) ?? j.fid,
+                  attempts: (payload.new.attempts as number) ?? j.attempts,
+                  dispatched_at: (payload.new.dispatched_at as string) ?? j.dispatched_at,
                 }
               : j
           )
@@ -172,6 +206,12 @@ export function EnrollmentView({
         </Toolbar>
       )}
 
+      {actionError && (
+        <Alert variant="error">
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
+      )}
+
       {jobs.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
@@ -190,13 +230,21 @@ export function EnrollmentView({
                 <TableHead>{labelMember}</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Note</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {jobs.map((job) => {
                 const badge = STATUS_BADGE[job.status]
-                const noteText = job.command === 'register-master' ? '—' : (job.note ?? '—')
+                const noteText = job.command === 'register-master'
+                  ? '—'
+                  : job.status === 'failed'
+                    ? (job.last_error ?? job.note ?? '—')
+                    : (job.note ?? '—')
                 const noteTruncated = noteText.length > 40 ? noteText.slice(0, 40) + '…' : noteText
+                const stuck = jobIsStuck(job)
+                const canOverwriteRetry =
+                  jobSlotOccupied(job) && (job.command === 'register' || job.command === 'register-master')
                 return (
                   <TableRow key={job.id}>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
@@ -245,6 +293,50 @@ export function EnrollmentView({
                           ].filter(Boolean).join(' · ')}
                         </span>
                       )}
+                      {stuck && (
+                        <span className="block text-xs text-warning-foreground">
+                          No response for {Math.round((Date.now() - Date.parse(job.dispatched_at ?? job.created_at)) / 60000)}m
+                          {job.attempts > 1 ? ` · ${job.attempts} attempts` : ''}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1">
+                        {job.status === 'failed' && job.command !== 'clearall' && (
+                          <Button
+                            size="xs" variant="ghost" disabled={busyId === job.id}
+                            onClick={() => runAction(job.id, () => retryEnrollmentJob(job.id))}
+                          >
+                            Re-queue
+                          </Button>
+                        )}
+                        {job.status === 'failed' && canOverwriteRetry && (
+                          <Button
+                            size="xs" variant="ghost" disabled={busyId === job.id}
+                            title="Re-queue and tell the device it may overwrite the occupied slot"
+                            onClick={() => runAction(job.id, () => retryEnrollmentJob(job.id, { withOverwrite: true }))}
+                          >
+                            + overwrite
+                          </Button>
+                        )}
+                        {stuck && (
+                          <Button
+                            size="xs" variant="ghost" disabled={busyId === job.id}
+                            onClick={() => runAction(job.id, () => retryEnrollmentJob(job.id))}
+                          >
+                            Retry
+                          </Button>
+                        )}
+                        {(stuck || job.status === 'pending') && (
+                          <Button
+                            size="xs" variant="ghost" disabled={busyId === job.id}
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => runAction(job.id, () => cancelEnrollmentJob(job.id))}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 )

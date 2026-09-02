@@ -12,7 +12,10 @@ export type EnrollmentJob = {
   finger_slot: 'fin1' | 'fin2' | null
   fid: number | null
   note: string | null
+  last_error: string | null
+  attempts: number
   created_at: string
+  dispatched_at: string | null
   device: { id: string; group_name: string; unit_name: string } | null
   student: { id: string; fullname: string; sid: string } | null
   institution: { name: string } | null
@@ -39,7 +42,7 @@ export default async function EnrollmentPage({
   let jobsQ = supabase
     .from('enrollment_jobs')
     .select(`
-      id, command, status, finger_slot, fid, note, created_at,
+      id, command, status, finger_slot, fid, note, last_error, attempts, created_at, dispatched_at,
       device:device_id(id, group_name, unit_name),
       student:student_id(id, fullname, sid),
       institution:institution_id(name)

@@ -181,3 +181,91 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   revalidatePath('/enrollment')
   return { error: null }
 }
+
+// Copyable columns for a re-queued job. `attempts` / `dispatched_at` /
+// `last_error` deliberately reset (fresh row), `status` back to 'pending'.
+const REQUEUE_COLUMNS = 'command, device_id, institution_id, student_id, finger_slot, fid, note' as const
+
+/**
+ * Re-queue a failed or stuck job as a NEW pending row. The status guard added
+ * in 20260902120000 makes completed/failed terminal, so a retry can't just
+ * flip the old row — it inserts a fresh one. A stuck `in_progress` job is also
+ * marked failed here so there's never two live jobs for the same enrolment.
+ *
+ * `withOverwrite` forwards allow_overwrite=true — the escape hatch for a slot
+ * that reads free in the DB but the device rejected as occupied.
+ */
+export async function retryEnrollmentJob(
+  jobId: string,
+  opts: { withOverwrite?: boolean } = {},
+): Promise<{ error: string | null }> {
+  const session = await requireRole('super_admin', 'platform_admin')
+  if (!(await ownsRecord('enrollment_jobs', jobId, session))) return { error: 'Not found.' }
+  const supabase = createAdminClient()
+
+  const { data: job } = await supabase
+    .from('enrollment_jobs')
+    .select(`${REQUEUE_COLUMNS}, status, allow_overwrite`)
+    .eq('id', jobId)
+    .single()
+
+  if (!job) return { error: 'Not found.' }
+  if (job.status !== 'failed' && job.status !== 'in_progress') {
+    return { error: 'Only failed or stuck jobs can be re-queued.' }
+  }
+
+  const row: Record<string, unknown> = {
+    command: job.command,
+    device_id: job.device_id,
+    institution_id: job.institution_id,
+    student_id: job.student_id,
+    finger_slot: job.finger_slot,
+    fid: job.fid,
+    note: job.note,
+    status: 'pending',
+    allow_overwrite:
+      (job.command === 'register' || job.command === 'register-master') &&
+      (opts.withOverwrite === true || job.allow_overwrite === true),
+  }
+
+  const { error: insertError } = await supabase.from('enrollment_jobs').insert(row)
+  if (insertError) return { error: insertError.message }
+
+  // Retire a stuck in_progress original so it isn't also re-delivered.
+  if (job.status === 'in_progress') {
+    await supabase
+      .from('enrollment_jobs')
+      .update({ status: 'failed', last_error: 'superseded by manual re-queue' })
+      .eq('id', jobId)
+  }
+
+  revalidatePath('/enrollment')
+  return { error: null }
+}
+
+/** Mark a pending or stuck job failed so it stops being dispatched. */
+export async function cancelEnrollmentJob(jobId: string): Promise<{ error: string | null }> {
+  const session = await requireRole('super_admin', 'platform_admin')
+  if (!(await ownsRecord('enrollment_jobs', jobId, session))) return { error: 'Not found.' }
+  const supabase = createAdminClient()
+
+  const { data: job } = await supabase
+    .from('enrollment_jobs')
+    .select('status')
+    .eq('id', jobId)
+    .single()
+
+  if (!job) return { error: 'Not found.' }
+  if (job.status !== 'pending' && job.status !== 'in_progress') {
+    return { error: 'Only pending or in-progress jobs can be cancelled.' }
+  }
+
+  const { error } = await supabase
+    .from('enrollment_jobs')
+    .update({ status: 'failed', last_error: 'cancelled by operator' })
+    .eq('id', jobId)
+
+  if (error) return { error: error.message }
+  revalidatePath('/enrollment')
+  return { error: null }
+}
