@@ -20,6 +20,19 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   // Allow devices on the local network to load dev resources and HMR.
   allowedDevOrigins: localIPs,
+  async headers() {
+    return [
+      {
+        // The PWA service worker must never be cached, so a new deploy's worker
+        // is picked up on the next visit rather than served stale.
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { RegisterSw } from "@/components/pwa/register-sw";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -14,8 +15,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  applicationName: "Attendance System",
   title: "Attendance System",
   description: "Attendance management dashboard",
+  appleWebApp: {
+    capable: true,
+    title: "Attendance",
+    statusBarStyle: "default",
+  },
+  icons: {
+    apple: [{ url: "/icons/apple-icon-180.png", sizes: "180x180", type: "image/png" }],
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7f7f7" },
+    { media: "(prefers-color-scheme: dark)", color: "#181818" },
+  ],
 };
 
 // Runs before first paint to apply the persisted (or system) colour scheme,
@@ -36,7 +57,10 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <RegisterSw />
+      </body>
     </html>
   );
 }

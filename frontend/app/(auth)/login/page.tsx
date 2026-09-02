@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { InstallPrompt } from '@/components/pwa/install-prompt'
 
 // L1: this lockout is a UX nicety ONLY — it lives in localStorage and is trivially
 // bypassed (clear storage / call /api/signin directly). The real brute-force
@@ -190,6 +191,8 @@ export default function LoginPage() {
           </a>
           .
         </p>
+
+        <InstallPrompt />
       </div>
     </div>
   )

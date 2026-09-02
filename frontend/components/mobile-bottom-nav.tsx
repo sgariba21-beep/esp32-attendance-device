@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { InstallPrompt } from '@/components/pwa/install-prompt'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { InstitutionConfig } from '@/lib/types'
 import {
@@ -166,6 +167,10 @@ export function MobileBottomNav({ role, institution }: { role: UserRole; institu
           })}
 
           <div className="pt-1 border-t border-border mt-1">
+            <InstallPrompt
+              variant="row"
+              className="flex w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            />
             <button
               onClick={handleSignOut}
               className="flex w-full items-center gap-3 rounded-md px-2.5 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"

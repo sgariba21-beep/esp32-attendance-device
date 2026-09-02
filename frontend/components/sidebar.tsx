@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { InstallPrompt } from '@/components/pwa/install-prompt'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { InstitutionConfig } from '@/lib/types'
 import {
@@ -203,6 +204,10 @@ export function Sidebar({ role, institution }: { role: UserRole; institution: In
           </div>
           <ThemeToggle />
         </div>
+        <InstallPrompt
+          variant="row"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+        />
         <button
           onClick={handleSignOut}
           className="mt-1 flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
