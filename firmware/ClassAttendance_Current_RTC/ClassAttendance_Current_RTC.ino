@@ -39,7 +39,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.9.0"         // increment on each flash (1.9.0: refuse to overwrite an occupied sensor slot unless approved)
+#define FIRMWARE_VERSION  "1.10.0"        // increment on each flash (1.10.0: server-reachability watchdog + durable enrollment reports; enrollment job payload uses member_id)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -290,9 +290,30 @@ void flushQueue();
 static void recoverInflightQueue();
 static void seedQueueDepthFromDisk();
 
+// Durable enrollment status reports (Core 0 flush; Core 1 append on POST failure).
+void flushEnrollReports();
+static void appendEnrollReport_locked(const String &line);
+// Server-reachability watchdog. postJSONToUrl()/postJSONBootstrap() feed
+// markPostResult(); NetworkTask reads it to escalate (re-associate, reboot)
+// and the idle screen reads it for the "No server" indicator.
+void markPostResult(bool ok);
+bool getServerReachableSafe();
+void getNetHealthSafe(bool &reachable, int &fails, unsigned long &lastOkMs);
+
 #define POST_MAX_RETRIES   3
 #define POST_BASE_DELAY_MS 500
 #define POST_TIMEOUT_MS    30000
+
+// Server-reachability watchdog. The link can stay associated while every HTTPS
+// call is refused (heap fragmentation, mbedTLS arena exhaustion, a filtering
+// middlebox). Before this the device just showed "Online" and went silent
+// until a power cycle.
+#define NET_UNREACHABLE_FAILS   5                       // consecutive failed POSTs (link still up) => "no server"
+#define NET_REASSOC_INTERVAL_MS 60000UL                 // while unreachable, force a WiFi re-associate this often
+#define NET_REBOOT_AFTER_MS     (5UL * 60UL * 1000UL)   // unreachable this long on a live link => ESP.restart()
+#define NET_MIN_LARGEST_BLOCK   30000UL                 // largest free heap block below this can't fit a TLS arena => reboot
+#define ENROLL_REPORT_QUEUE_FILE "/enroll_reports.txt"
+#define ENROLL_REPORT_MAX_BYTES  (16UL * 1024UL)
 
 bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHttpCode, String &outBody);
 bool postJSONBootstrap(const String &jsonPayload, const char* targetUrl, int &outHttpCode, String &outBody);
@@ -675,6 +696,112 @@ void getQueueStatsSafe(long &depth, long &dropped) {
   xSemaphoreGive(displayMutex);
 }
 
+/* ---- Server-reachability watchdog ----
+ * Written from Core 0 (NetworkTask / EnrollmentTask, via postJSONToUrl), read
+ * from Core 1 (idle screen). displayMutex-guarded like the queue counters. A
+ * dropped link is a different, already-handled state, so failures only count
+ * while WiFi.status()==WL_CONNECTED. */
+volatile bool          serverReachable      = true;
+volatile int           consecutivePostFails = 0;
+volatile unsigned long lastPostOkMs         = 0;
+
+void markPostResult(bool ok) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  if (ok) {
+    consecutivePostFails = 0;
+    lastPostOkMs = millis();
+    serverReachable = true;
+  } else {
+    if (consecutivePostFails < 100000) consecutivePostFails++;
+    if (consecutivePostFails >= NET_UNREACHABLE_FAILS) serverReachable = false;
+  }
+  xSemaphoreGive(displayMutex);
+}
+
+bool getServerReachableSafe() {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  bool r = serverReachable;
+  xSemaphoreGive(displayMutex);
+  return r;
+}
+
+void getNetHealthSafe(bool &reachable, int &fails, unsigned long &lastOkMs) {
+  xSemaphoreTake(displayMutex, portMAX_DELAY);
+  reachable = serverReachable;
+  fails     = consecutivePostFails;
+  lastOkMs  = lastPostOkMs;
+  xSemaphoreGive(displayMutex);
+}
+
+/* ---- Durable enrollment status reports ----
+ * reportEnrollUpdate() (Core 1) used to POST fire-and-forget; a single lost
+ * update-enrollment-job left the job stuck in_progress forever. Now a failed
+ * POST is appended here and NetworkTask (Core 0) retries it in flushEnrollReports().
+ * Bounded; on overflow the OLDEST line is dropped (the server also re-delivers
+ * a job stuck in_progress, so a truly lost report still self-heals). Callers
+ * hold spiffsMutex. */
+static void appendEnrollReport_locked(const String &line) {
+  size_t sz = 0;
+  if (SPIFFS.exists(ENROLL_REPORT_QUEUE_FILE)) {
+    File fr = SPIFFS.open(ENROLL_REPORT_QUEUE_FILE, FILE_READ);
+    if (fr) { sz = fr.size(); fr.close(); }
+  }
+  if (sz + line.length() + 1 > ENROLL_REPORT_MAX_BYTES) {
+    std::vector<String> keep;
+    File fr = SPIFFS.open(ENROLL_REPORT_QUEUE_FILE, FILE_READ);
+    if (fr) {
+      while (fr.available()) { String l = fr.readStringUntil('\n'); l.trim(); if (l.length()) keep.push_back(l); }
+      fr.close();
+    }
+    size_t total = line.length() + 1;
+    for (auto &k : keep) total += k.length() + 1;
+    while (!keep.empty() && total > ENROLL_REPORT_MAX_BYTES) {
+      total -= keep.front().length() + 1;
+      keep.erase(keep.begin());
+    }
+    File fw = SPIFFS.open(ENROLL_REPORT_QUEUE_FILE, FILE_WRITE);
+    if (fw) { for (auto &k : keep) fw.println(k); fw.close(); }
+  }
+  File f = SPIFFS.open(ENROLL_REPORT_QUEUE_FILE, FILE_APPEND);
+  if (f) { f.println(line); f.close(); }
+}
+
+void flushEnrollReports() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+  if (!SPIFFS.exists(ENROLL_REPORT_QUEUE_FILE)) { xSemaphoreGive(spiffsMutex); return; }
+  std::vector<String> lines;
+  File f = SPIFFS.open(ENROLL_REPORT_QUEUE_FILE, FILE_READ);
+  if (f) {
+    while (f.available()) { String l = f.readStringUntil('\n'); l.trim(); if (l.length()) lines.push_back(l); }
+    f.close();
+  }
+  SPIFFS.remove(ENROLL_REPORT_QUEUE_FILE);
+  xSemaphoreGive(spiffsMutex);
+
+  if (lines.empty()) return;
+  Serial.printf("flushEnrollReports: retrying %u queued report(s)\n", (unsigned)lines.size());
+
+  std::vector<String> keep;
+  for (auto &line : lines) {
+    int code = 0; String body;
+    bool ok = postJSONToUrl(line, ENROLL_UPD_URL, code, body);
+    Serial.printf("flushEnrollReports: -> code=%d\n", code);
+    // Keep only genuine transients. A 2xx, or a 4xx (job gone / bad request),
+    // is final -- stop retrying it.
+    if (!ok && (code <= 0 || code >= 500 || code == 429)) keep.push_back(line);
+    vTaskDelay(pdMS_TO_TICKS(150));
+  }
+
+  if (!keep.empty()) {
+    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+    for (auto &l : keep) appendEnrollReport_locked(l);
+    xSemaphoreGive(spiffsMutex);
+  }
+}
+
 // Tier 2 blocked-state tracking (Phase 6). Core-0-exclusive by construction:
 // registerDevice()/pollAssignment() only run while pendingAssignment is true,
 // EnrollmentTask's poll only runs once it's false, so PENDING/REJECTED and
@@ -851,7 +978,12 @@ void renderIdleScreen() {
   display.print(nameSnapshot.length() ? nameSnapshot : String("Unassigned"));
 
   display.setCursor(0, 36);
-  display.print(WiFi.status() == WL_CONNECTED ? "Online" : "Offline");
+  // "No server" = link associated but every HTTPS call is being refused. Was
+  // the invisible failure mode: the screen said "Online" and the device had
+  // silently stopped talking to the server.
+  display.print(WiFi.status() != WL_CONNECTED ? "Offline"
+                : getServerReachableSafe()   ? "Online"
+                :                              "No server");
 
   // Tier 3 (Phase 6): offline+queue-depth banner, a 4th line layered over
   // idle rather than a separate screen -- "persistent banner over idle" per
@@ -1290,11 +1422,14 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
       outBody = http.getString();
       Serial.printf("POST -> code=%d body=%s\n", code, outBody.c_str());
       http.end();
-      if (code >= 200 && code < 300) return true;
+      if (code >= 200 && code < 300) { markPostResult(true); return true; }
       if (code >= 500 || code == 429) {
         Serial.printf("Server transient %d; will retry\n", code);
       } else {
         Serial.printf("Permanent HTTP failure %d\n", code);
+        // A 4xx means the server answered — it IS reachable, this payload is
+        // just rejected. Don't let it feed the unreachable watchdog.
+        markPostResult(true);
         return false;
       }
     } else {
@@ -1308,6 +1443,7 @@ bool postJSONToUrl(const String &jsonPayload, const char* targetUrl, int &outHtt
       Serial.println("Max POST attempts reached");
     }
   }
+  markPostResult(false);
   return false;
 }
 
@@ -1525,8 +1661,17 @@ void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
   Serial.printf("reportEnrollUpdate: jobId=%s status=%s fid=%d\n",
                 jobId.c_str(), status.c_str(), fingerId);
   int httpCode = 0; String body;
-  postJSONToUrl(payload, ENROLL_UPD_URL, httpCode, body);
+  bool ok = postJSONToUrl(payload, ENROLL_UPD_URL, httpCode, body);
   Serial.printf("update-enrollment-job -> code=%d body=%s\n", httpCode, body.c_str());
+  // Durability: a lost report used to strand the job at in_progress forever.
+  // Persist it and let NetworkTask retry (flushEnrollReports). A 4xx is final
+  // (job gone / rejected) so it isn't worth re-queuing.
+  if (!ok && (httpCode <= 0 || httpCode >= 500 || httpCode == 429)) {
+    Serial.println("reportEnrollUpdate: POST failed — queuing for retry");
+    xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+    appendEnrollReport_locked(payload);
+    xSemaphoreGive(spiffsMutex);
+  }
 }
 
 /* ================== Enrollment execution ================== */
@@ -2244,6 +2389,7 @@ void NetworkTask(void *pvParameters) {
   if (WiFi.status() == WL_CONNECTED && !pendingAssignment) {
     Serial.println("NetworkTask: boot flush — sending any queued records.");
     flushQueue();
+    flushEnrollReports();
   }
 
   for (;;) {
@@ -2274,18 +2420,28 @@ void NetworkTask(void *pvParameters) {
     // Consume any extra signals that stacked while we were in flushQueue().
     while (xSemaphoreTake(memQueueSem, 0) == pdTRUE) {}
 
-    // Tier 3 offline+queue-depth banner (Phase 6): posted once on the
-    // online->offline edge, not every loop -- renderIdleScreen() re-reads
-    // the live counters itself on every 1s idle tick regardless, so there's
-    // nothing to keep resyncing here. "Show the count only while offline" --
-    // a permanent counter reading 0 all day is decoration.
-    static bool wasOffline = false;
+    // Tier 3 degraded banner (Phase 6): shown whenever the device can't reach
+    // the server -- WiFi link down OR link up but every HTTPS call refused.
+    // renderIdleScreen() re-reads the live queue counters each 1s idle tick.
+    static bool degradedBannerShown       = false;
+    static unsigned long lastReassocMs     = 0;
+    static unsigned long unreachableSinceMs = 0;
 
-    if (WiFi.status() == WL_CONNECTED) {
-      if (wasOffline) {
-        clearDisplayState(TIER_DEGRADED);
-        wasOffline = false;
-      }
+    const bool linkUp = (WiFi.status() == WL_CONNECTED);
+    bool reachable = true; int netFails = 0; unsigned long lastOkMs = 0;
+    if (linkUp) getNetHealthSafe(reachable, netFails, lastOkMs);
+    const bool degraded = !linkUp || !reachable;
+
+    if (degraded && !degradedBannerShown) {
+      postDisplayState(TIER_DEGRADED, 0, "", "", "");
+      degradedBannerShown = true;
+    } else if (!degraded && degradedBannerShown) {
+      clearDisplayState(TIER_DEGRADED);
+      degradedBannerShown = false;
+    }
+
+    if (linkUp && reachable) {
+      unreachableSinceMs = 0;
       if (!rtcSynced) {
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -2293,11 +2449,44 @@ void NetworkTask(void *pvParameters) {
         rtcSynced = true;
       }
       flushQueue();
-    } else {
-      if (!wasOffline) {
-        postDisplayState(TIER_DEGRADED, 0, "", "", "");
-        wasOffline = true;
+      flushEnrollReports();
+    } else if (linkUp && !reachable) {
+      // Link associated but the server won't answer -- heap/TLS/socket wedge,
+      // or a filtering middlebox. Escalate.
+      rtcSynced = false;
+      const unsigned long now = millis();
+      if (unreachableSinceMs == 0) unreachableSinceMs = now;
+
+      // Keep trying: the very next POST that succeeds clears the flag via
+      // markPostResult().
+      flushQueue();
+      flushEnrollReports();
+
+      // Step 1: force a fresh association periodically -- often clears a
+      // half-wedged supplicant / stale DHCP lease without a full reboot.
+      if (now - lastReassocMs > NET_REASSOC_INTERVAL_MS) {
+        lastReassocMs = now;
+        Serial.printf("NetworkTask: server unreachable (%d fails) -- forcing WiFi re-associate\n", netFails);
+        WiFi.disconnect(true);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
       }
+
+      // Step 2: still nothing after NET_REBOOT_AFTER_MS of a live link with no
+      // successful POST -- the network stack is wedged; only a reboot clears
+      // it. Never mid-OTA, mid-enrollment, or under a takeover screen.
+      const bool safeToReboot = !otaInProgress && !enrollmentJobPending
+                                && !tierActive[TIER_INTERACTION] && !tierActive[TIER_TAKEOVER];
+      const bool tooLong =
+        (lastOkMs != 0 && now - lastOkMs > NET_REBOOT_AFTER_MS) ||
+        (now - unreachableSinceMs > NET_REBOOT_AFTER_MS);
+      if (tooLong && safeToReboot) {
+        Serial.println("NetworkTask: server unreachable too long -- rebooting to clear the network stack");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP.restart();
+      }
+    } else {
+      // WiFi link itself is down -- original reconnect path.
       rtcSynced = false;
       Serial.println("NetworkTask: WiFi not connected; attempting reconnect");
       WiFi.disconnect(true);
@@ -2311,6 +2500,26 @@ void NetworkTask(void *pvParameters) {
         xSemaphoreTake(spiffsMutex, portMAX_DELAY);
         trimSPIFFSQueue_locked();
         xSemaphoreGive(spiffsMutex);
+      }
+    }
+
+    // Runtime heap watch: a heap so fragmented the largest free block can't
+    // hold an mbedTLS arena is an unrecoverable HTTPS wedge -- reboot out of it.
+    {
+      static unsigned long lastHeapLogMs = 0;
+      const unsigned long now = millis();
+      if (now - lastHeapLogMs > 60000UL) {
+        lastHeapLogMs = now;
+        const size_t largest = ESP.getMaxAllocHeap();
+        Serial.printf("Heap: free=%u largest=%u\n",
+                      (unsigned)esp_get_free_heap_size(), (unsigned)largest);
+        const bool safeToReboot = !otaInProgress && !enrollmentJobPending
+                                  && !tierActive[TIER_INTERACTION] && !tierActive[TIER_TAKEOVER];
+        if (largest < NET_MIN_LARGEST_BLOCK && safeToReboot) {
+          Serial.println("NetworkTask: heap too fragmented for TLS -- rebooting");
+          vTaskDelay(pdMS_TO_TICKS(200));
+          ESP.restart();
+        }
       }
     }
   }
