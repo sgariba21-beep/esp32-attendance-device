@@ -2513,7 +2513,10 @@ void NetworkTask(void *pvParameters) {
         const size_t largest = ESP.getMaxAllocHeap();
         Serial.printf("Heap: free=%u largest=%u\n",
                       (unsigned)esp_get_free_heap_size(), (unsigned)largest);
-        const bool safeToReboot = !otaInProgress && !enrollmentJobPending
+        // Grace period: a real fragmentation wedge takes hours to build. Never
+        // reboot on low heap in the first 5 minutes, so a device that simply
+        // boots with a tight heap can't get stuck in a reboot loop.
+        const bool safeToReboot = millis() > 300000UL && !otaInProgress && !enrollmentJobPending
                                   && !tierActive[TIER_INTERACTION] && !tierActive[TIER_TAKEOVER];
         if (largest < NET_MIN_LARGEST_BLOCK && safeToReboot) {
           Serial.println("NetworkTask: heap too fragmented for TLS -- rebooting");
@@ -2617,7 +2620,8 @@ void EnrollmentTask(void *pvParameters) {
             job.fingerSlot    = jobObj["finger_slot"]     | "";
             // 1.10.0: server sends member_id; keep student_id as a fallback so a
             // device flashed before the edge functions are updated still works.
-            job.memberId     = jobObj["member_id"] | jobObj["student_id"] | "";
+            job.memberId      = jobObj["member_id"] | "";
+            if (job.memberId.length() == 0) job.memberId = jobObj["student_id"] | "";
             job.uniqueId      = jobObj["sid"]             | "";
             job.name          = jobObj["fullname"]        | "";
             job.requestedFid  = jobObj["fid"]             | 0;
