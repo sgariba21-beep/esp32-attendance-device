@@ -95,6 +95,8 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 | Fingerprint Sensor | R503 Capacitive |
 | RTC Module | DS3231 |
 | Display (optional) | SSD1306 0.96" 128×64 I²C OLED @ address 0x3C — the firmware runs headless if it is absent or fails to init |
+| Carrier PCB | Custom 2-layer KiCad interconnect board — no active parts; seats the ESP32 module and provides keyed connectors for the R503 (JST-SH), the RTC + OLED I²C group, and a JST-GH 5 V input. Source in [`hardware/PCBs/`](hardware/PCBs/) |
+| Enclosure | 3D-printed base + lid (+ an OLED bezel variant for display builds). FreeCAD source and print-ready 3MF in [`hardware/CAD files/`](hardware/CAD%20files/) |
 
 ### Wiring
 
