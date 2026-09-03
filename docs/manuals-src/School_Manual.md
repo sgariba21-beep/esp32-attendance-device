@@ -22,7 +22,7 @@ Your sidebar has:
 
 ### 1.1 How a school day is recorded
 
-A student places a finger on a scanner. The device recognises them, records the scan, and shows their name. Every night, the system fills in an **absent** record for every active student who did not scan that day -- skipping holidays, and skipping weekends if you have that switch on.
+A student places a finger on a scanner. The device recognises them, records the scan, and shows their name. Every night, the system fills in an **absent** record for every active student who did not scan that day -- skipping holidays, and skipping any weekday you have not selected under **Days tracked** in Settings.
 
 This means your attendance register completes itself. You do not mark anybody absent by hand.
 
@@ -30,7 +30,7 @@ This means your attendance register completes itself. You do not mark anybody ab
 
 ## 2. Setting up, in the right order
 
-1. **Settings** -- name, logo, timezone, and turn on **Skip weekends** if you do not run Saturday classes.
+1. **Settings** -- name, logo, timezone, and set **Days tracked** (untick Saturday and Sunday if you do not run weekend classes).
 2. **Academic** -- create the current term and mark it Active. Add your holidays.
 3. **Devices** -- assign each scanner to the grade and class it sits in.
 4. **Members** -- add students, or import them from a spreadsheet.

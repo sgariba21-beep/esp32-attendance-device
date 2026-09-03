@@ -64,7 +64,7 @@ You cannot edit anybody's details. If a record is wrong, tell your admin.
 
 The export covers your unit only. For data from another unit, ask an admin or super admin.
 
-> [!NOTE] Absences are generated automatically overnight for anyone active who did not scan, skipping holidays and weekends where that is configured. Nobody marks absences by hand. If a device was offline, its scans upload later and correct the record.
+> [!NOTE] Absences are generated automatically overnight for anyone active who did not scan, skipping holidays and any weekday the institution does not track. Nobody marks absences by hand. If a device was offline, its scans upload later and correct the record.
 
 ## 6. Changing your password
 

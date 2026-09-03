@@ -55,6 +55,7 @@ log-attendance       -- dual-path: device_id header path + legacy institution se
 get-enrollment-job   -- authenticates via devices.device_secret
 update-enrollment-job -- authenticates via devices.device_secret + derives institution from device
 mark-absent          -- batched (BATCH_SIZE=8), no auth change
+register             -- MAC-based device registration, x-bootstrap-secret (unchanged, redeploy for parity)
 ```
 
 The `log-attendance` function supports **both** auth paths simultaneously during the rollout:
@@ -67,7 +68,8 @@ Do not remove the legacy path until all devices are re-provisioned.
 
 ## Step 3 — OTA firmware update
 
-Tag a new firmware release on GitHub Releases with the `fw-` prefix and the new binary.
+Tag a new firmware release on GitHub Releases with the `firmware-v<major>.<minor>.<patch>`
+prefix (matches `OTA_TAG_PREFIX` in the sketch) and attach the new binary.
 Devices will check for updates on the next boot (after a randomised 0–120 s jitter).
 
 New firmware changes relevant to this migration:

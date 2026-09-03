@@ -100,7 +100,7 @@ Time-in and time-out for the same person on the same day appear on one row.
 
 Apply your filters, press **Export CSV**, and open the file in Excel or Google Sheets.
 
-> [!NOTE] Absences are filled in automatically overnight for everyone active who did not scan, skipping holidays and -- if that setting is on -- weekends. You never mark anybody absent by hand. A scan that arrives late, from a device that was offline, corrects the record when it syncs.
+> [!NOTE] Absences are filled in automatically overnight for everyone active who did not scan, skipping holidays and any weekday your institution does not track. You never mark anybody absent by hand. A scan that arrives late, from a device that was offline, corrects the record when it syncs.
 
 ## 6. Year-end promotion
 

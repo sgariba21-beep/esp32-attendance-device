@@ -4,18 +4,18 @@ Authoritative point-in-time backups of the **cloud** Supabase database. These
 must be taken with project credentials, so they are produced by a human/CI with
 access — not by the code-review tooling.
 
-> The old `backend/full_backup.sql` is a **stale Phase-1 dump** and is clearly
-> labelled as such at the top of the file. Do not use it to restore.
+The files already in this folder (`schema_pre-fixes.sql`, `backup_28-06-2026.sql`)
+are historical snapshots from the June 2026 security-fix rollout, kept for
+reference. They are **not** current — do not restore from them.
 
-## When (L6)
+## When
 
-Take **two** backups around the security-fix rollout:
+Take **two** backups around any migration rollout:
 
-1. **`pre-fixes`** — *before* applying the new `20260615120000_*` … `20260615127000_*`
-   migrations (i.e. capture the current live state first).
-2. **`post-fixes`** — *after* all migrations are applied and verified.
+1. **`pre`** — *before* applying the migration set (capture the current live state first).
+2. **`post`** — *after* all migrations are applied and the e2e checklist passes.
 
-Name files `schema_pre-fixes_YYYY-MM-DD.sql` and `schema_post-fixes_YYYY-MM-DD.sql`
+Name files `schema_pre_YYYY-MM-DD.sql` and `schema_post_YYYY-MM-DD.sql`
 (add `data_…` variants if you also dump data).
 
 ## How

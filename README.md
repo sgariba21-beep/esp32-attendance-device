@@ -74,10 +74,11 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 
 | Layer | Technology |
 |---|---|
-| Firmware | Arduino (ESP32), FreeRTOS, R503 fingerprint library |
+| Firmware | Arduino (ESP32), FreeRTOS, R503 fingerprint library, SSD1306 OLED (Adafruit SSD1306 + GFX) |
 | Database | Supabase (cloud PostgreSQL + Auth + Storage + pg_cron) |
 | Edge functions | Deno (Supabase Edge Functions) |
 | Dashboard | Next.js App Router, shadcn/ui, TailwindCSS |
+| Dashboard PWA | Installable web app — `manifest.webmanifest` + a minimal service worker (installability only, no offline cache) and an in-app install prompt |
 | Hosting | Vercel (dashboard) |
 
 > **Note on Next.js:** This project uses a version with breaking API changes from standard Next.js. Middleware lives in `frontend/proxy.ts`, not `middleware.ts`. Read `frontend/AGENTS.md` before writing any Next.js code.
@@ -93,6 +94,7 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 | Microcontroller | ESP32 (dual-core, 240 MHz) |
 | Fingerprint Sensor | R503 Capacitive |
 | RTC Module | DS3231 |
+| Display (optional) | SSD1306 0.96" 128×64 I²C OLED @ address 0x3C — the firmware runs headless if it is absent or fails to init |
 
 ### Wiring
 
@@ -102,6 +104,8 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 | R503 RX → ESP32 TX | GPIO 17 |
 | DS3231 SDA | GPIO 21 |
 | DS3231 SCL | GPIO 22 |
+| OLED SDA | GPIO 21 (shared I²C bus with the DS3231) |
+| OLED SCL | GPIO 22 (shared I²C bus with the DS3231) |
 
 ---
 
@@ -114,14 +118,18 @@ Single sketch: `firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC
 | Task | Core | Responsibility |
 |---|---|---|
 | `FingerprintTask` | 1 | Scan loop, match against the local fid map, LED feedback, enrollment execution, captive-portal launch on master-finger scan. Writes each scan to SPIFFS then signals `NetworkTask` via binary semaphore. |
-| `NetworkTask` | 0 | Provisioning, waiting on scan semaphore from `FingerprintTask`, rotate-then-process SPIFFS queue flush to `log-attendance`, NTP→RTC sync, WiFi reconnect. |
-| `EnrollmentTask` | 0 | Polls `get-enrollment-job`, hands jobs to `FingerprintTask`, acts on the decommission signal (wipes identity and reboots into provisioning). |
+| `NetworkTask` | 0 | Provisioning, waiting on scan semaphore from `FingerprintTask`, rotate-then-process SPIFFS queue flush to `log-attendance`, NTP→RTC sync, WiFi reconnect, and a server-reachability watchdog that reboots the device after a sustained inability to reach the backend. |
+| `EnrollmentTask` | 0 | Polls `get-enrollment-job`, hands jobs to `FingerprintTask`, reports results durably (retried until acknowledged), acts on the decommission signal (wipes identity and reboots into provisioning). |
 
 Inter-task communication:
 
 - `memQueueSem` is a binary semaphore used only as a signal: `FingerprintTask` gives it after writing a scan to SPIFFS; `NetworkTask` waits on it (or a 15 s periodic timeout) before calling `flushQueue()`. There is no in-memory scan queue.
 - Enrollment jobs pass from `EnrollmentTask` to `FingerprintTask` through `currentEnrollJob`, guarded by `enrollMutex` and signalled by `enrollSem`.
 - `spiffsMutex` serialises every SPIFFS access across all three tasks.
+
+### Display (OLED)
+
+An optional SSD1306 128×64 panel on the shared I²C bus. `display.begin()` is attempted once in `setup()`; on failure `displayAvailable = false` and the firmware runs headless with no behaviour change. There is no dedicated display task — rendering is driven from a Core-0-safe mailbox. Tasks post card state (idle clock, scan verdict, enrollment step, master-finger confirm, provisioning, OTA) into the mailbox and never touch the `display` object directly. Tier-2 status (queue depth, dropped-record count, degraded / offline) is overlaid on the idle screen; the panel sleeps after 120 s idle and wakes on the next event. The per-institution `member_name_display` setting (fetched via `get-enrollment-job`, cached in SPIFFS with `config_rev`) controls how much of a member's name a scan card shows.
 
 ### Offline queue
 
@@ -149,15 +157,34 @@ All dashboard data access uses `createAdminClient()` (service role — bypasses 
 
 ```sql
 -- Institution registry (one row per tenant)
+-- type: 'school' | 'office' | 'shop'
 -- theme_primary: hex brand colour injected as CSS custom properties server-side (no FOUC)
 -- theme_preset: curated palette key (e.g. 'indigo', 'rose') or 'custom'; null → platform default
 -- device_secret: shared bootstrap secret — TRANSITIONAL. Will be removed once all
 --   devices have been re-provisioned with per-device secrets (devices.device_secret).
+-- tracked_weekdays: smallint[] of ISO weekday numbers (1=Mon … 7=Sun) attendance is
+--   tracked on. Replaces the removed skip_weekends boolean. log-attendance ignores
+--   scans on other days; mark-absent generates no rows for them.
+-- time_format: '12h' | '24h' — dashboard clock rendering only; stored times stay UTC / 24h.
+-- track_lateness / expected_start_time / late_grace_minutes and
+--   track_early_leaving / expected_end_time / early_leave_grace_minutes:
+--   optional per-institution punctuality thresholds that drive attendance.punctuality.
+-- member_name_display: 'full' | 'first' | 'initial_last' | 'sid' | 'none' — how much of a
+--   member's name the device OLED shows on a scan card (enrollment always shows the full name).
+-- currency: ISO-4217 display currency for the retail module (formatting only, no FX).
+-- sell_products / sell_services / loyalty_enabled: shop-module switches.
+-- status: 'active' | 'suspended' | 'deactivated' — non-active tenants are gated to /suspended.
+-- config_rev: bigint bumped by the institutions_touch trigger on any row change; the device
+--   polls it to know its cached device_config is stale. updated_at is bumped by the same trigger.
 institutions    (id, name, type, logo_url, label_member, label_members, label_group,
                  label_unit, label_period, label_staff, label_staff_plural,
                  track_students, track_staff, student_scan_mode, staff_scan_mode,
-                 skip_weekends, device_secret, timezone, theme_primary, theme_preset,
-                 loyalty_enabled)
+                 tracked_weekdays, timezone, time_format, track_lateness,
+                 expected_start_time, late_grace_minutes, track_early_leaving,
+                 expected_end_time, early_leave_grace_minutes, member_name_display,
+                 currency, sell_products, sell_services, loyalty_enabled, status,
+                 device_secret, config_rev, created_at, updated_at,
+                 theme_primary, theme_preset)
 
 -- Members (students, staff, customers, etc.) — scoped to institution
 -- member_type: 'student' | 'staff'  (default 'student')
@@ -177,25 +204,38 @@ devices         (id, group_name, unit_name, display_name, mac, provisioning_toke
 periods         (id, term, year, status, start_date, end_date, institution_id)
 
 -- Attendance records — scoped to institution
--- scan_type: 'present' | 'absent' | 'time_in' | 'time_out'
+-- status: 'present' | 'absent'
+-- scan_type: 'present' | 'time_in' | 'time_out'  (CHECK constraint — 'absent' is a status, not a scan_type)
+-- punctuality: 'on_time' | 'late' | 'early_leave' | null — verdict fixed at scan time from the
+--   institution's thresholds; null when tracking is off or the row is a mark-absent placeholder
 -- date/time are stored in the INSTITUTION's timezone (log-attendance + mark-absent agree)
 -- scan_id is UNIQUE PER INSTITUTION (institution_id, scan_id); dedup also on (member_id, date, scan_type)
 -- device_id FK is ON DELETE SET NULL
 attendance      (id, member_id→members, period_id→periods, device_id→devices SET NULL,
-                 date, time, status, scan_type, scan_id, institution_id)
+                 date, time, status, scan_type, punctuality, scan_id, institution_id)
 
 -- Remote fingerprint enrollment queue
+-- command: 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
+-- member_id: FK→members (renamed from student_id). NULL for clearall / register-master / delete-master.
+-- allow_overwrite: operator confirmed overwriting an already-occupied sensor slot
+--   (register / register-master only). The device refuses an occupied slot unless this is true.
+-- dispatched_at / attempts / last_error: dispatch tracking. get-enrollment-job re-delivers a job
+--   stuck in_progress past a timeout and auto-fails it (with last_error) after a capped number of
+--   attempts. The enrollment_jobs_status_guard trigger makes 'completed' / 'failed' terminal.
 -- device_id FK is ON DELETE SET NULL
-enrollment_jobs (id, device_id→devices SET NULL, student_id→members, finger_slot,
-                 command, status, fid, note, institution_id, created_at)
+enrollment_jobs (id, device_id→devices SET NULL, member_id→members, finger_slot,
+                 command, status, fid, note, allow_overwrite, dispatched_at, attempts,
+                 last_error, institution_id, created_at)
 
 -- Holidays (date ranges) — scoped to institution
 -- recurring: true = matched by month/day every year (year-wrap ranges supported)
 holidays        (id, label, start_date, end_date, recurring, institution_id)
 
 -- Dashboard user roles — scoped to institution (platform_admin has null institution_id)
--- assigned_device_id: FK used by teacher/staff role to scope attendance to their unit.
---   Preferred over the legacy assigned_unit string; backfilled by migration.
+-- assigned_device_id: FK that pins a session to one device. REQUIRED for teacher/staff
+--   (unresolved → they see nothing); OPTIONAL for admin (bound → records + enrollment
+--   scoped to that device; unbound → whole institution). Preferred over the legacy
+--   assigned_unit string; backfilled by migration. Resolved by dal.ts resolveDeviceScope().
 profiles        (id→auth.users, role, assigned_unit, assigned_device_id→devices SET NULL,
                  institution_id)
 
@@ -225,21 +265,21 @@ Authentication uses Supabase Auth (server-side only — all Supabase calls go th
 |---|---|---|
 | `platform_admin` | Cross-institution (no institution_id) | All pages, bypasses all role gates, operates via service role. Responsible for creating institutions and bootstrapping first super_admin per institution. |
 | `super_admin` | Institution-scoped | All pages — devices, enrollment, promotion, academic, members, attendance, user management. Can manage users within their institution but cannot create platform_admins. |
-| `admin` | Institution-scoped | Members, academic, promotion, attendance — no devices or enrollment. |
+| `admin` | Institution-scoped (optionally device-scoped) | Members, academic, promotion, attendance — no devices or enrollment. May optionally be pinned to a single device via `assigned_device_id`; when pinned, attendance/members and enrollment are scoped to that device, otherwise the whole institution. |
 | `teacher` | Institution-scoped, unit-scoped | Read-only attendance and members, filtered to their `assigned_device_id` (FK, with `assigned_unit` string-match fallback for unbackfilled profiles). |
 | `staff` | Institution-scoped, unit-scoped | Same as teacher — read-only attendance and members, filtered to their unit. The `/staff` roster page is not visible in the nav for this role. |
 | `cashier` | Institution-scoped (shop type) | Sales, Clients, and Catalog pages only. Intended for retail staff at shop-type institutions. Cannot access attendance, members, devices, or admin pages. |
 
 ### How it works
 
-- `frontend/lib/supabase/dal.ts` exports `verifySession()`, `requireRole(...roles)`, `getInstitution(institutionId)`, and `resolveInstitutionScope(session, institutionParam?)`.
+- `frontend/lib/supabase/dal.ts` exports `verifySession()`, `requireRole(...roles)`, `getInstitution(institutionId)`, `resolveInstitutionScope(session, institutionParam?)`, and `resolveDeviceScope(session)` (returns `{ mode: 'all' | 'device' | 'none' }` — the single device a session is pinned to, if any).
 - `verifySession()` and `getInstitution()` are both `cache()`-wrapped — one DB hit per render cycle regardless of how many components call them.
 - `requireRole()` calls `verifySession()` and redirects to `/unauthorized` if the role doesn't match. `platform_admin` bypasses all role checks.
 - `resolveInstitutionScope()` enforces tenant scoping: platform_admin may pass an explicit institution param; all other roles are always locked to their own `institution_id` regardless of query params.
 - **Fail-closed:** an authenticated user with no `profiles` row (or no role) is redirected to `/unauthorized` — it does **not** default to any role. Public sign-up is disabled in Supabase Auth; accounts are created only via `/users` and `/onboarding`.
 - **Tenant ownership:** because the dashboard uses the service role (RLS bypassed), every mutating server action verifies the target record belongs to the caller's institution via `lib/supabase/ownership.ts` (`ownsRecord`). `platform_admin` is cross-tenant by design.
 - The dashboard layout calls `verifySession()` and passes `role` to the sidebar and mobile nav, which filter nav items by role.
-- `teacher` and `staff` have an `assigned_device_id` (FK, preferred) or `assigned_unit` (legacy string) in their profile. Attendance and member data is filtered server-side to that unit before rendering — including the CSV export (`/api/attendance/export`).
+- `teacher` and `staff` are always device-scoped via `assigned_device_id` (FK, preferred) or `assigned_unit` (legacy string); an unresolved assignment means they see nothing, never everything. `admin` may optionally carry the same binding. Attendance and member data — and the CSV export (`/api/attendance/export`) — is filtered server-side to that device before rendering.
 - Run `node scripts/check-rbac.mjs` (from `frontend/`) to verify every page under `(dashboard)` has a `requireRole(` call. Exits 1 with a list if any are ungated.
 
 ### Creating the first super_admin (per institution)
@@ -262,14 +302,14 @@ Additional accounts are managed through the `/users` page in the dashboard.
 | Route | Access | Description |
 |---|---|---|
 | `/` | All roles | Overview — today's present/absent counts, attendance rate, and a recent-activity feed (last 8 scans). `teacher`/`staff` see only their unit. `platform_admin` sees a cross-tenant summary: institution count, active members, devices online, and total scans today. |
-| `/attendance` | All roles | Attendance records with date, period, member, unit, status, and type filters. Per-member stats panel. Results paginated at 50 rows. `teacher`/`staff` see only their unit; a teacher with no device assigned sees an empty-state prompt to contact their administrator. Time-in/time-out pairs shown on a single row. CSV export available. |
+| `/attendance` | All roles | Attendance records with date, period, member, unit, status, and type filters. Per-member stats panel. Results paginated at 50 rows. `teacher`/`staff` see only their unit; a teacher with no device assigned sees an empty-state prompt to contact their administrator. Time-in/time-out pairs shown on a single row, with **Late** / **Early** badges when the institution has punctuality thresholds enabled. CSV export available. |
 | `/members` | All roles except cashier | Member roster (non-staff). `teacher`/`staff` see only their unit, no edit controls. |
 | `/staff` | super_admin, admin, platform_admin | Staff member roster. Visible only when `track_staff = true`. |
 | `/devices` | super_admin, platform_admin | ESP32 device registry and provisioning — assign unregistered devices to units, revoke devices. Search + institution filter for platform_admin. Devices only enter via physical provisioning (no manual create). |
-| `/academic` | super_admin, admin, platform_admin | Academic periods and holidays. Labeled "Periods & Holidays" for office institutions. Supports recurring (yearly) holidays matched by month/day. |
-| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — register, delete, clearall commands sent to devices. Validates member institution + device assignment before dispatching. Institution column for platform_admin. |
+| `/academic` | super_admin, admin, platform_admin | Academic periods and holidays. Nav label is "Academic" (school), "Periods & Holidays" (office), or "Closed Days" (shop — holidays only). Supports recurring (yearly) holidays matched by month/day. |
+| `/enrollment` | super_admin, platform_admin | Fingerprint enrollment job queue — `register`, `delete`, `clearall`, `register-master`, `delete-master` commands sent to devices, with retry / cancel controls for failed or stuck jobs (jobs stranded `in_progress` are also re-delivered and self-healed server-side). Validates member institution + device assignment before dispatching. Institution column for platform_admin. |
 | `/promotion` | super_admin, admin, platform_admin | Bulk year-end promotion — moves members to the next group, resets finger slots, deactivates final-year members. School-type institutions only. |
-| `/settings` | super_admin, platform_admin | Institution config — name, logo, type, label overrides, scan modes, skip_weekends, timezone. |
+| `/settings` | super_admin, platform_admin | Institution config — name, logo, brand colour, type, label overrides, per-type scan modes, tracked weekdays (7-day selector, replaces skip_weekends), late-arrival / early-departure thresholds, timezone, 12h/24h time display, name-shown-on-device, and (shop) currency / offerings / loyalty toggles. |
 | `/institutions` | platform_admin | All institutions with member/device counts. Edit or delete any institution (deletion fans out SPIFFS wipe to all assigned devices). |
 | `/institutions/[id]` | platform_admin | Edit a specific institution's settings. |
 | `/onboarding` | platform_admin | Create a new institution and its first super_admin account. Includes timezone selector (Africa/Accra default) and neutral label presets for shop-type institutions. |
@@ -316,8 +356,8 @@ Screenshots pending production UI.
 ### Normal operation
 
 - Every scan: `POST /log-attendance` with `{ device_id, ... }` body and `x-device-secret: <per-device secret>` header. A transitional dual-path also accepts the legacy shared `institutions.device_secret` for devices not yet re-provisioned.
-- Enrollment polling: `POST /get-enrollment-job` with `{ device_id }`, authenticated via per-device secret.
-- Enrollment result: `POST /update-enrollment-job` with `{ id, device_id, institution_id, status, ... }`, authenticated via per-device secret. `institution_id` is derived server-side from the device row — the body value is ignored.
+- Enrollment polling: `POST /get-enrollment-job` with `{ device_id }`, authenticated via per-device secret. A job left `in_progress` past a timeout (device rebooted, ack lost) is re-delivered, and auto-failed after a capped number of attempts.
+- Enrollment result: `POST /update-enrollment-job` with `{ id, device_id, institution_id, status, ... }`, authenticated via per-device secret. `institution_id` is derived server-side from the device row — the body value is ignored. The device retries this report until it lands (firmware ≥ 1.10.0); the `enrollment_jobs_status_guard` trigger keeps a terminal `completed` / `failed` status from being pulled backwards by a late write.
 - Decommission signal: if `get-enrollment-job` returns `decommissioned: true`, the device wipes its identity and reboots. The `device_resets` row persists until the device re-registers (not consumed on read — durable against race conditions).
 - `pg_cron` calls `POST /mark-absent` daily with `x-cron-secret`. Processes institutions in batches of 8 concurrently. **Requires the `pg_net` extension** — enable it in the Supabase dashboard under Database → Extensions.
 
@@ -327,7 +367,7 @@ Set `devices.revoked = true` in the database. The device's next `log-attendance`
 
 ### OTA
 
-Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest` on boot after a random jitter delay. Releases must be tagged `firmware-v<version>` (e.g. `firmware-v1.1.6`). The `.bin` asset is downloaded and flashed via the ESP32 `Update` library.
+Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest` on boot after a random jitter delay. Releases must be tagged `firmware-v<version>` (e.g. `firmware-v1.10.0`; current `FIRMWARE_VERSION` is `1.10.0`). The `.bin` asset is downloaded and flashed via the ESP32 `Update` library.
 
 ---
 
@@ -358,11 +398,15 @@ esp32-attendance-device/
 │           ├── register/
 │           └── assignment-poll/            ← issues per-device secret on first assignment
 └── frontend/
-    ├── proxy.ts                            ← Next.js middleware (NOT middleware.ts)
+    ├── proxy.ts                            ← Next.js middleware (NOT middleware.ts); matcher excludes
+    │                                         /api, _next, and the PWA assets (manifest.webmanifest, sw.js, icons/)
+    ├── next.config.ts                      ← sends Cache-Control: no-cache for /sw.js
     ├── AGENTS.md                           ← read before writing any Next.js code
     ├── scripts/
-    │   └── check-rbac.mjs                 ← CI guard: exits 1 if any dashboard page lacks requireRole
+    │   ├── check-rbac.mjs                 ← CI guard: exits 1 if any dashboard page lacks requireRole
+    │   └── generate-icons.mjs             ← regenerates the PWA icon set from the SVG source
     ├── app/
+    │   ├── manifest.ts                    ← web app manifest, served at /manifest.webmanifest (platform branding only)
     │   ├── (auth)/login/                  ← password is NOT trimmed before submission
     │   ├── (dashboard)/
     │   │   ├── layout.tsx                 ← verifySession, generateMetadata (dynamic tab title)
@@ -389,7 +433,8 @@ esp32-attendance-device/
     │   │   ├── enrollment-stream/         ← SSE stream for enrollment job updates (kept)
     │   │   ├── realtime-stream/           ← 410 tombstone — use /api/changes instead
     │   │   ├── changes/                   ← watermark poll endpoint (replaces SSE stream)
-    │   │   └── attendance/export/         ← CSV export with full filter parity
+    │   │   ├── attendance/export/         ← CSV export with full filter parity
+    │   │   └── reports/{takings,clients,stylists}/export/  ← shop report CSV exports
     │   ├── suspended/                     ← institution suspended; sign-out only
     │   └── unauthorized/
     ├── lib/
@@ -397,7 +442,7 @@ esp32-attendance-device/
     │   ├── theme.ts                       ← per-institution brand theming
     │   └── supabase/
     │       ├── dal.ts                     ← verifySession, requireRole, getInstitution,
-    │       │                                 resolveInstitutionScope, UserRole
+    │       │                                 resolveInstitutionScope, resolveDeviceScope, UserRole
     │       └── server.ts                  ← createAuthClient, createAdminClient
     └── components/
         ├── sidebar.tsx
@@ -406,6 +451,7 @@ esp32-attendance-device/
         ├── theme-toggle.tsx
         ├── realtime-refresh.tsx           ← polls /api/changes every 12 s; router.refresh() on watermark advance
         ├── session-manager.tsx            ← inactivity timeout + sessionStorage guard
+        ├── pwa/                           ← service-worker registration + in-app install prompt
         └── ui/
             └── single-select.tsx
 ```
@@ -423,12 +469,14 @@ esp32-attendance-device/
 | 5 | Captive portal — WiFi-only | ✅ Complete |
 | 6 | Retail / loyalty module — shop-type tenants, cashier role, sales/clients/catalog/rewards/reports | ✅ Complete |
 | 7 | Security hardening — per-device secrets, SPIFFS-only durable queue, tenant isolation fixes, polling watermark | ✅ Complete |
+| 8 | OLED display — device-side status screen: idle clock, scan / enrollment / portal / master-confirm cards, degraded & offline states | ✅ Complete |
+| 9 | Reliability & reach — enrollment-job self-healing (re-delivery, retry/cancel, status guard), firmware server-reachability watchdog, per-institution tracked weekdays / time format / punctuality thresholds, installable PWA | ✅ Complete |
 
 ---
 
 ## Roadmap
 
-- [ ] Admin mobile app (iOS/Android)
+- [x] Installable PWA (add-to-home-screen) — native iOS/Android app still TBD
 - [ ] GES-formatted report exports
 - [ ] SMS attendance notifications
 - [ ] Analytics dashboard with term-over-term trends

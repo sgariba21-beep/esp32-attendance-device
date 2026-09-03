@@ -235,7 +235,7 @@ Run through this before leaving a client site.
 
 - [ ] Institution created with the correct **type** and **timezone**
 - [ ] Super admin can log in and has changed the temporary password
-- [ ] Settings configured: labels, currency, scan modes, skip-weekends, branding
+- [ ] Settings configured: labels, currency, scan modes, days tracked, punctuality thresholds, time display, branding
 - [ ] Holidays or closed days entered for the current period
 - [ ] Every device assigned to a group and unit, showing solid blue
 - [ ] **Master fingerprint enrolled on every device** and the client knows whose finger it is

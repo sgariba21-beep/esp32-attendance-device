@@ -39,7 +39,7 @@ There is no self-service password reset. Passwords are changed from the **Accoun
 | **Academic** / **Periods & Holidays** / **Closed Days** | Terms and non-working days. The name depends on your type. |
 | **Promotion** | Year-end bulk promotion. Schools only. |
 | **Clients**, **Sales**, **Catalog**, **Loyalty**, **Reports** | The retail module. Shops only. |
-| **Settings** | Name, logo, branding, labels, currency, scan modes, timezone. |
+| **Settings** | Name, logo, branding, labels, currency, scan modes, tracked weekdays, punctuality thresholds, time display, timezone. |
 | **Accounts** | Dashboard logins for your organisation. |
 
 ## 4. Devices
@@ -172,11 +172,11 @@ Create a period with its name, year, and start and end dates, and mark the curre
 
 Under holidays, add every non-working day. No absences are generated on those dates. Tick **Recurring** for holidays on the same calendar date each year.
 
-If **Skip weekends** is on in Settings, Saturdays and Sundays are skipped automatically -- do not add them individually.
+You do not need to add weekends as holidays. Settings has a **Days tracked** selector (Mon to Sun); any day you leave unselected is ignored entirely -- no scans recorded, no absences generated -- so a Monday-to-Friday institution simply unticks Sat and Sun there.
 
 ## 8. Attendance
 
-Go to **Attendance** and filter by date range, period, member, unit, or scan type. Time-in and time-out for the same person on the same day appear on one row.
+Go to **Attendance** and filter by date range, period, member, unit, or scan type. Time-in and time-out for the same person on the same day appear on one row. If you have punctuality thresholds turned on (see Settings), late arrivals carry a **Late** badge and early departures an **Early** badge.
 
 To export: apply your filters, press **Export CSV**, and open the file in Excel or Google Sheets.
 
@@ -200,7 +200,9 @@ Review the preview, then press **Promote**.
 | **Name shown on device** | How much of a person's name appears on the device screen after a scan: full name, first name, initial and surname, ID number, or nothing. |
 | **Currency** | Denomination for shop money figures. Display only. |
 | **Sell products / services / loyalty** | Which retail modules are active. Shops only. |
-| **Skip weekends** | Do not generate absences on Saturday and Sunday. |
+| **Days tracked** | A Mon-to-Sun selector. Only the selected days record attendance; scans on other days are ignored and no absences are generated for them. Untick Sat and Sun for a weekday-only operation. |
+| **Flag late arrivals / early departures** | Optional. Set an expected start (and end) time plus a grace window; arrivals after start + grace are marked **Late**, and time-out scans before end - grace are marked **Early**. Early-departure flagging only applies to time in / out scan mode. |
+| **Time display** | 12-hour or 24-hour clock across the dashboard. Display only -- stored times and CSV exports stay 24-hour. |
 | **Timezone** | Decides when a day starts and ends for records and absence marking. |
 
 > [!TIP] "Name shown on device" is a privacy control. In a shared or public area, *first name only* or *initial and surname* keeps the queue behind the scanner from reading everyone's full identity.

@@ -99,8 +99,9 @@ Mark each ✅ as it passes. Tests are grouped by area and ordered by dependency.
 ## 5. mark-absent cron (T15)
 
 - [ ] **Batch concurrency:** with ≥9 institutions in the database, trigger `mark-absent` manually
-  via the Bearer token. Verify serial/log output shows batches of 8 processed concurrently,
-  not sequentially one-by-one.
+  with the `x-cron-secret: <CRON_SECRET>` header (Kong strips `Authorization` before it reaches
+  the function — a Bearer token returns 401). Verify serial/log output shows batches of 8
+  processed concurrently, not sequentially one-by-one.
 
 - [ ] **Absent records created:** after a period ends with no attendance, verify absent records
   appear in `attendance` for enrolled members.
@@ -177,7 +178,7 @@ Mark each ✅ as it passes. Tests are grouped by area and ordered by dependency.
 
 ---
 
-## 10. Rewards redemption (applies migrations `20260823130000`, `20260823130100`)
+## 10. Rewards redemption (applies migrations `20260823150417_rewards_redemption_link`, `20260823150444_create_sale_fn_v2`, `20260823150629_create_sale_revoke_public`, `20260823152205_create_sale_fn_atomic_redeem_guard`, `20260823152412_rewards_log_enforce_non_repeatable`)
 
 - [ ] **Free service, existing line:** build a rule a client has already earned (e.g. visit
   count). Open Sales, pick that client, add the target service to the cart at its normal
@@ -257,4 +258,58 @@ Mark each ✅ as it passes. Tests are grouped by area and ordered by dependency.
 
 ---
 
-*Last updated: 2026-08-23. Run this checklist on each significant release.*
+## 11. Tracked weekdays, time format & punctuality (migration `20260830120000`)
+
+- [ ] **Tracked weekdays:** in Settings, deselect Wed from "Days tracked" and save. Scan on a
+  Wednesday → verify no attendance row is written and `mark-absent` creates no rows for that
+  Wednesday. Re-select Wed and confirm normal behaviour returns.
+
+- [ ] **Weekend tracking:** select Sat + Sun in "Days tracked". Verify scans and absences are
+  generated on the weekend (the old skip_weekends special-case is gone).
+
+- [ ] **Time display:** set Settings → Time display to 12-hour. Verify attendance times and the
+  recent-scans feed render as `1:30 PM`; confirm the CSV export still contains 24-hour `HH:MM:SS`.
+
+- [ ] **Late arrival:** enable "Flag late arrivals", set an expected start time and a grace
+  window. A scan after `start + grace` gets `attendance.punctuality = 'late'` and a **Late**
+  badge; a scan before it reads `on_time` with no badge. A `mark-absent` placeholder leaves
+  `punctuality` NULL.
+
+- [ ] **Early departure:** enable "Flag early departures" for a member type on Time In / Time Out
+  mode. A `time_out` scan before `end - grace` gets `punctuality = 'early_leave'` and an
+  **Early** badge. Confirm it is inert for a Present / Absent member type.
+
+## 12. Enrollment job reliability (migrations `20260902120000`, `20260902130000`)
+
+- [ ] **member_id rename:** create a register job. Confirm `enrollment_jobs.member_id` is set
+  (not `student_id`) and the device (firmware ≥ 1.10.0) enrolls the correct member.
+
+- [ ] **Occupied-slot refusal:** target a sensor slot that physically holds a template but reads
+  as free server-side. With `allow_overwrite = false` the device refuses and reports `failed`
+  with a `last_error`. Re-dispatch with the overwrite confirmation checked → it enrols.
+
+- [ ] **Stuck-job self-heal:** dispatch a job, then kill the device before it POSTs
+  `update-enrollment-job`. Verify `get-enrollment-job` re-delivers the job after the timeout,
+  `attempts` increments, and after the cap the job is auto-failed with `last_error`.
+
+- [ ] **Status guard:** once a job is `completed` / `failed`, a late `update-enrollment-job`
+  write (or a raced `in_progress` write) does not move it back — the terminal status sticks,
+  but `note` / `fid` / `last_error` still update.
+
+- [ ] **Dashboard retry / cancel:** on a failed or stuck row on `/enrollment`, use **Retry** and
+  **Cancel** and confirm each does what it says.
+
+## 13. Installable PWA (`app/manifest.ts`, `public/sw.js`, `proxy.ts`)
+
+- [ ] **Manifest reachable unauthenticated:** logged out, GET `/manifest.webmanifest` and
+  `/sw.js` → both return 200 (not a 307 to `/login`).
+
+- [ ] **Install prompt:** in Chrome/Edge, load the dashboard and confirm the in-app "Install
+  app" affordance appears and installs to the home screen / desktop.
+
+- [ ] **No stale caching:** after installing, deploy a change and reopen the installed app →
+  the new version loads (the service worker never caches; `/sw.js` is served `no-cache`).
+
+---
+
+*Last updated: 2026-09-03. Run this checklist on each significant release.*

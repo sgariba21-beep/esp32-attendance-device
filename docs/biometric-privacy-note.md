@@ -23,7 +23,7 @@ sensor's own flash memory, indexed by a slot number (FID, 1–127).
 | Location | What is stored | What is NOT stored |
 |---|---|---|
 | R503 sensor flash | Feature template (sensor-internal format) | Raw finger image |
-| Device SPIFFS | FID→member mapping (`fid_map.json`): slot number, member ID, name, role | Template data |
+| Device SPIFFS | FID→member mapping (`fid_map.csv`): slot number, member unique ID, role, name | Template data |
 | Supabase `members` table | `fin1`, `fin2` — integer slot numbers (e.g. `3`, `7`) | Template data, images |
 | Supabase `attendance` table | Member ID, timestamp, device ID, scan ID | Any biometric data |
 

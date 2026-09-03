@@ -60,7 +60,7 @@ Found under **Settings**. Only a super admin can change these.
 | **Sell services** | Off hides the Services tab and service line items. Turn off if you are a pure retail kiosk. |
 | **Enable loyalty rewards** | Off hides the whole Loyalty section. Existing history is kept and resumes if you turn it back on. |
 | **Timezone** | Decides when "today" starts and ends for visits, takings, and absence marking. |
-| **Skip weekends** | Leave this **off** for most shops -- salons and shops usually trade on Saturdays. Use **Closed Days** instead. |
+| **Days tracked** | Leave Saturday (and Sunday) **ticked** for most shops -- salons and shops usually trade at the weekend. For a specific date you are shut, use **Closed Days** instead. |
 | **Track staff** | Must be on for employee attendance. |
 
 > [!WARNING] Turning off **Sell products** or **Sell services** only hides them from new sales. It never rewrites past sales -- old records keep their item names and prices and still appear correctly in Reports.

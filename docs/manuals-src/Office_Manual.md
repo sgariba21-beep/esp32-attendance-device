@@ -35,7 +35,7 @@ You can set this separately for members and for staff.
 
 ## 2. Setting up, in the right order
 
-1. **Settings** -- name, logo, timezone, scan mode, and **Skip weekends** if you are a Monday-to-Friday operation.
+1. **Settings** -- name, logo, timezone, scan mode, and **Days tracked** (untick Sat and Sun if you are a Monday-to-Friday operation).
 2. **Periods & Holidays** -- create your current reporting period and add your public holidays.
 3. **Devices** -- assign each scanner to the department and location it sits in.
 4. **Members / Staff** -- add your people, or import them from a spreadsheet.
@@ -80,7 +80,7 @@ Add every non-working day: public holidays, company shutdowns, stocktaking days.
 
 Tick **Recurring** for holidays on the same calendar date each year. Leave it unticked for dates that move.
 
-**Skip weekends** in Settings handles Saturday and Sunday for you -- do not add them as holidays one by one.
+The **Days tracked** selector in Settings handles Saturday and Sunday for you -- untick the days you are closed rather than adding them as holidays one by one.
 
 ## 5. Your people
 
@@ -124,7 +124,7 @@ In time in / time out mode, both times for a person on a given day appear on the
 | Problem | What to do |
 | --- | --- |
 | Everyone marked absent on a working day | A holiday was set by mistake, or the device was offline all day. Check both. |
-| Everyone marked absent on a weekend | **Skip weekends** is off. Turn it on in Settings. |
+| Everyone marked absent on a weekend | Sat / Sun are still ticked under **Days tracked** in Settings. Untick them. |
 | Someone absent but they were at work | They did not scan, or scanned at a device outside their unit. |
 | Time out recorded but no time in | Their first scan of the day did not register. Check the device screen for "NO MATCH". |
 | A leaver still shows absences | They were never set Inactive. |

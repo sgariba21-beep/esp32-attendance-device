@@ -35,7 +35,7 @@ Exits 1 with a list if any page is missing a `requireRole(` call.
 
 ## Middleware
 
-Middleware lives in `proxy.ts`, **not** `middleware.ts`. The matcher must exclude `/api` routes.
+Middleware lives in `proxy.ts`, **not** `middleware.ts`. The matcher must exclude `/api` routes and the PWA assets (`manifest.webmanifest`, `sw.js`, `icons/`) so they stay reachable while logged out.
 
 ## Key directories
 
@@ -43,8 +43,9 @@ Middleware lives in `proxy.ts`, **not** `middleware.ts`. The matcher must exclud
 |---|---|
 | `app/(dashboard)/` | All authenticated dashboard pages |
 | `app/(auth)/login/` | Login page |
-| `app/api/` | API routes (signin, signout, changes watermark, CSV export, enrollment SSE) |
-| `lib/supabase/dal.ts` | `verifySession`, `requireRole`, `resolveInstitutionScope`, `getInstitution` |
+| `app/api/` | API routes (signin, signout, changes watermark, attendance + shop-report CSV exports, enrollment SSE) |
+| `app/manifest.ts` | Web app manifest (`/manifest.webmanifest`) for PWA install |
+| `lib/supabase/dal.ts` | `verifySession`, `requireRole`, `resolveInstitutionScope`, `resolveDeviceScope`, `getInstitution` |
 | `lib/supabase/server.ts` | `createAuthClient`, `createAdminClient` |
-| `components/` | Shared UI components including sidebar and mobile nav |
+| `components/` | Shared UI components including sidebar, mobile nav, and `pwa/` (SW registration + install prompt) |
 | `scripts/check-rbac.mjs` | CI guard for RBAC coverage |
