@@ -90,7 +90,7 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole, deviceBou
     { href: '/devices',    label: 'Devices',    icon: Cpu,           group: 'manage', roles: ['super_admin', 'platform_admin'] },
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, group: 'manage', roles: enrollmentRoles },
     // Periods & holidays: schools get 'Academic', offices get 'Periods & Holidays',
-    // shops get 'Closed Days' (holidays only; feeds mark-absent for stylists — A-9).
+    // shops get 'Closed Days' (holidays only; feeds mark-absent for shop staff — A-9).
     {
       href: '/academic',
       label: institution.type === 'office' ? 'Periods & Holidays' : institution.type === 'shop' ? 'Closed Days' : 'Academic',

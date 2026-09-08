@@ -16,7 +16,7 @@ import type { UserRole } from '@/lib/supabase/dal'
 export type DailyTakings  = { date: string; total: number; count: number }
 export type WeeklyTakings = { weekStart: string; total: number; count: number }
 export type ClientRevenue = { clientId: string; name: string; total: number; count: number }
-export type StylistRevenue = { stylistId: string | null; name: string; total: number; count: number }
+export type StaffRevenue = { staffId: string | null; name: string; total: number; count: number }
 export type PopularItem   = { name: string; type: 'service' | 'product'; qty: number; revenue: number }
 export type VisitFreq     = { name: string; count: number; lastVisit: string }
 export type LowStockItem  = { id: string; name: string; stock: number; price: number }
@@ -26,7 +26,7 @@ type Props = {
   dailyTakings: DailyTakings[]
   weeklyTakings: WeeklyTakings[]
   clientRevenue: ClientRevenue[]
-  stylistRevenue: StylistRevenue[]
+  staffRevenue: StaffRevenue[]
   popularItems: PopularItem[]
   visitFreq: VisitFreq[]
   lowStock: LowStockItem[]
@@ -82,7 +82,7 @@ export function ReportsView({
   dailyTakings,
   weeklyTakings,
   clientRevenue,
-  stylistRevenue,
+  staffRevenue,
   popularItems,
   visitFreq,
   lowStock,
@@ -101,7 +101,7 @@ export function ReportsView({
         <TabsList>
           <TabsTrigger value="takings">Takings</TabsTrigger>
           <TabsTrigger value="clients">By client ({clientRevenue.length})</TabsTrigger>
-          <TabsTrigger value="stylists">By {labelStaff.toLowerCase()} ({stylistRevenue.length})</TabsTrigger>
+          <TabsTrigger value="staff">By {labelStaff.toLowerCase()} ({staffRevenue.length})</TabsTrigger>
           <TabsTrigger value="items">Items ({popularItems.length})</TabsTrigger>
           <TabsTrigger value="visits">Visits</TabsTrigger>
           <TabsTrigger value="low-stock">
@@ -230,13 +230,13 @@ export function ReportsView({
           </div>
         </TabsContent>
 
-        {/* ── By stylist ──────────────────────────────────────────────── */}
-        <TabsContent value="stylists">
+        {/* ── By staff ────────────────────────────────────────────────── */}
+        <TabsContent value="staff">
           <div className="mt-4 space-y-4">
             <div className="flex justify-end">
-              <ExportLink href="/api/reports/stylists/export" />
+              <ExportLink href="/api/reports/staff/export" />
             </div>
-            {stylistRevenue.length === 0 ? (
+            {staffRevenue.length === 0 ? (
               <EmptyState icon={TrendingUp} message="No sales recorded yet." />
             ) : (
               <div className="overflow-hidden rounded-xl border border-border shadow-xs">
@@ -250,11 +250,11 @@ export function ReportsView({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stylistRevenue.map((r, i) => (
-                      <TableRow key={r.stylistId ?? '__none__'}>
+                    {staffRevenue.map((r, i) => (
+                      <TableRow key={r.staffId ?? '__none__'}>
                         <TableCell className="tabular-nums text-muted-foreground text-xs w-8">{i + 1}</TableCell>
                         <TableCell className="font-medium">
-                          {r.stylistId
+                          {r.staffId
                             ? r.name
                             : <span className="italic text-muted-foreground">{r.name}</span>}
                         </TableCell>

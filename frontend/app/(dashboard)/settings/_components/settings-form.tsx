@@ -159,7 +159,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
           </NativeSelect>
           <p className="text-xs text-muted-foreground">
             Office type tracks staff only and hides Academic and Promotion.
-            Shop type tracks stylists, hides student and promotion features, and enables the retail module.
+            Shop type tracks staff, hides student and promotion features, and enables the retail module.
           </p>
         </div>
 

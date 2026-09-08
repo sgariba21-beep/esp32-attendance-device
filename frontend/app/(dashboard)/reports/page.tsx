@@ -6,7 +6,7 @@ import type {
   DailyTakings,
   WeeklyTakings,
   ClientRevenue,
-  StylistRevenue,
+  StaffRevenue,
   PopularItem,
   VisitFreq,
   LowStockItem,
@@ -136,25 +136,25 @@ export default async function ReportsPage() {
     .map(([clientId, { name, total, count }]) => ({ clientId, name, total, count }))
     .sort((a, b) => b.total - a.total)
 
-  // Revenue per stylist — all-time
-  const stylistRevMap = new Map<string, { name: string; total: number; count: number }>()
+  // Revenue per staff member — all-time
+  const staffRevMap = new Map<string, { name: string; total: number; count: number }>()
   for (const tx of transactions) {
     const key = tx.staff_id ?? '__none__'
-    const existing = stylistRevMap.get(key)
+    const existing = staffRevMap.get(key)
     if (existing) {
       existing.total += Number(tx.total)
       existing.count++
     } else {
-      stylistRevMap.set(key, {
+      staffRevMap.set(key, {
         name: tx.staff_id ? (tx.members?.fullname ?? 'Unknown') : 'Unattributed',
         total: Number(tx.total),
         count: 1,
       })
     }
   }
-  const stylistRevenue: StylistRevenue[] = [...stylistRevMap.entries()]
+  const staffRevenue: StaffRevenue[] = [...staffRevMap.entries()]
     .map(([key, { name, total, count }]) => ({
-      stylistId: key === '__none__' ? null : key,
+      staffId: key === '__none__' ? null : key,
       name,
       total,
       count,
@@ -228,7 +228,7 @@ export default async function ReportsPage() {
       dailyTakings={dailyTakings}
       weeklyTakings={weeklyTakings}
       clientRevenue={clientRevenue}
-      stylistRevenue={stylistRevenue}
+      staffRevenue={staffRevenue}
       popularItems={popularItems}
       visitFreq={visitFreq}
       lowStock={lowStock}

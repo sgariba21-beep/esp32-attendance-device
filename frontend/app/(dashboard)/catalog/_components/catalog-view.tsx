@@ -139,7 +139,7 @@ export function CatalogView({ products, services, role, currency, sellProducts, 
   const activeProductCount = products.filter((p) => p.active).length
   const activeServiceCount = services.filter((s) => s.active).length
 
-  // Module-level offerings gate (#3b): a service-only salon hides Products, a
+  // Module-level offerings gate (#3b): a service-only shop hides Products, a
   // retail kiosk hides Services. Per-item active/archived is separate (above).
   if (!sellProducts && !sellServices) {
     return (

@@ -26,7 +26,7 @@ export async function createInstitutionWithAdmin(data: OnboardingFormData) {
 
   const supabase = createAdminClient()
 
-  // T18: neutral retail defaults for shop type (no salon-specific vocabulary).
+  // T18: neutral retail defaults for shop type (no trade-specific vocabulary).
   // Labels remain editable in Settings after creation.
   const shopLabels = {
     label_member:       'Staff',

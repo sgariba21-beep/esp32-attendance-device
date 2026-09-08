@@ -323,11 +323,11 @@ Additional accounts are managed through the `/users` page in the dashboard.
 
 | Route | Access | Description |
 |---|---|---|
-| `/sales` | super_admin, admin, cashier | Record sales transactions. Line-item entry with catalog lookup, optional stylist assignment, per-sale note. Low-stock warning surfaced as a non-blocking alert after a successful sale. |
+| `/sales` | super_admin, admin, cashier | Record sales transactions. Line-item entry with catalog lookup, optional staff assignment, per-sale note. Low-stock warning surfaced as a non-blocking alert after a successful sale. |
 | `/clients` | super_admin, admin, cashier | Client roster with visit history and loyalty point balance. Search by name or phone. |
 | `/catalog` | super_admin, admin, cashier | Products and services catalog. Stock quantity tracked for products; low-stock threshold warnings on the Reports page. |
 | `/rewards` | super_admin, admin | Loyalty reward redemption and tier management. Gated additionally by `loyalty_enabled` on the institution. |
-| `/reports` | super_admin, admin | Sales analytics — daily/weekly takings, revenue by client and stylist, popular items, visit frequency, low-stock products, loyalty rewards issued. CSV export for takings, client revenue, and stylist revenue. |
+| `/reports` | super_admin, admin | Sales analytics — daily/weekly takings, revenue by client and staff member, popular items, visit frequency, low-stock products, loyalty rewards issued. CSV export for takings, client revenue, and staff revenue. |
 
 ### Screenshots
 
@@ -436,7 +436,7 @@ esp32-attendance-device/
     │   │   ├── realtime-stream/           ← 410 tombstone — use /api/changes instead
     │   │   ├── changes/                   ← watermark poll endpoint (replaces SSE stream)
     │   │   ├── attendance/export/         ← CSV export with full filter parity
-    │   │   └── reports/{takings,clients,stylists}/export/  ← shop report CSV exports
+    │   │   └── reports/{takings,clients,staff}/export/  ← shop report CSV exports
     │   ├── suspended/                     ← institution suspended; sign-out only
     │   └── unauthorized/
     ├── lib/

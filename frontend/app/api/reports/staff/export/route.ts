@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest) {
     .select('total, staff_id, members(fullname)')
     .eq('institution_id', institutionId ?? '')
 
-  // Aggregate in memory: revenue per stylist
+  // Aggregate in memory: revenue per staff member
   type Row = { total: number; staff_id: string | null; members: { fullname: string } | null }
   const map = new Map<string, { name: string; total: number; count: number }>()
   for (const r of (rows ?? []) as unknown as Row[]) {
@@ -62,7 +62,7 @@ export async function GET(_req: NextRequest) {
   return new Response(csv, {
     headers: {
       'Content-Type': 'text/csv',
-      'Content-Disposition': 'attachment; filename="revenue-by-stylist.csv"',
+      'Content-Disposition': 'attachment; filename="revenue-by-staff.csv"',
     },
   })
 }
