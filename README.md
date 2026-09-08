@@ -331,12 +331,19 @@ Additional accounts are managed through the `/users` page in the dashboard.
 
 ### Screenshots
 
-![Overview dashboard showing today's attendance summary](docs/images/dashboard-overview.png)
-![Attendance view with filters and per-member stats panel](docs/images/dashboard-attendance.png)
-![Devices page showing provisioning workflow](docs/images/dashboard-devices.png)
-![Enrollment queue with fingerprint job management](docs/images/dashboard-enrollment.png)
+Dark-mode captures of the dashboard live in [`images/`](images/) — one set per
+institution type (38 pages in all). See [`images/README.md`](images/README.md)
+for the full index.
 
-Screenshots pending production UI.
+![School — overview](images/school--01-overview.jpg)
+![Office — overview](images/office--01-overview.jpg)
+![Shop — overview with the retail module](images/shop--01-overview.jpg)
+
+> **Disclaimer — dummy data.** Every screenshot is taken from throwaway demo
+> institutions (Riverdale High School, Northwind Logistics, Curbside Cycle Co.)
+> created solely for documentation. All names, clients, sales, attendance
+> records and figures shown are fabricated — not real people, and not the real
+> institutions that use this system.
 
 ---
 
