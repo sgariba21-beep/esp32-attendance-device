@@ -1,11 +1,13 @@
 # Dashboard screenshots — demo institutions
 
-Dark-mode captures of the live dashboard (`esp32-attendance-device-y9cs.vercel.app`,
-which tracks the `oled-integration` branch), one set per institution type. Taken
-2026-09-08 against three throwaway demo tenants seeded in the production Supabase
-project alongside the real ones (the real institutions are untouched and never
-appear in these shots — every capture was taken while signed in as the demo
-tenant's own `super_admin`, which the app hard-scopes to that tenant).
+Dark-mode captures of the live dashboard (`esp32-attendance-device-y9cs.vercel.app`),
+one set per institution type. Taken 2026-09-08 against three throwaway demo
+tenants seeded in the production Supabase project alongside the real ones (the
+real institutions are untouched and never appear in these shots — every capture
+was taken while signed in as the demo tenant's own `super_admin`, which the app
+hard-scopes to that tenant). All 18 `shop--*` shots plus the two settings shots
+were re-taken after the `7bd44ab` "drop salon vocabulary" cleanup reached the
+live deployment, so nothing here reads "stylist".
 
 Filenames: `<type>--<nn>-<page>.jpg`. JPEG because that is what the capture path
 produces; ~1250–1570 px wide.
@@ -75,7 +77,7 @@ sales, 3 loyalty rules with 5 issuances.
 | `shop--15-enrollment.jpg` | Enrollment |
 | `shop--16-closed-days.jpg` | Closed Days |
 | `shop--17-accounts.jpg` | Accounts |
-| `shop--18-settings.jpg` | Settings (custom labels + attendance tracking) |
+| `shop--18-settings.jpg` | Settings (identity + branding; "Shop type tracks staff") |
 
 ## Notes
 
