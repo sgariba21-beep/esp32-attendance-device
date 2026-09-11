@@ -23,7 +23,7 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 - Enrolled members: [N]
 - Running since: [start date]
 
-![Device installed at [institution name]](docs/images/deployment.jpg)
+![Device installed at [institution name]](images/deployment.jpg)
 
 ---
 
@@ -386,9 +386,10 @@ Firmware checks `https://api.github.com/repos/sgariba21-beep/esp32-attendance-de
 esp32-attendance-device/
 ├── README.md
 ├── docs/
-│   ├── device-secret-migration-rollout.md  ← step-by-step guide for per-device secret rollout
-│   ├── biometric-privacy-note.md           ← what biometric data is stored where and how
-│   └── e2e-testing-checklist.md            ← test cases for each major feature area
+│   ├── README.md                           ← index: which document is for whom, what to hand over
+│   ├── for-clients/                        ← PDFs for institutions: role guides, type guides, privacy note
+│   ├── for-operators/                      ← platform manual, technical docs, secret-rollout guide, e2e checklist
+│   └── source/                             ← Markdown sources + build.py — edit these, not the PDFs
 ├── firmware/
 │   └── ClassAttendance_Current_RTC/
 │       ├── ClassAttendance_Current_RTC.ino ← ESP32 firmware (single sketch)

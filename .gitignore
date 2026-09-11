@@ -6,6 +6,6 @@ CLAUDE.md
 .env*.local
 backend/supabase/functions/.env
 
-# Python bytecode (docs/manuals-src build script)
+# Python bytecode (docs/source build script)
 __pycache__/
 *.pyc

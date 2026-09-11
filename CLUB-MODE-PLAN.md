@@ -403,5 +403,5 @@ still opens the captive portal on double press; a scan with no meeting shows the
 refusal card; power-cycling mid-meeting preserves meeting state; scans queued while
 offline flush into the right meeting.
 
-Add the passing cases to [docs/e2e-testing-checklist.md](docs/e2e-testing-checklist.md)
+Add the passing cases to [docs/for-operators/e2e-testing-checklist.md](docs/for-operators/e2e-testing-checklist.md)
 as each phase lands.
