@@ -1,6 +1,7 @@
 # Club Mode — Session-Based Attendance
 
-**Status:** Planned, not started. No code written.
+**Status:** Phase 1 **applied to cloud** 2026-09-26 and verified (§7). Phases 2–4
+not started.
 **Target:** A 4th institution type, `club`, whose unit of attendance is a *meeting*
 rather than a *day*.
 
@@ -36,6 +37,7 @@ Recorded so they are not relitigated at implementation time.
 |---|---|---|
 | How a meeting starts | **Scheduled in the dashboard**, plus **opened at the device** by a master finger for impromptu ones | No first-scan auto-open. Phase 4 firmware is required only for the ad-hoc path. |
 | How a meeting ends | Scheduled meetings carry their own end time; ad-hoc ones close on a second master press; hard end-of-day backstop | Needs a sweep job more frequent than the current daily cron. |
+| Ad-hoc master press while offline | **Must work offline** (decided at Phase 1 start). Mechanism deferred to Phase 4 | Phase 1 deliberately adds no constraint that would preclude it — see §8 B. |
 | Do absences exist | **Per-tenant setting** (`institutions.track_absences`) | Some clubs enforce attendance, some do not. One flag, not two code paths. |
 | Scoping | **New institution type `club`** | Mirrors how `shop` was added. A school cannot host a club inside its own tenant — accepted. |
 | Scan with no meeting open | **Reject**, device shows "No meeting open" | Device must know meeting state locally. See §6 and Open Decision A. |
@@ -46,19 +48,39 @@ Recorded so they are not relitigated at implementation time.
 
 ## 3. Why this is safe for existing tenants
 
-Every attendance row that exists today would have `meeting_id IS NULL`. So the
-day-keyed unique constraint becomes a **partial** index scoped to
-`meeting_id IS NULL`, and a second partial index covers session mode:
+Every attendance row that exists today has `meeting_id IS NULL`. The day-keyed
+unique constraint is replaced by two keys that use **NULL semantics** to tell the
+modes apart:
 
 ```sql
--- daily-mode tenants (school / office / shop): behaviour identical to today
-unique (member_id, date, scan_type) where meeting_id is null
--- session-mode (club): two meetings in one day no longer collide
-unique (member_id, meeting_id, scan_type) where meeting_id is not null
+-- daily-mode (school / office / shop): meeting_id is always NULL, and
+-- NULLS NOT DISTINCT makes those NULLs equal -> exactly the old key.
+-- club: one row per meeting per day.
+unique nulls not distinct (member_id, date, scan_type, meeting_id)
+
+-- club: one row per member per meeting per scan type. Default NULLS DISTINCT,
+-- so daily rows (NULL meeting_id) never collide -> constrains club rows only.
+unique (meeting_id, member_id, scan_type)
 ```
 
 No backfill, no data migration, no behaviour change for any live tenant. This is
 the property the whole plan turns on — if it stops holding, stop and re-plan.
+
+> **Correction to the first draft of this plan.** It proposed *partial* indexes
+> (`… where meeting_id is null`). That would have broken production:
+> [mark-absent](backend/supabase/functions/mark-absent/index.ts) upserts with
+> `onConflict: "member_id,date,scan_type"`, which PostgREST sends as
+> `ON CONFLICT (member_id, date, scan_type) DO NOTHING`. Postgres only accepts a
+> partial index as the conflict arbiter if the `ON CONFLICT` clause repeats its
+> `WHERE` predicate, and PostgREST cannot send one — so every tenant's nightly
+> absence run would have errored (error `42P10`), silently, because mark-absent
+> reports per-institution failures as strings inside a `200`. Both keys above are
+> non-partial, so PostgREST can target them by column list. `NULLS NOT DISTINCT`
+> needs Postgres 15+; cloud runs 17. Verified locally — see §7 Phase 1.
+>
+> The old `(member_id, date, scan_type)` key is **kept** in Phase 1 for the same
+> reason, and dropped in Phase 2 only after mark-absent is redeployed with the new
+> conflict target.
 
 Two further pieces of existing machinery this plan leans on:
 
@@ -105,6 +127,18 @@ are**, so every existing report, filter and CSV export keeps working untouched.
 `device_id` uses `ON DELETE SET NULL`, matching the deliberate pattern on
 `attendance` and `members` — deleting a device must never destroy history.
 
+As built, the table also carries integrity CHECKs: `ends_at >= starts_at` (`>=` so
+an ad-hoc meeting opened and closed in the same second is still closable); a
+scheduled meeting must have `ends_at`; `status = 'open'` requires `opened_at`;
+`status = 'closed'` requires `closed_at`; titles are NULL or 1–120 non-blank
+characters. It deliberately does **not** check that `origin = 'device'` implies a
+`device_id` — that would make `DELETE FROM devices` fail, because `SET NULL` would
+violate it.
+
+Also deliberately left out until Phase 4, because they depend on how the offline
+master press is replayed (§8 B): "at most one open meeting per device", and an
+idempotency key for replayed device events. Both are additive when they land.
+
 ### 4.2 New table: `meeting_schedules` (Phase 3)
 
 Recurrence rules, materialised into `meetings` rows ahead of time. Attendance
@@ -134,13 +168,19 @@ cover the real cases; a general recurrence engine is a trap at this scale.
 
 ```sql
 alter table attendance
-  add column meeting_id uuid references meetings(id) on delete cascade;
+  add column meeting_id uuid references meetings(id);   -- default NO ACTION
 ```
 
-`ON DELETE CASCADE` here is intentional and differs from the `device_id` rule:
-deleting a meeting that never happened *should* remove its attendance rows. The
-dashboard must therefore warn before deleting a meeting with scans, and prefer
-`status = 'cancelled'` over deletion.
+**Changed from the first draft, which used `ON DELETE CASCADE`.** Cascade would let
+one mistaken delete silently erase a meeting's attendance. The FK now mirrors
+`attendance.member_id` (NO ACTION): a meeting that has attendance **cannot be
+deleted** until its rows are removed deliberately. The dashboard offers
+`status = 'cancelled'` instead, and a "delete" of a meeting with scans must be an
+explicit two-step (Phase 3).
+
+NO ACTION rather than RESTRICT matters: NO ACTION is checked at the *end* of the
+statement, so `DELETE FROM institutions` — which cascades to both `meetings` and
+`attendance` — still succeeds. RESTRICT would fire mid-cascade and block it.
 
 ### 4.4 Altered: `institutions`
 
@@ -155,8 +195,12 @@ alter table institutions
   add column meeting_autoclose_minutes integer not null default 240;
 ```
 
-`track_absences` defaults `true` so every existing tenant keeps today's behaviour;
-`/onboarding` sets it `false` when creating a `club`.
+`track_absences` defaults `true`; `/onboarding` sets it `false` when creating a
+`club`. As built it is **club-only**: the close sweep reads it, `mark-absent` does
+not, so school / office / shop keep getting daily absences regardless. Extending it
+to daily-mode tenants would be a separate, deliberate decision.
+
+The minute columns carry sanity bounds: pre/post-roll `0–240`, auto-close `15–1440`.
 
 Pre-roll and post-roll widen a scheduled meeting's acceptance window so early
 arrivals and stragglers still count. Auto-close is the backstop for an ad-hoc
@@ -173,6 +217,10 @@ create trigger trg_activity_meetings
 after insert or update or delete on public.meetings
 for each row execute function public.touch_institution_activity();
 ```
+
+The function's deleted-institution guard
+([20260904120000](backend/supabase/migrations/20260904120000_touch_institution_activity_skip_deleted_institution.sql))
+already covers the `ON DELETE CASCADE` from institutions.
 
 ---
 
@@ -257,33 +305,97 @@ this ordering is the point of the plan, not an accident of it.
 
 ### Phase 1 — Schema (invisible; zero behaviour change)
 
-Migration filenames are suggestions; **re-date them at implementation time** to stay
-after the latest applied migration (currently `20260904120000`).
+**Built, and applied to cloud** 2026-09-26 ~20:00 UTC via `apply_migration`, recorded
+in the cloud history as `20260926200055`, `20260926200119`, `20260926200202`. Three
+files in `backend/supabase/migrations/`, applied in order:
 
 | File | Contents |
 |---|---|
-| `…_club_type_and_meeting_settings.sql` | Widen `institutions_type_check` to include `'club'`; add `track_absences`, `meeting_preroll_minutes`, `meeting_postroll_minutes`, `meeting_autoclose_minutes` |
-| `…_meetings_table.sql` | `meetings` table; indexes on `(institution_id, starts_at)` and a partial index on `status = 'open'` |
-| `…_attendance_meeting_id.sql` | `attendance.meeting_id`; **swap the unique constraint for the two partial indexes** |
-| `…_meetings_activity_trigger.sql` | `trg_activity_meetings` on `touch_institution_activity()` |
-| `…_meetings_rls.sql` | Dormant defence-in-depth policies, matching the existing pattern |
+| `20260926120000_club_type_and_meeting_settings.sql` | Widen `institutions_type_check` to include `'club'`; add `track_absences`, `meeting_preroll_minutes`, `meeting_postroll_minutes`, `meeting_autoclose_minutes` |
+| `20260926120100_meetings.sql` | `meetings` table + CHECKs + indexes, **and** its RLS policy, explicit grants, and watermark trigger |
+| `20260926120200_attendance_meeting_id.sql` | `attendance.meeting_id` (NO ACTION FK); **adds** the two new unique keys; **keeps** the old one |
 
-**The constraint swap is the one risky step.** Build the replacement indexes
-`CONCURRENTLY` first, verify, then drop the old constraint inside a transaction.
-Dropping first leaves a window with no dedup protection on a live table.
+Deviations from the first draft of this plan, and why:
+
+- **3 files, not 5.** RLS and the watermark trigger live in the same file as the
+  table. This project auto-grants new tables to `anon` / `authenticated`, so applying
+  the table without RLS — even briefly, between two files — would expose it through
+  the Data API.
+- **Explicit `GRANT`s to `service_role`.** Supabase stops auto-granting new public
+  tables on 2026-10-30; applying after that without them would leave the edge
+  functions with "permission denied for table meetings".
+- **No constraint *swap* in Phase 1** — additive only (see §3). Nothing is dropped,
+  so there is no window without dedup protection, and nothing to do `CONCURRENTLY`.
+  (`CREATE INDEX CONCURRENTLY` also cannot run inside a transaction, which is how
+  `apply_migration` and the SQL editor run a file.) Lock time is milliseconds at
+  current volume (~1k attendance rows).
+
+**Apply** each file as one unit, in order, via the SQL editor or `apply_migration`.
 
 **Verify:**
 
 ```sql
--- both partial indexes present, old constraint gone
-select indexname, indexdef from pg_indexes
- where tablename = 'attendance' and indexdef ilike '%scan_type%';
+-- old key kept, both new keys present (expect 3 rows)
+select conname, pg_get_constraintdef(oid) from pg_constraint
+ where conrelid = 'public.attendance'::regclass
+   and conname in ('attendance_member_date_scan_type_unique',
+                   'attendance_member_date_scan_type_meeting_key',
+                   'attendance_meeting_member_scan_type_key');
 
--- every existing row is daily-mode
-select count(*) from attendance where meeting_id is not null;  -- expect 0
+-- every existing row is daily-mode (expect 0)
+select count(*) from attendance where meeting_id is not null;
+
+-- meetings is locked down (expect true / true)
+select relrowsecurity from pg_class where oid = 'public.meetings'::regclass;
+select has_table_privilege('service_role', 'public.meetings', 'insert');
 ```
 
+**Tested** (2026-09-26) on PGlite — real Postgres (18.3) compiled to WASM — against
+a replica of the live cloud schema generated from its catalog: exact columns,
+defaults, constraints, indexes, trigger functions, and triggers for `institutions`,
+`devices`, `members`, `periods`, `attendance`, `institution_activity`. Baseline data
+was seeded on the *current* schema, then each file applied in its own transaction,
+as in cloud. 43 checks, all passing, including: today's mark-absent statement still
+dedups; the Phase 2 conflict target works both before and after the old key is
+dropped; dropping the old key first reproduces `42P10`; the partial-index design
+reproduces `42P10`; every meeting CHECK; meeting, device, and whole-institution
+delete paths; the watermark trigger. A mutation run (CASCADE FK, plain UNIQUE
+instead of `NULLS NOT DISTINCT`) fails 5 of the checks, so the suite does detect
+regressions.
+
+*Not* tested: a from-scratch `supabase db reset` of the full migration chain (local
+Docker Desktop was crashing on start), and the PostgREST layer itself — the tests
+issue the SQL PostgREST generates for `upsert(…, { onConflict, ignoreDuplicates })`,
+not the HTTP call. Cloud runs Postgres 17; nothing used here differs between 17 and 18.
+
+**Verified in cloud after apply:**
+- All verify queries above pass: 3 keys, 0 rows with `meeting_id`, RLS on, grants in place.
+- `EXPLAIN` (no `ANALYZE`, so nothing written) of mark-absent's exact statement
+  resolves its conflict arbiter to `attendance_member_date_scan_type_unique`, so the
+  nightly run is unaffected. The Phase 2 target
+  `(member_id, date, scan_type, meeting_id)` already resolves to
+  `attendance_member_date_scan_type_meeting_key`.
+- Security advisors identical before and after. Performance advisors add only
+  "unused index" notices for the three empty-table `meetings` indexes. There is no
+  unindexed-FK notice for `attendance.meeting_id`: the club key covers it.
+- `meetings` has no legacy `"service role full access"` policy, unlike older tables,
+  and needs none: cloud `service_role` has `BYPASSRLS`.
+
 ### Phase 2 — Backend
+
+**Start with the dedup contract step, in this exact order.** Each step is safe on
+its own; doing them out of order breaks the nightly absence run for every tenant.
+
+1. Redeploy `mark-absent` with `onConflict: "member_id,date,scan_type,meeting_id"`,
+   and set `meeting_id: null` explicitly on each absent row. This works against the
+   Phase 1 schema, where both old and new keys exist.
+2. Only then apply a migration that drops `attendance_member_date_scan_type_unique`.
+   Before step 1, that drop makes today's mark-absent fail with `42P10`.
+3. Then build the rest of Phase 2. Until step 2 lands, a club member cannot be
+   recorded at two meetings on the same day — the old key blocks it.
+
+`close-meetings` writes club absences with
+`onConflict: "meeting_id,member_id,scan_type"` — the non-partial club key.
 
 | Item | Detail |
 |---|---|
@@ -301,7 +413,7 @@ Absence rows written on close reuse the existing shape: `status = 'absent'`,
 
 | Item | Detail |
 |---|---|
-| `/meetings` *(new route)* | List upcoming / past. Create one-off and recurring. Show the currently-open meeting live with a present count. Close, cancel, edit. Warn loudly before deleting a meeting that has scans (`ON DELETE CASCADE`). |
+| `/meetings` *(new route)* | List upcoming / past. Create one-off and recurring. Show the currently-open meeting live with a present count. Close, cancel, edit. A meeting with attendance **cannot** be deleted (the FK refuses it) — offer Cancel; if a real delete is ever needed, it is an explicit two-step that removes the attendance first. |
 | Recurrence generator | Materialise `meeting_schedules` into `meetings` rows ~8 weeks ahead; extend on each `close-meetings` cron run. |
 | `/attendance` | Meeting filter; show meeting title alongside date for club tenants. |
 | Overview `/` | For clubs, attendance rate = *meetings attended / meetings held*, not days. |
@@ -323,7 +435,7 @@ Bump `FIRMWARE_VERSION` from `1.10.0`
 | Scan-loop branch | At [firmware:2779](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:2779), before the existing `role == "master"` branch: `session_master` calls `toggle-meeting`. **The existing double-press → captive-portal gesture is untouched**, because this is a different finger. |
 | Meeting state cache | Parse the new `device_config_meeting_*` fields; persist alongside the existing `device_config.json` so state survives a reboot mid-meeting. |
 | OLED cards | "No meeting open" (refusal), "Meeting opened HH:MM", "Meeting closed · N present". Post to the existing Core-0-safe mailbox; never touch `display` directly from a task. |
-| Offline path | When WiFi is down, skip the local meeting check and queue the scan (§6). |
+| Offline path | When WiFi is down, skip the local meeting check and queue the scan (§6). The session-master press **must also work offline** — mechanism to be designed at the start of this phase (§8 B). |
 
 **Release:** tag `firmware-v1.11.0`. OTA compares against the compiled-in version and
 only flashes a strictly newer one.
@@ -340,23 +452,46 @@ alternative — refuse when offline too — loses every scan of a meeting held d
 outage. *Recommendation:* accept the inconsistency, and make the OLED say
 "Queued — offline" so it is visible rather than silent.
 
-**B — Should the ad-hoc master press work offline?**
-Opening a meeting is a control action, not a data point, so the simple answer is
-refuse and show "Offline". But a club meeting somewhere with poor WiFi is exactly the
-target scenario. Queueing an open/close pair for later replay is doable but adds real
-complexity — reconciling a queued open against a meeting the server may have already
-auto-closed. *Recommendation:* refuse in Phase 4; revisit only if a real deployment
-hits it.
+**B — How the ad-hoc master press works offline.** *Decided: it must work offline.*
+The mechanism is still open and gets designed at the start of Phase 4. What that
+design has to answer:
+
+- **Queueing.** Open/close presses become durable SPIFFS events, like scans, and are
+  replayed on reconnect with their RTC timestamps — so `toggle-meeting` must accept
+  a device timestamp, not stamp `now()`.
+- **Idempotency.** A replayed press whose ack was lost must not open a second
+  meeting. Likely a device-generated event id (as `scan_id` does for scans), stored
+  on `meetings`.
+- **Ordering.** Scans taken during an offline meeting are queued *after* its open
+  event and must land inside it. Either replay controls before scans, or rely on
+  timestamp resolution (§5) and allow a scan to arrive before its meeting exists
+  (a short server-side retry, or leave it queued on the device until the meeting
+  exists).
+- **Local state.** Offline, the device must track "meeting open" itself so it
+  accepts scans, which also resolves most of Open Decision A.
+- **Reconciliation.** The server may auto-close or end-of-day-close a meeting that
+  the device, offline, still thinks is open; or a scheduled meeting may overlap an
+  offline ad-hoc one.
+
+Phase 1 was built to leave all of this open: it adds no "one open meeting per
+device" constraint and no idempotency column. Both are additive when this is
+decided.
 
 ---
 
 ## 9. Risks and gotchas
 
-- **The constraint swap (Phase 1)** is the only step that can damage existing data.
-  Build `CONCURRENTLY`, verify, then drop. Never the reverse.
-- **`ON DELETE CASCADE` on `attendance.meeting_id`** means deleting a meeting deletes
-  its attendance. Intended, but the UI must make it hard to do by accident. Prefer
-  `cancelled`.
+- **The old-key drop (Phase 2 step 2)** is the step that can break production:
+  applied before mark-absent is redeployed, every tenant's nightly absence run fails
+  with `42P10`, reported only inside a `200` response. Follow the Phase 2 order.
+- **Deleting a meeting with attendance is refused by the database** (NO ACTION FK).
+  Intended — the UI must offer Cancel rather than surface a raw FK error.
+- **A deleted host device turns its meetings into unbound ones.** `device_id` is
+  `SET NULL`, and NULL also means "not bound to a device". In Phase 2 resolution
+  (`device_id = D or device_id is null`), a deleted device's *future* scheduled
+  meetings would start matching scans from the tenant's other devices. Harmless for
+  single-device clubs; decide in Phase 2 whether resolution should skip unbound
+  meetings whose host was deleted, or whether device deletion should cancel them.
 - **DST and timezone edits.** Meeting windows are `timestamptz`; a tenant changing
   `institutions.timezone` shifts the local rendering of already-scheduled meetings.
   Decide whether existing rows re-anchor or hold their instant — probably hold, and
@@ -384,9 +519,10 @@ hits it.
 
 ## 11. Per-phase test checklist
 
-**Phase 1** — existing tenants unaffected: a school logs a scan, a duplicate scan is
-still rejected, `mark-absent` still writes rows. `select count(*) from attendance where
-meeting_id is not null` returns 0.
+**Phase 1** — after applying to cloud: run the §7 Phase 1 verify queries; the next
+nightly `mark-absent` run returns `marked N absent` / `all tracked members present`
+for every tenant, with no `insert error`; a school scan still logs, and a duplicate
+scan is still rejected.
 
 **Phase 2** — scan inside a scheduled window lands with `meeting_id`; scan outside
 returns `no_meeting_open`; **a scan whose timestamp is 3 days old lands in the correct
