@@ -1,4 +1,5 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { handleClubScan } from "./club.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -134,10 +135,10 @@ Deno.serve(async (req: Request) => {
     // Load institution config (shared by both auth paths).
     const { data: institution, error: instError } = await supabase
       .from("institutions")
+      // One string literal, not a concatenation: supabase-js can only infer the
+      // row type from a literal (a built string types the row as an error).
       .select(
-        "status, timezone, tracked_weekdays, track_students, track_staff, student_scan_mode, staff_scan_mode, " +
-        "track_lateness, expected_start_time, late_grace_minutes, " +
-        "track_early_leaving, expected_end_time, early_leave_grace_minutes"
+        "type, status, timezone, tracked_weekdays, track_students, track_staff, student_scan_mode, staff_scan_mode, track_lateness, expected_start_time, late_grace_minutes, track_early_leaving, expected_end_time, early_leave_grace_minutes"
       )
       .eq("id", institution_id)
       .single();
@@ -152,6 +153,23 @@ Deno.serve(async (req: Request) => {
 
     const tz = institution.timezone || "UTC";
     const { date, time, weekday } = zonedParts(instant, tz);
+
+    // Club tenants take attendance per meeting, resolved by the scan's own
+    // timestamp (see ./club.ts). The weekday, holiday and period gates below
+    // are day-based and do not apply to them.
+    if (institution.type === "club") {
+      const { status, body } = await handleClubScan(supabase, {
+        institution_id,
+        institution,
+        authenticatedDeviceId,
+        sid,
+        scan_id,
+        instant,
+        date,
+        time,
+      });
+      return json(body, status);
+    }
 
     // tracked_weekdays holds ISO weekday numbers (1 = Mon … 7 = Sun); zonedParts
     // gives an en-US short name. A day not in the set is not tracked at all.

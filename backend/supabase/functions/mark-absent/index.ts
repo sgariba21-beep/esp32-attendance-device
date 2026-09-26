@@ -27,12 +27,18 @@ function localTime(instant: Date, timeZone: string): string {
 const BATCH_SIZE = 8;
 
 async function processInstitution(inst: {
-  id: string; status: string; tracked_weekdays: number[] | null; timezone: string;
+  id: string; type: string; status: string; tracked_weekdays: number[] | null; timezone: string;
   track_students: boolean; track_staff: boolean;
   student_scan_mode: string; staff_scan_mode: string;
 }): Promise<string> {
   if (inst.status !== "active") {
     return `${inst.id}: inactive — skipped`;
+  }
+
+  // Club tenants take attendance per MEETING, not per day. Their absences are
+  // written when each meeting closes, by public.close_due_meetings() (pg_cron).
+  if (inst.type === "club") {
+    return `${inst.id}: club — absences come from close_due_meetings`;
   }
 
   const now = new Date();
@@ -150,6 +156,9 @@ async function processInstitution(inst: {
       status: "absent",
       scan_type: scanTypeFor(m.member_type),
       scan_id: null,
+      // Daily-mode row. Explicit so it is always part of the upsert payload
+      // that the onConflict target below names.
+      meeting_id: null,
     }));
 
   if (absentRecords.length === 0) {
@@ -158,8 +167,12 @@ async function processInstitution(inst: {
 
   const { error: insertError } = await supabase
     .from("attendance")
+    // Targets attendance_member_date_scan_type_meeting_key, which is UNIQUE
+    // NULLS NOT DISTINCT: for daily rows (meeting_id always NULL) it is exactly
+    // the old (member_id, date, scan_type) key. Do not drop meeting_id from
+    // this list — the old 3-column key no longer exists to match it (42P10).
     .upsert(absentRecords, {
-      onConflict: "member_id,date,scan_type",
+      onConflict: "member_id,date,scan_type,meeting_id",
       ignoreDuplicates: true,
     });
 
@@ -183,7 +196,7 @@ Deno.serve(async (req: Request) => {
     const { data: institutions, error: instError } = await supabase
       .from("institutions")
       .select(
-        "id, status, tracked_weekdays, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
+        "id, type, status, tracked_weekdays, timezone, track_students, track_staff, student_scan_mode, staff_scan_mode"
       );
 
     if (instError || !institutions || institutions.length === 0) {

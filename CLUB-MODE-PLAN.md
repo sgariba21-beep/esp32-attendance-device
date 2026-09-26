@@ -1,7 +1,7 @@
 # Club Mode — Session-Based Attendance
 
-**Status:** Phase 1 **applied to cloud** 2026-09-26 and verified (§7). Phases 2–4
-not started.
+**Status:** Phases 1 and 2 **live in cloud** (2026-09-26) and verified end to end.
+Phases 3–4 not started.
 **Target:** A 4th institution type, `club`, whose unit of attendance is a *meeting*
 rather than a *day*.
 
@@ -238,7 +238,8 @@ existing `parseInstant`, [log-attendance:17](backend/supabase/functions/log-atte
      scheduled → starts_at - preroll  <=  T  <=  ends_at + postroll
      device    → opened_at            <=  T  <=  coalesce(closed_at, now())
 
-3. No match → 409 with code "no_meeting_open"
+3. No match → 200 with code "no_meeting_open" and no scan_type
+   (NOT a 4xx — see "Response contract" in §7 Phase 2)
 
 4. Insert attendance with meeting_id set, and date/time computed in the
    institution timezone exactly as today.
@@ -383,38 +384,117 @@ not the HTTP call. Cloud runs Postgres 17; nothing used here differs between 17 
 
 ### Phase 2 — Backend
 
-**Start with the dedup contract step, in this exact order.** Each step is safe on
-its own; doing them out of order breaks the nightly absence run for every tenant.
+**Built, tested, and deployed to cloud** (2026-09-26) — see the runbook below.
+Purely server-side. Decisions taken at the start of Phase 2:
 
-1. Redeploy `mark-absent` with `onConflict: "member_id,date,scan_type,meeting_id"`,
-   and set `meeting_id: null` explicitly on each absent row. This works against the
-   Phase 1 schema, where both old and new keys exist.
-2. Only then apply a migration that drops `attendance_member_date_scan_type_unique`.
-   Before step 1, that drop makes today's mark-absent fail with `42P10`.
-3. Then build the rest of Phase 2. Until step 2 lands, a club member cannot be
-   recorded at two meetings on the same day — the old key blocks it.
+- **`toggle-meeting` and the poll's meeting fields moved to Phase 4.** Both exist
+  only for firmware, and their contracts (device timestamps, replay idempotency,
+  whether an offline device needs the upcoming schedule cached) are exactly what
+  the offline master-press design decides (§8 B).
+- **Meeting logic lives in Postgres**, not a new edge function: set-based,
+  transactional, and testable against the replica. pg_cron calls the sweep
+  directly — no pg_net hop, no cron secret.
+- **Expected attendees** of a meeting are the members enrolled on its device
+  (fingerprints live on the sensor — nobody else can physically scan in); for an
+  unbound meeting, all active tracked members.
+- **Club punctuality** is measured against the meeting's own `starts_at` /
+  `ends_at` with the institution's grace minutes, at whole-minute granularity like
+  the daily path. Ad-hoc meetings are never judged (no scheduled start).
+- **Scheduled meetings never flip to `open`**: "live" means inside the window.
+  Only device meetings use `open`.
 
-`close-meetings` writes club absences with
-`onConflict: "meeting_id,member_id,scan_type"` — the non-partial club key.
-
-| Item | Detail |
+| File | What it does |
 |---|---|
-| `log-attendance` | Add meeting resolution (§5) for `club` tenants. Skip the `tracked_weekdays` gate entirely for clubs — it would be a second filter that silently drops impromptu meetings. Return `no_meeting_open` as a distinct code. Non-club tenants take the existing path unchanged. |
-| `toggle-meeting` *(new)* | `POST` with `{ device_id }` + `x-device-secret`. Opens an ad-hoc meeting, or closes the open one. Returns the new state plus a present-count for the OLED. Mirrors the auth block in `log-attendance`. |
-| `get-enrollment-job` | Bump `DEVICE_CONFIG_VERSION` → 2; add the four `device_config_meeting_*` fields (§6). Send them every poll, **not** gated on `config_rev` — meeting state changes far more often than institution config. |
-| `close-meetings` *(new)* | On `pg_cron` every ~15 min. Closes scheduled meetings past `ends_at + postroll`; closes ad-hoc meetings idle beyond `meeting_autoclose_minutes`; end-of-day backstop; writes absences where `track_absences` is on, guarded by `absences_written_at`. |
-| `mark-absent` | Add an early skip for `type = 'club'` — club absences come from `close-meetings`, never the daily cron. |
+| `20260926130000_meeting_functions.sql` | `resolve_meeting(institution, device, instant)` (§5 algorithm, overlap precedence: bound > unbound, core window > roll, latest start); `close_due_meetings(now)` sweep; device-delete guard trigger + `meetings.device_deleted_at` |
+| `20260926130100_drop_old_attendance_dedup_key.sql` | Drops `attendance_member_date_scan_type_unique`. Guarded: refuses to run if the replacement key is missing |
+| `20260926130200_close_meetings_cron.sql` | `cron.schedule('close-meetings', '*/15 * * * *', …)` |
+| `20260926130300_close_due_meetings_whole_seconds.sql` | Replaces `close_due_meetings` with one change: absent rows' `time` truncated to whole seconds (found by the live test) |
+| `functions/mark-absent/index.ts` | Skips `type = 'club'`; `onConflict: "member_id,date,scan_type,meeting_id"` with `meeting_id: null` explicit |
+| `functions/log-attendance/club.ts` *(new)* | The whole club scan path. `index.ts` branches to it right after the timestamp conversion, before the weekday / holiday / period gates; the daily path is otherwise untouched |
 
-Absence rows written on close reuse the existing shape: `status = 'absent'`,
-`scan_id = null`, plus `meeting_id`. That keeps the placeholder-overwrite path in
-`log-attendance` working for late flushes.
+**The sweep** (`close_due_meetings`): closes scheduled meetings once
+`ends_at + post-roll` passes; closes ad-hoc meetings at the *earlier* of their idle
+deadline (last scan + auto-close) and local midnight — `closed_at` is that moment,
+not the sweep time, so offline scans taken before it still resolve in; then writes
+absences for every closed, unprocessed meeting. It is the **only** writer of club
+absences, so meetings closed by any path (sweep, dashboard, device) get them.
+`absences_written_at` means "absence pass done" and is set even when nothing was
+written, so turning `track_absences` on later never floods past meetings. Tenants
+with a timezone Postgres doesn't recognise are skipped, not allowed to fail the run.
+
+**The device-delete guard.** `meetings.device_id` is `SET NULL`, and NULL means
+"unbound", which the resolver lets any device match. Unguarded, deleting a device
+would turn every meeting it hosted — including historic ones — into a trap for
+other devices' late-flushed scans. A deleted device can never authenticate again,
+so the guard (a `BEFORE DELETE` trigger, because the `SET NULL` action runs before
+any `AFTER` trigger could find the rows) stamps `device_deleted_at` on all its
+meetings, which the resolver then never matches; cancels its future ones; closes
+any under way; and marks their absence pass done unwritten (the same delete
+SET-NULLs `members.device_id`, so who was expected is unknowable). It skips itself
+mid-cascade from `DELETE FROM institutions`, like the watermark trigger does.
+
+**Response contract with the device** (firmware ≥ 1.10.0, unchanged —
+[firmware:653](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:653),
+[firmware:2108](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:2108)):
+`200` + `scan_type` → PRESENT / TIME IN / TIME OUT; `200` without `scan_type` →
+NOT LOGGED; `4xx` → ERROR **and counted as lost data** in the OLED banner; `5xx` →
+kept queued and retried. So "no meeting open" is `200` + `code: "no_meeting_open"`
+(the first draft's 409 would have shown ERROR and inflated "N lost"), and a failed
+meeting lookup is `500` so the scan is retried, not dropped. With today's firmware a
+club therefore already gets a sensible device experience: scans inside a meeting
+show PRESENT, scans outside show NOT LOGGED.
+
+**Also fixed in passing:** `log-attendance`'s institution `select` was built by
+string concatenation, which supabase-js types as `GenericStringError` — 16
+pre-existing type errors. It is now one literal (identical at runtime), and all
+three function files pass `deno check` with zero errors.
+
+**Tested** (local — Docker Desktop is down, so PGlite + Deno):
+
+- SQL on PGlite against the cloud replica, club tenant in Africa/Nairobi (UTC+3) to
+  exercise real offset math: Phase 1 regression 43/43, Phase 2 69/69, twice. Covers
+  window edges (pre/post-roll ±1 min), overlap precedence, early close, legacy
+  no-device path, tenant isolation, every sweep branch (idle deadline, local
+  midnight, absences on/off with no retro-flood, time_in_out, suspended tenant,
+  invalid timezone), the device guard, and institution delete through the guard.
+  A mutation run removing the resolver's deleted-device filter, the timezone guard,
+  and the cascade guard fails 12 checks. The drop-key guard refuses to run without
+  Phase 1 and leaves the old key intact.
+- `club.ts`: 14 Deno unit tests with a recording fake client — every response the
+  firmware can see, the legacy auth path, time-in/out sequencing per meeting,
+  placeholder overwrite, duplicates, and error → 500.
+
+**Deploy runbook — in this order; each step is safe on its own:**
+
+| # | Step | Verify |
+|---|---|---|
+| 1 | Apply `20260926130000_meeting_functions.sql` | ✅ **done** 2026-09-26: grants, trigger, column in place; sweep on empty table returns zeros |
+| 2 | Deploy `mark-absent` (`--no-verify-jwt`) | ✅ **v15.** Throwaway *daily* tenant tracking all 7 days; triggered via `pg_net` exactly as the cron does: `marked 1 absent`, no `insert error`; real tenants `day not tracked — skipped`; club test tenant skipped. Re-triggered: still one row (conflict path) |
+| 3 | Apply `20260926130100_drop_old_attendance_dedup_key.sql` — **only after step 2** | ✅ Old key gone; re-triggered mark-absent: no error, still one row — daily dedup now rests on the `NULLS NOT DISTINCT` key alone |
+| 4 | Apply `20260926130200_close_meetings_cron.sql` | ✅ `close-meetings` job active, runs as `postgres` |
+| 5 | Deploy `log-attendance` (`--no-verify-jwt`; ships `index.ts` + `club.ts` + `deno.json`) | ✅ **v15.** Real HTTPS scans with a test device secret: daily scan overwrote its absent placeholder; duplicate and same-`scan_id` retry → `Duplicate scan ignored`; club scan inside a meeting → logged with `meeting_id`; between meetings → `no_meeting_open` (200); wrong secret → 401; unknown member → 404. The **first real cron run** (23:15 UTC) closed the past test meeting and wrote absences for both members; then a scan timestamped *inside* that closed meeting (a late offline flush) → `overwrote absent placeholder` in the right meeting |
+| 5a | Apply `20260926130300_close_due_meetings_whole_seconds.sql` | ✅ Fix for a bug the live run exposed: sweep absences carried the meeting start's microseconds (`21:09:49.949243`) where every other row is `HH:MM:SS`. Now truncated; re-verified live (`23:16:48.148` start → `23:16:48`) and in PGlite (a check that fails without the fix) |
+| 6 | Delete both test tenants | ✅ Cascaded cleanly through meetings, the device guard and the watermark trigger; nothing left; real data unchanged (3 tenants, 973 attendance rows) |
+| 7 | Advisors before/after | ✅ Security lints identical to the pre-Phase-1 baseline; none mention the new functions |
+
+Two gotchas for whoever deploys edge functions here:
+
+- The Supabase MCP deploy tool **defaults to `verify_jwt: true`**. Devices send no
+  JWT, so that default would lock every device out. Always pass `false` /
+  `--no-verify-jwt`.
+- Via the MCP deploy tool, `import_map_path` must be passed explicitly as
+  `deno.json`; otherwise it reuses the previous version's absolute
+  `file:///tmp/…` path and the deploy is rejected. The CLI reads it from
+  `config.toml` and is unaffected.
 
 ### Phase 3 — Dashboard (the value cut point)
 
 | Item | Detail |
 |---|---|
 | `/meetings` *(new route)* | List upcoming / past. Create one-off and recurring. Show the currently-open meeting live with a present count. Close, cancel, edit. A meeting with attendance **cannot** be deleted (the FK refuses it) — offer Cancel; if a real delete is ever needed, it is an explicit two-step that removes the attendance first. |
-| Recurrence generator | Materialise `meeting_schedules` into `meetings` rows ~8 weeks ahead; extend on each `close-meetings` cron run. |
+| Recurrence generator | Materialise `meeting_schedules` into `meetings` rows ~8 weeks ahead; extend from the same pg_cron cadence as `close_due_meetings` (a second function, or a step in it). |
+| Manual close | Closing a meeting from the dashboard only sets `status = 'closed'`, `closed_at = now()`; the sweep writes its absences within 15 min. Never write absences from the dashboard. |
+| Device delete UX | Deleting a device cancels its future meetings and closes any under way, skipping their absences (§7 Phase 2 device guard). Warn with a count before confirming. |
 | `/attendance` | Meeting filter; show meeting title alongside date for club tenants. |
 | Overview `/` | For clubs, attendance rate = *meetings attended / meetings held*, not days. |
 | `/settings` | Absence toggle, pre/post-roll, auto-close, label overrides. |
@@ -430,6 +510,8 @@ Bump `FIRMWARE_VERSION` from `1.10.0`
 
 | Item | Detail |
 |---|---|
+| `toggle-meeting` *(moved from Phase 2)* | Edge function: `POST` with `{ device_id }` + `x-device-secret`, opens or closes the device's ad-hoc meeting. Must accept a **device timestamp** and a **replay id** (offline, §8 B). |
+| Poll meeting fields *(moved from Phase 2)* | `get-enrollment-job`: bump `DEVICE_CONFIG_VERSION` → 2 and add meeting state (§6), sent every poll. May need the upcoming schedule too, so an offline device can decide locally (§8 A/B). |
 | `session_master` role | New value in `fidMapRole`. No format change — the fid map CSV already carries a free-form role column. |
 | Enrollment commands | `register-session-master` / `delete-session-master`, mirroring the existing `register-master` handling at [firmware:2698](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:2698). Widen the `enrollment_jobs.command` CHECK in a Phase 4 migration. |
 | Scan-loop branch | At [firmware:2779](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:2779), before the existing `role == "master"` branch: `session_master` calls `toggle-meeting`. **The existing double-press → captive-portal gesture is untouched**, because this is a different finger. |
@@ -486,12 +568,16 @@ decided.
   with `42P10`, reported only inside a `200` response. Follow the Phase 2 order.
 - **Deleting a meeting with attendance is refused by the database** (NO ACTION FK).
   Intended — the UI must offer Cancel rather than surface a raw FK error.
-- **A deleted host device turns its meetings into unbound ones.** `device_id` is
-  `SET NULL`, and NULL also means "not bound to a device". In Phase 2 resolution
-  (`device_id = D or device_id is null`), a deleted device's *future* scheduled
-  meetings would start matching scans from the tenant's other devices. Harmless for
-  single-device clubs; decide in Phase 2 whether resolution should skip unbound
-  meetings whose host was deleted, or whether device deletion should cancel them.
+- **A deleted host device would turn its meetings into unbound ones** — *resolved in
+  Phase 2* by the device-delete guard and `meetings.device_deleted_at` (§7 Phase 2).
+  The residual cost: a device deleted mid-meeting leaves that meeting without
+  absences.
+- **Offline ad-hoc meetings vs the server's auto-close.** The sweep closes an ad-hoc
+  meeting at its idle deadline using only the scans the *server* has seen. If a
+  device opens a meeting online and then loses WiFi for longer than
+  `meeting_autoclose_minutes`, scans it keeps taking offline land after the
+  meeting's `closed_at` and are rejected when they flush. Part of the Phase 4
+  offline design (§8 B).
 - **DST and timezone edits.** Meeting windows are `timestamptz`; a tenant changing
   `institutions.timezone` shifts the local rendering of already-scheduled meetings.
   Decide whether existing rows re-anchor or hold their instant — probably hold, and
