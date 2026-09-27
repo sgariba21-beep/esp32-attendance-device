@@ -13,6 +13,7 @@ import { createUser, updateUserRole } from '../_actions'
 import { indefiniteArticle } from '@/lib/utils'
 import type { UserRole } from '@/lib/supabase/dal'
 import type { UserRow } from './users-view'
+import type { InstitutionType } from '@/lib/types'
 
 type DeviceOption = { id: string; group_name: string; unit_name: string; institution_id?: string | null }
 
@@ -23,7 +24,7 @@ type Props = {
   devices: DeviceOption[]
   labelUnit: string
   labelStaff: string
-  institutionType: 'school' | 'office' | 'shop'
+  institutionType: InstitutionType
   currentUserRole: UserRole
   institutions: { id: string; name: string }[]
   members: { id: string; fullname: string }[]

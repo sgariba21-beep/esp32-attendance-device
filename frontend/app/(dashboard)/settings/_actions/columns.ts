@@ -3,9 +3,11 @@
 // functions, so the non-async helpers live here and are imported by both
 // save paths (settings/_actions and institutions/_actions).
 
+import type { InstitutionType } from '@/lib/types'
+
 export type SettingsFormData = {
   name: string
-  type: 'school' | 'office' | 'shop'
+  type: InstitutionType
   logo_url: string
   label_member: string
   label_members: string
@@ -36,6 +38,10 @@ export type SettingsFormData = {
   loyalty_enabled: boolean
   theme_primary: string
   theme_preset: string
+  track_absences: boolean
+  meeting_preroll_minutes: number
+  meeting_postroll_minutes: number
+  meeting_autoclose_minutes: number
 }
 
 /**
@@ -63,5 +69,23 @@ export function attendanceConfigColumns(data: SettingsFormData) {
     track_early_leaving: data.track_early_leaving,
     expected_end_time: data.track_early_leaving && data.expected_end_time ? data.expected_end_time : null,
     early_leave_grace_minutes: grace(data.early_leave_grace_minutes),
+  }
+}
+
+/**
+ * Club-mode meeting settings, clamped to the institutions CHECK bounds
+ * (20260926120000) so an out-of-range entry is corrected, never rejected by
+ * the database with a raw constraint error. Written for every type — the
+ * values are simply unused outside clubs.
+ */
+export function clubConfigColumns(data: SettingsFormData) {
+  const clamp = (n: number, lo: number, hi: number, fallback: number) =>
+    Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.floor(n))) : fallback
+
+  return {
+    track_absences: data.track_absences,
+    meeting_preroll_minutes: clamp(data.meeting_preroll_minutes, 0, 240, 30),
+    meeting_postroll_minutes: clamp(data.meeting_postroll_minutes, 0, 240, 30),
+    meeting_autoclose_minutes: clamp(data.meeting_autoclose_minutes, 15, 1440, 240),
   }
 }

@@ -19,6 +19,9 @@ export default async function AttendancePage({
   const fromDate = typeof params.from === 'string' ? params.from : undefined
   const toDate = typeof params.to === 'string' ? params.to : undefined
   const termId = typeof params.term === 'string' ? params.term : undefined
+  // Club mode: records belong to meetings. Ignored for other tenant types.
+  const isClub = institution.type === 'club'
+  const meetingId = isClub && typeof params.meeting === 'string' ? params.meeting : undefined
   const studentIds = typeof params.students === 'string'
     ? params.students.split(',').filter(Boolean)
     : []
@@ -71,16 +74,31 @@ export default async function AttendancePage({
     ? (await supabase.from('institutions').select('id, name, track_students, track_staff').order('name')).data ?? []
     : []
 
-  const [membersRes, devicesRes, periodsRes] = await Promise.all([membersQ, devicesQ, periodsQ])
-
-  const allDevices = (devicesRes.data ?? []) as Device[]
-
   // Device scoping: teacher/staff always, admin when bound to a device. Unbound
   // admin / super_admin / platform_admin => whole institution ('all').
   const scope = await resolveDeviceScope(session)
   const deviceLocked = scope.mode === 'device'
   const noScopeMatch = scope.mode === 'none'
   const scopedDeviceId = scope.mode === 'device' ? scope.deviceId : null
+
+  // Club mode: meetings offered in the filter, newest first. A device-pinned
+  // session sees its device's meetings plus those open to all devices.
+  let meetingsQ = isClub && effectiveInstitutionId
+    ? supabase
+        .from('meetings')
+        .select('id, title, origin, starts_at')
+        .eq('institution_id', effectiveInstitutionId)
+        .neq('status', 'cancelled')
+        .order('starts_at', { ascending: false })
+        .limit(200)
+    : null
+  if (meetingsQ && scopedDeviceId) meetingsQ = meetingsQ.or(`device_id.eq.${scopedDeviceId},device_id.is.null`)
+
+  const [membersRes, devicesRes, periodsRes, meetingsRes] = await Promise.all([
+    membersQ, devicesQ, periodsQ, meetingsQ ?? Promise.resolve({ data: [] }),
+  ])
+
+  const allDevices = (devicesRes.data ?? []) as Device[]
   let effectiveDeviceIds = deviceIds
   if (deviceLocked) effectiveDeviceIds = [scopedDeviceId!]
   else if (noScopeMatch) effectiveDeviceIds = ['__no_match__']
@@ -116,7 +134,8 @@ export default async function AttendancePage({
       student:member_id(id, fullname, sid),
       academic:period_id(id, term, year),
       device:device_id(id, group_name, unit_name),
-      institution:institution_id(name)
+      institution:institution_id(name),
+      meeting:meeting_id(id, title, starts_at, absences_written_at)
     `, { count: 'exact' })
     .order('date', { ascending: false })
     .order('time', { ascending: false })
@@ -126,6 +145,7 @@ export default async function AttendancePage({
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
   if (termId) query = query.eq('period_id', termId)
+  if (meetingId) query = query.eq('meeting_id', meetingId)
 
   // Combine student and staff member ID filters — both can be set independently
   const combinedMemberIds = [...studentIds, ...staffFilterIds]
@@ -142,6 +162,7 @@ export default async function AttendancePage({
   if (fromDate) memberStatsQ = memberStatsQ.gte('date', fromDate)
   if (toDate) memberStatsQ = memberStatsQ.lte('date', toDate)
   if (termId) memberStatsQ = memberStatsQ.eq('period_id', termId)
+  if (meetingId) memberStatsQ = memberStatsQ.eq('meeting_id', meetingId)
   if (combinedMemberIds.length > 0) memberStatsQ = memberStatsQ.in('member_id', combinedMemberIds)
   if (effectiveDeviceIds.length > 0) memberStatsQ = memberStatsQ.in('device_id', effectiveDeviceIds)
   if (typeMemberIds !== null) memberStatsQ = memberStatsQ.in('member_id', typeMemberIds)
@@ -186,7 +207,10 @@ export default async function AttendancePage({
         staffMembers={visibleStaff}
         devices={allDevices}
         academic={(periodsRes.data ?? []) as AcademicTerm[]}
-        filters={{ fromDate, toDate, termId, studentIds, staffIds: staffFilterIds, deviceIds, typeFilter, institutionFilter, statusFilter }}
+        filters={{ fromDate, toDate, termId, meetingId, studentIds, staffIds: staffFilterIds, deviceIds, typeFilter, institutionFilter, statusFilter }}
+        meetings={(meetingsRes.data ?? []) as { id: string; title: string | null; origin: 'scheduled' | 'device'; starts_at: string }[]}
+        timezone={institution.timezone}
+        trackAbsences={institution.track_absences}
         memberStats={memberStats}
         page={page}
         pageSize={PAGE_SIZE}

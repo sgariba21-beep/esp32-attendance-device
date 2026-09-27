@@ -25,8 +25,8 @@ export default async function PromotionPage() {
   const { institutionId } = await requireRole('super_admin', 'admin')
   const institution = await getInstitution(institutionId)
 
-  // Promotion doesn't apply to office-type institutions
-  if (institution.type === 'office') {
+  // Promotion (advancing year groups) doesn't apply to offices or clubs
+  if (institution.type === 'office' || institution.type === 'club') {
     redirect('/unauthorized')
   }
 

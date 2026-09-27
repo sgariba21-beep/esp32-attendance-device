@@ -17,6 +17,9 @@ import { pluralize } from '@/lib/utils'
 import type { Device, UnassignedDevice, InstitutionConfig } from '@/lib/types'
 import type { UserRole } from '@/lib/supabase/dal'
 
+/** Club mode: upcoming meetings / active schedules each device hosts. */
+export type MeetingImpact = Record<string, { meetings: number; schedules: number }>
+
 type Props = {
   devices: Device[]
   pendingSetupDevices: Device[]
@@ -24,10 +27,23 @@ type Props = {
   role: UserRole
   institution: InstitutionConfig
   allInstitutions: { id: string; name: string }[]
+  /** Club mode: upcoming meetings / active schedules each device hosts. */
+  meetingImpact?: MeetingImpact
 }
 
-export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, role, institution, allInstitutions }: Props) {
+export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, role, institution, allInstitutions, meetingImpact = {} }: Props) {
   const isPlatformAdmin = role === 'platform_admin'
+
+  // Deleting a club device cancels its upcoming meetings and stops its
+  // schedules (a database trigger does it) — say so before confirming.
+  function meetingImpactNote(deviceId: string): string {
+    const i = meetingImpact[deviceId]
+    if (!i || (i.meetings === 0 && i.schedules === 0)) return ''
+    const parts: string[] = []
+    if (i.meetings) parts.push(`${i.meetings} upcoming ${i.meetings === 1 ? 'meeting' : 'meetings'} on it will be cancelled`)
+    if (i.schedules) parts.push(`${i.schedules} recurring ${i.schedules === 1 ? 'schedule' : 'schedules'} will stop`)
+    return ` ${parts.join(', and ')}.`
+  }
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogTitle, setDialogTitle] = useState<string | undefined>(undefined)
@@ -242,7 +258,7 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
           onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
           title="Delete device?"
           description={confirmTarget
-            ? `This will permanently delete this device${confirmTarget.institution?.name ? ` from ${confirmTarget.institution.name}` : ''}. The physical device will be signalled to reset on its next connection.`
+            ? `This will permanently delete this device${confirmTarget.institution?.name ? ` from ${confirmTarget.institution.name}` : ''}. The physical device will be signalled to reset on its next connection.${meetingImpactNote(confirmTarget.id)}`
             : ''}
           confirmLabel="Delete device"
           loading={deleting}
@@ -393,7 +409,7 @@ export function DevicesView({ devices, pendingSetupDevices, unassignedDevices, r
         open={confirmTarget !== null}
         onOpenChange={(v) => { if (!v) setConfirmTarget(null) }}
         title="Delete device?"
-        description={confirmTarget ? `This will permanently delete the ${confirmTarget.group_name} ${confirmTarget.unit_name} device. Members assigned to it will lose their ${institution.label_unit.toLowerCase()} assignment. The physical device will be signalled to reset on its next connection.` : ''}
+        description={confirmTarget ? `This will permanently delete the ${confirmTarget.group_name} ${confirmTarget.unit_name} device. Members assigned to it will lose their ${institution.label_unit.toLowerCase()} assignment. The physical device will be signalled to reset on its next connection.${meetingImpactNote(confirmTarget.id)}` : ''}
         confirmLabel="Delete device"
         loading={deleting}
         onConfirm={handleDelete}

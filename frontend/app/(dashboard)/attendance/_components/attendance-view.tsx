@@ -23,7 +23,8 @@ import { Pagination } from '@/components/ui/pagination'
 import { Toolbar, ToolbarField, ToolbarSeparator } from '@/components/ui/toolbar'
 import { MultiSelect } from './multi-select'
 import { pluralize, formatClockTime } from '@/lib/utils'
-import type { AttendanceRecord, Device, AcademicTerm } from '@/lib/types'
+import { formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
+import type { AttendanceRecord, Device, AcademicTerm, InstitutionType } from '@/lib/types'
 
 type MemberOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
 
@@ -46,10 +47,14 @@ type Labels = {
   label_period: string
 }
 
+/** Club mode: a meeting offered in the filter. */
+type MeetingOption = { id: string; title: string | null; origin: 'scheduled' | 'device'; starts_at: string }
+
 type Filters = {
   fromDate?: string
   toDate?: string
   termId?: string
+  meetingId?: string
   studentIds: string[]
   staffIds: string[]
   deviceIds: string[]
@@ -74,12 +79,16 @@ type Props = {
   institutions: { id: string; name: string; track_students: boolean; track_staff: boolean }[]
   track_students: boolean
   track_staff: boolean
-  institutionType: 'school' | 'office' | 'shop'
+  institutionType: InstitutionType
   timeFormat: '12h' | '24h'
   memberStats: MemberStat[]
   teacherNoDevice?: boolean
   /** Session is pinned to a single device (teacher/staff always, admin when bound). */
   deviceLocked?: boolean
+  /** Club mode: meetings for the filter, and the zone their times are shown in. */
+  meetings?: MeetingOption[]
+  timezone?: string
+  trackAbsences?: boolean
 }
 
 function formatClass(device: { group_name: string; unit_name: string }) {
@@ -117,6 +126,7 @@ type PairedRow = {
   student: AttendanceRecord['student']
   device: AttendanceRecord['device']
   academic: AttendanceRecord['academic']
+  meeting: AttendanceRecord['meeting']
   timeIn: string | null
   timeOut: string | null
   lateIn: boolean
@@ -124,7 +134,9 @@ type PairedRow = {
   isAbsent: boolean
 }
 
-// Collapses time_in / time_out siblings into one row per (member, date, device, period).
+// Collapses time_in / time_out siblings into one row per (member, date, device, period, meeting).
+// The meeting is part of the key so a club member at two meetings on one day
+// gets two rows, not one merged row.
 // Records arrive date desc, time desc so time_out always precedes time_in for the same session.
 // Absent records are kept as individual rows (no times to pair).
 function pairRecords(records: AttendanceRecord[]): PairedRow[] {
@@ -136,18 +148,18 @@ function pairRecords(records: AttendanceRecord[]): PairedRow[] {
       const k = `absent-${r.id}`
       map.set(k, {
         id: r.id, date: r.date, institution: r.institution,
-        student: r.student, device: r.device, academic: r.academic,
+        student: r.student, device: r.device, academic: r.academic, meeting: r.meeting,
         timeIn: null, timeOut: null, lateIn: false, earlyOut: false, isAbsent: true,
       })
       order.push(k)
       continue
     }
 
-    const k = `${r.student?.id ?? r.id}||${r.date}||${r.device?.id ?? ''}||${r.academic?.id ?? ''}`
+    const k = `${r.student?.id ?? r.id}||${r.date}||${r.device?.id ?? ''}||${r.academic?.id ?? ''}||${r.meeting?.id ?? ''}`
     if (!map.has(k)) {
       map.set(k, {
         id: r.id, date: r.date, institution: r.institution,
-        student: r.student, device: r.device, academic: r.academic,
+        student: r.student, device: r.device, academic: r.academic, meeting: r.meeting,
         timeIn: null, timeOut: null, lateIn: false, earlyOut: false, isAbsent: false,
       })
       order.push(k)
@@ -203,11 +215,37 @@ function buildSummary(records: AttendanceRecord[]): SummaryRow[] {
   })
 }
 
+type MeetingSummaryRow = {
+  key: string
+  meeting: NonNullable<AttendanceRecord['meeting']>
+  present: number
+  absent: number
+}
+
+// Club mode: one row per meeting, newest first. Counts ARRIVAL rows only
+// (present / time_in, and absences), so a time-in/out member is one person
+// per meeting, not two.
+function buildMeetingSummary(records: AttendanceRecord[]): MeetingSummaryRow[] {
+  const map = new Map<string, MeetingSummaryRow>()
+  for (const r of records) {
+    if (!r.meeting || r.scan_type === 'time_out') continue
+    if (!map.has(r.meeting.id)) map.set(r.meeting.id, { key: r.meeting.id, meeting: r.meeting, present: 0, absent: 0 })
+    const row = map.get(r.meeting.id)!
+    if (r.status === 'present') row.present++
+    else row.absent++
+  }
+  return Array.from(map.values()).sort((a, b) => b.meeting.starts_at.localeCompare(a.meeting.starts_at))
+}
+
+function meetingName(m: { title: string | null }): string {
+  return m.title ?? 'Untitled meeting'
+}
+
 export function AttendanceView({
   records, students, staffMembers, devices, academic, filters, page, pageSize,
   totalCount, role, assignedUnit, labels, institutions,
   track_students, track_staff, institutionType, timeFormat, memberStats, teacherNoDevice,
-  deviceLocked: deviceLockedProp,
+  deviceLocked: deviceLockedProp, meetings = [], timezone = 'UTC', trackAbsences = false,
 }: Props) {
   const fmtTime = (t: string) => formatClockTime(t, timeFormat)
   const isTeacher = role === 'teacher' || role === 'staff'
@@ -215,20 +253,12 @@ export function AttendanceView({
   // "scoped to X" banner and hides the device filter — but NOT the
   // misconfigured-teacher empty state below, which is role-specific.
   const deviceLocked = deviceLockedProp ?? isTeacher
-
-  if (isTeacher && teacherNoDevice) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="Attendance" />
-        <EmptyState
-          icon={Lock}
-          message="Your account isn't assigned to a unit yet — contact your administrator."
-        />
-      </div>
-    )
-  }
   const isPlatformAdmin = role === 'platform_admin'
   const isOffice = institutionType === 'office'
+  // Clubs: records belong to meetings, not periods.
+  const isClub = institutionType === 'club'
+  const fmtMeeting = (m: { title: string | null; starts_at: string }) =>
+    `${meetingName(m)} · ${formatZonedDate(m.starts_at, timezone)} ${formatZonedTime(m.starts_at, timezone, timeFormat)}`
   const router = useRouter()
   const pathname = usePathname()
   const [isPending, startTransition] = useTransition()
@@ -236,6 +266,7 @@ export function AttendanceView({
   const [fromDate, setFromDate] = useState(filters.fromDate ?? '')
   const [toDate, setToDate] = useState(filters.toDate ?? '')
   const [termId, setTermId] = useState(filters.termId ?? '')
+  const [meetingId, setMeetingId] = useState(filters.meetingId ?? '')
   const [studentIds, setStudentIds] = useState<string[]>(filters.studentIds)
   const [staffIds, setStaffIds] = useState<string[]>(filters.staffIds)
   const [deviceIds, setDeviceIds] = useState<string[]>(filters.deviceIds)
@@ -266,12 +297,12 @@ export function AttendanceView({
 
   const buildParams = useCallback(
     (overrides: Partial<{
-      from: string; to: string; term: string
+      from: string; to: string; term: string; meeting: string
       students: string[]; staff: string[]; classes: string[]
       type: string; institution: string; status: string; page: number
     }>) => {
       const current = {
-        from: fromDate, to: toDate, term: termId,
+        from: fromDate, to: toDate, term: termId, meeting: meetingId,
         students: studentIds, staff: staffIds, classes: deviceIds,
         type: typeFilter, institution: institutionFilter, status: statusFilter, page: 1,
         ...overrides,
@@ -280,6 +311,7 @@ export function AttendanceView({
       if (current.from) p.set('from', current.from)
       if (current.to) p.set('to', current.to)
       if (current.term) p.set('term', current.term)
+      if (current.meeting) p.set('meeting', current.meeting)
       if (current.students.length) p.set('students', current.students.join(','))
       if (current.staff.length) p.set('staff', current.staff.join(','))
       if (current.classes.length) p.set('classes', current.classes.join(','))
@@ -289,7 +321,7 @@ export function AttendanceView({
       if (current.page > 1) p.set('page', current.page.toString())
       return p.toString()
     },
-    [fromDate, toDate, termId, studentIds, staffIds, deviceIds, typeFilter, institutionFilter, statusFilter]
+    [fromDate, toDate, termId, meetingId, studentIds, staffIds, deviceIds, typeFilter, institutionFilter, statusFilter]
   )
 
   const applyFilters = useCallback(
@@ -311,7 +343,7 @@ export function AttendanceView({
   )
 
   function clearFilters() {
-    setFromDate(''); setToDate(''); setTermId('')
+    setFromDate(''); setToDate(''); setTermId(''); setMeetingId('')
     setStudentIds([]); setStaffIds([]); setDeviceIds([])
     setTypeFilter(''); setInstitutionFilter(''); setStatusFilter('')
     startTransition(() => { router.push(pathname) })
@@ -322,8 +354,9 @@ export function AttendanceView({
     return `/api/attendance/export${qs ? `?${qs}` : ''}`
   }
 
-  const hasFilters = !!(fromDate || toDate || termId || studentIds.length || staffIds.length || deviceIds.length || typeFilter || institutionFilter || statusFilter)
+  const hasFilters = !!(fromDate || toDate || termId || meetingId || studentIds.length || staffIds.length || deviceIds.length || typeFilter || institutionFilter || statusFilter)
   const summary = buildSummary(records)
+  const meetingSummary = isClub ? buildMeetingSummary(records) : []
   const totalPages = Math.ceil(totalCount / pageSize)
   const showInstitutionColumn = isPlatformAdmin
 
@@ -345,6 +378,20 @@ export function AttendanceView({
   }, [staffMembers, deviceIds])
 
   const classOptions = devices.map((d) => ({ value: d.id, label: formatClass(d) }))
+
+  // After every hook (rules-of-hooks): a teacher/staff account with no device
+  // assignment sees a prompt instead of data.
+  if (isTeacher && teacherNoDevice) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Attendance" />
+        <EmptyState
+          icon={Lock}
+          message="Your account isn't assigned to a unit yet — contact your administrator."
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -409,18 +456,34 @@ export function AttendanceView({
           />
         </ToolbarField>
 
-        <ToolbarField label={labels.label_period} htmlFor="term-filter">
-          <NativeSelect
-            id="term-filter"
-            value={termId}
-            onChange={(e) => { setTermId(e.target.value); applyFilters({ term: e.target.value }) }}
-          >
-            <option value="">All {pluralize(labels.label_period.toLowerCase())}</option>
-            {academic.map((a) => (
-              <option key={a.id} value={a.id}>{a.term} {a.year}</option>
-            ))}
-          </NativeSelect>
-        </ToolbarField>
+        {isClub ? (
+          <ToolbarField label="Meeting" htmlFor="meeting-filter">
+            <NativeSelect
+              id="meeting-filter"
+              value={meetingId}
+              onChange={(e) => { setMeetingId(e.target.value); applyFilters({ meeting: e.target.value }) }}
+              className="w-72"
+            >
+              <option value="">All meetings</option>
+              {meetings.map((m) => (
+                <option key={m.id} value={m.id}>{fmtMeeting(m)}</option>
+              ))}
+            </NativeSelect>
+          </ToolbarField>
+        ) : (
+          <ToolbarField label={labels.label_period} htmlFor="term-filter">
+            <NativeSelect
+              id="term-filter"
+              value={termId}
+              onChange={(e) => { setTermId(e.target.value); applyFilters({ term: e.target.value }) }}
+            >
+              <option value="">All {pluralize(labels.label_period.toLowerCase())}</option>
+              {academic.map((a) => (
+                <option key={a.id} value={a.id}>{a.term} {a.year}</option>
+              ))}
+            </NativeSelect>
+          </ToolbarField>
+        )}
 
         <ToolbarField label="Member type" htmlFor="type-filter">
           <NativeSelect
@@ -429,7 +492,7 @@ export function AttendanceView({
             onChange={(e) => { setTypeFilter(e.target.value); applyFilters({ type: e.target.value }) }}
           >
             <option value="">All types</option>
-            {showStudentType && <option value="student">Student</option>}
+            {showStudentType && <option value="student">{isClub ? labels.label_members : 'Student'}</option>}
             {showStaffType && <option value="staff">{labels.label_staff}</option>}
           </NativeSelect>
         </ToolbarField>
@@ -533,7 +596,7 @@ export function AttendanceView({
                       <TableHead>{labels.label_member}</TableHead>
                       <TableHead>ID</TableHead>
                       <TableHead>{labels.label_unit}</TableHead>
-                      <TableHead>{labels.label_period}</TableHead>
+                      <TableHead>{isClub ? 'Meeting' : labels.label_period}</TableHead>
                       <TableHead>Time In</TableHead>
                       <TableHead>Time Out</TableHead>
                       <TableHead>Status</TableHead>
@@ -552,7 +615,7 @@ export function AttendanceView({
                         </TableCell>
                         <TableCell>{r.device ? formatClass(r.device) : '—'}</TableCell>
                         <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
-                          {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
+                          {isClub ? (r.meeting ? fmtMeeting(r.meeting) : '—') : (r.academic ? `${r.academic.term} ${r.academic.year}` : '—')}
                         </TableCell>
                         <TableCell className="whitespace-nowrap tabular-nums">
                           <span className="inline-flex items-center gap-1.5">
@@ -586,7 +649,7 @@ export function AttendanceView({
                       <TableHead>{labels.label_member}</TableHead>
                       <TableHead>ID</TableHead>
                       <TableHead>{labels.label_unit}</TableHead>
-                      <TableHead>{labels.label_period}</TableHead>
+                      <TableHead>{isClub ? 'Meeting' : labels.label_period}</TableHead>
                       <TableHead>Time</TableHead>
                       <TableHead>Status</TableHead>
                     </TableRow>
@@ -604,7 +667,7 @@ export function AttendanceView({
                         </TableCell>
                         <TableCell>{r.device ? formatClass(r.device) : '—'}</TableCell>
                         <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
-                          {r.academic ? `${r.academic.term} ${r.academic.year}` : '—'}
+                          {isClub ? (r.meeting ? fmtMeeting(r.meeting) : '—') : (r.academic ? `${r.academic.term} ${r.academic.year}` : '—')}
                         </TableCell>
                         <TableCell className="whitespace-nowrap tabular-nums">
                           <span className="inline-flex items-center gap-1.5">
@@ -636,7 +699,46 @@ export function AttendanceView({
           </TabsContent>
 
           <TabsContent value="summary" className="mt-4">
-            {summary.length === 0 ? (
+            {isClub ? (
+              meetingSummary.length === 0 ? (
+                <EmptyState icon={CalendarDays} message="No meetings to summarise yet." />
+              ) : (
+                <div className="rounded-xl border border-border shadow-xs overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Meeting</TableHead>
+                        <TableHead className="text-right">Attendance %</TableHead>
+                        <TableHead className="text-right">Present</TableHead>
+                        <TableHead className="text-right">Absent</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {meetingSummary.map((row) => {
+                        const total = row.present + row.absent
+                        // A rate needs the absent side: only once the close
+                        // sweep has written absences for this meeting.
+                        const rated = trackAbsences && !!row.meeting.absences_written_at && total > 0
+                        return (
+                          <TableRow key={row.key}>
+                            <TableCell className="whitespace-nowrap">{fmtMeeting(row.meeting)}</TableCell>
+                            <TableCell className="text-right font-medium tabular-nums">
+                              {rated ? `${Math.round((row.present / total) * 100)}%` : '—'}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-success-foreground font-medium">{row.present}</TableCell>
+                            <TableCell className="text-right tabular-nums text-destructive font-medium">{row.absent}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                  <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                    Covers the records on this page. Attendance % needs absences, so it shows once a meeting has closed
+                    {trackAbsences ? '' : ' — and absence tracking is off for this club (Settings → Meetings)'}.
+                  </p>
+                </div>
+              )
+            ) : summary.length === 0 ? (
               <EmptyState icon={CalendarDays} message="No data to summarise. Add attendance records first." />
             ) : (
               <div className="rounded-xl border border-border shadow-xs overflow-x-auto">

@@ -1,7 +1,8 @@
 # Club Mode — Session-Based Attendance
 
 **Status:** Phases 1 and 2 **live in cloud** (2026-09-26) and verified end to end.
-Phases 3–4 not started.
+Phase 3 migrations **live in cloud** (2026-09-27); dashboard committed on `club-mode`
+but not deployed (Vercel prod tracks `oled-integration`). Phase 4 not started.
 **Target:** A 4th institution type, `club`, whose unit of attendance is a *meeting*
 rather than a *day*.
 
@@ -489,19 +490,56 @@ Two gotchas for whoever deploys edge functions here:
 
 ### Phase 3 — Dashboard (the value cut point)
 
-| Item | Detail |
+**Built and tested locally** (2026-09-27). **Migrations applied to cloud** 2026-09-27
+~19:45 UTC via `apply_migration` (140000 then 140100). UI not yet deployed (Vercel prod
+tracks `oled-integration`, not `club-mode`). Decisions at the
+start of Phase 3: schedules are **end-and-recreate** (not editable), and the club
+overview is **meeting-centred**.
+
+**Database** — `20260926140000_meeting_schedules.sql` (+ `…140100` cron):
+
+| Piece | What it does |
 |---|---|
-| `/meetings` *(new route)* | List upcoming / past. Create one-off and recurring. Show the currently-open meeting live with a present count. Close, cancel, edit. A meeting with attendance **cannot** be deleted (the FK refuses it) — offer Cancel; if a real delete is ever needed, it is an explicit two-step that removes the attendance first. |
-| Recurrence generator | Materialise `meeting_schedules` into `meetings` rows ~8 weeks ahead; extend from the same pg_cron cadence as `close_due_meetings` (a second function, or a step in it). |
-| Manual close | Closing a meeting from the dashboard only sets `status = 'closed'`, `closed_at = now()`; the sweep writes its absences within 15 min. Never write absences from the dashboard. |
-| Device delete UX | Deleting a device cancels its future meetings and closes any under way, skipping their absences (§7 Phase 2 device guard). Warn with a count before confirming. |
-| `/attendance` | Meeting filter; show meeting title alongside date for club tenants. |
-| Overview `/` | For clubs, attendance rate = *meetings attended / meetings held*, not days. |
-| `/settings` | Absence toggle, pre/post-roll, auto-close, label overrides. |
-| `/onboarding` | `club` preset labels (Member / Members / Group / Meeting); `track_absences` default `false`. |
-| Nav | Add Meetings; hide `/promotion` (school-only) and `/academic` (clubs have no periods) for `club`. Both [sidebar.tsx:71](frontend/components/sidebar.tsx:71) and [mobile-bottom-nav.tsx:67](frontend/components/mobile-bottom-nav.tsx:67) branch on `institution.type` — update both, plus the title map in [mobile-header.tsx:15](frontend/components/mobile-header.tsx:15). |
-| RBAC | Every new page under `(dashboard)` needs a `requireRole(` call. Run `node scripts/check-rbac.mjs` from `frontend/` — it exits 1 and lists any ungated page. |
-| Tenancy | Every mutating action calls `ownsRecord('meetings', id, session)`. `ownsRecord` is already generic over any table with an `institution_id` column ([ownership.ts](frontend/lib/supabase/ownership.ts)) — no change to the helper itself, only new call sites. |
+| `meeting_schedules` | Recurrence rule: weekly / every N weeks (1–12) / monthly Nth weekday (1st–4th, last); local start time + length; `starts_on` / optional `ends_on`; optional device. RLS, grants, watermark trigger in the same file |
+| `meetings.schedule_id` | Which rule generated an occurrence; `UNIQUE (schedule_id, starts_at)` (one-offs unconstrained, NULLS DISTINCT) |
+| `generate_scheduled_meetings(schedule?, now?, horizon=56)` | Materialises occurrences in the club's LOCAL time (`(day + time) AT TIME ZONE tz` — 10:00 stays 10:00 across DST). Never before today, never past `ends_on`, never an occurrence that has **already ended** (a schedule made at 09:00 for 08:00–09:00 today would otherwise be closed at once with everyone absent). `generated_through` means a deleted occurrence ("skip") is never re-created. Skips non-active tenants and unknown timezones |
+| `end_meeting_schedule(schedule)` | Deactivates; deletes not-yet-started occurrences, cancels any that already hold a (pre-roll) scan; history untouched |
+| `meeting_attendance_counts(institution, since)` | Present / absent per meeting, arrival rows only (time-in/out member counted once). Aggregated in Postgres because the Data API caps responses at 1000 rows — client-side counting would silently undercount |
+| Device-delete guard (replaced) | Now also **deactivates** the device's schedules. `meeting_schedules.device_id` is SET NULL, not CASCADE: CASCADE was tried and failed in PGlite — the meetings.device_id SET NULL firing alongside it re-checks `schedule_id` against the just-deleted schedule |
+| `generate-meetings` cron | Daily 00:10 UTC; the dashboard also generates a new schedule's first 8 weeks immediately |
+
+**Dashboard:**
+
+| Area | As built |
+|---|---|
+| `/meetings` *(new)* | Live-now cards (present / expected, Close now, Cancel, View scans), Upcoming (Edit, Cancel, Delete — "Skip" for a recurring occurrence), Recurring (End), Past 60 days (present / absent, status incl. "Closing…" while awaiting the sweep, Rename, Delete only if no attendance, link to its attendance). Refreshes every minute so meetings move section on their own |
+| Meeting rules (server actions) | Can't create/move a meeting that has already ended; overlap check on core times per device (pre/post-roll overlaps are allowed — back-to-back meetings); only the title can change once a meeting has started; delete refused if attendance exists (offers Cancel); close only once started; close never writes absences (the sweep is the only writer). Device-pinned admins only see / act on their device's meetings. Local times ↔ UTC via `lib/zoned-time.ts`, which matches Postgres `AT TIME ZONE` exactly, DST gap and fold included |
+| `/attendance` + CSV | Meeting filter + column for clubs; time-in/out pairing keyed by meeting (two meetings in one day no longer merge); Summary tab per meeting, with a rate only once the meeting's absence pass has run. Also fixed the file's 17 pre-existing rules-of-hooks errors (early return above the hooks) |
+| Overview `/` | Clubs: Live now / Next meeting, Last meeting rate, pooled average over the last 10 rated meetings, active members, recent activity |
+| `/settings` | Club type; Meetings section (record absences, early arrival, late check-in, auto-close — clamped to the DB bounds); weekday picker and fixed expected times hidden for clubs (lateness is measured from each meeting's own start / end) |
+| `/onboarding` | Club / Society type; presets Member / Members / Group / Venue / Organiser(s); absences off by default |
+| Nav, guards | Meetings for clubs (sidebar, mobile More sheet, header); Academic hidden and `/academic` redirects clubs to `/meetings`; `/promotion` refuses clubs |
+| Devices | Delete confirmation says how many upcoming meetings will be cancelled and schedules stopped |
+
+**Tested:** PGlite SQL — Phase 1 43/43, Phase 2 69/69 (before and after the Phase 3
+schema), Phase 3 38/38 twice (weekly, fortnightly, first Monday, last Friday, New York
+across the 1 Nov DST change, horizon rollover, skip-not-recreated, end schedule, counts,
+device and institution delete). Deno unit tests for `zoned-time` + `meetings` 8/8
+(incl. DST gap / fold matched against Postgres). `tsc` clean; `next build` passes (all
+28 routes); ESLint 43 → 26 errors with nothing new. PostgREST query shapes validated
+against the live API with the public key (and failing controls). *Not* tested: the
+pages in a browser — they need a signed-in club account (see checklist, §11).
+
+**Verified in cloud after apply:** RLS on with its one policy; all four functions
+executable by `service_role` only (not `anon` / `authenticated`); device guard now
+deactivates schedules; `generate-meetings` job active at `10 0 * * *` next to
+`close-meetings` and `mark-absent-daily`. A smoke test in a rolled-back transaction
+(throwaway New York club, 28 Oct): weekly Saturday 10:00 → 8 meetings, 31 Oct 14:00Z
+then 7 Nov 15:00Z (DST change handled); last-Monday 19:00 → 1 inside the horizon
+(30 Nov = 1 Dec 00:00Z); re-run created 0; a deleted occurrence was not re-created;
+ending the weekly schedule removed 7; deleting the device cancelled the rest and
+deactivated both schedules. Afterwards: no test rows, 3 tenants, 973 attendance rows
+(unchanged); advisors unchanged.
 
 ### Phase 4 — Firmware
 
@@ -615,10 +653,32 @@ returns `no_meeting_open`; **a scan whose timestamp is 3 days old lands in the c
 closed meeting, not the current one**; a late scan overwrites its absent placeholder;
 two meetings on one day both accept the same member; `mark-absent` skips club tenants.
 
-**Phase 3** — `node scripts/check-rbac.mjs` exits 0; a `cashier` / `teacher` cannot
-reach `/meetings`; a super_admin of tenant A cannot mutate tenant B's meeting;
-recurrence generates the right dates across a month boundary; the dashboard refreshes
-within ~12 s of a meeting opening.
+**Phase 3** — automated checks are in §7 Phase 3. Browser click-test, as a platform
+admin and then as the new club's super admin (needs the Phase 3 migrations applied, and
+a dashboard pointed at cloud — local `.env.local` targets a local Supabase stack):
+
+1. Onboarding: create a Club / Society — labels come out Member / Group / Venue /
+   Organiser; Settings shows the Meetings section, no weekday picker, absences off.
+2. Nav: Meetings present; Academic absent; `/academic` redirects to `/meetings`;
+   `/promotion` → unauthorized.
+3. Create a one-off meeting starting in ~5 minutes → it appears under Upcoming, then
+   (within a minute of its pre-roll opening) under Live now.
+4. Try to create one that overlaps it on the same device → "Overlaps …" error; one
+   that already ended → refused.
+5. Create a weekly recurring meeting → "N meetings scheduled"; they list under
+   Upcoming with the recurring icon; Skip one; End the schedule → future ones gone.
+6. Scan in on a real device during the live meeting → present count rises (≤ 12 s);
+   Close now → "Closing…" in Past, then Closed with absences within 15 min (if on).
+7. Attendance page: Meeting filter narrows to that meeting; Meeting column shows its
+   name; Summary shows one row per meeting; CSV has a Meeting column.
+8. Overview: Live now / Next meeting / Last meeting / Average cards.
+9. Devices: the delete dialog for the club's device mentions the upcoming meetings.
+10. A school tenant: nothing changed — no Meetings, Academic present, attendance and
+    overview exactly as before.
+
+`check-rbac.mjs` still exits 1 on `app/(dashboard)/page.tsx` — pre-existing (the
+overview deliberately uses `verifySession()` so every role can see it); `/meetings`
+passes.
 
 **Phase 4** — session master opens and closes a meeting; the *config* master finger
 still opens the captive portal on double press; a scan with no meeting shows the

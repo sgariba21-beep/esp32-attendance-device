@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution } from '@/lib/supabase/dal'
 import { pluralize } from '@/lib/utils'
@@ -10,6 +11,10 @@ import type { AcademicTerm, Holiday } from '@/lib/types'
 export default async function AcademicPage() {
   const { institutionId } = await requireRole('super_admin', 'admin')
   const institution = await getInstitution(institutionId)
+
+  // Clubs have no periods or holidays: meetings define when attendance is taken.
+  if (institution.type === 'club') redirect('/meetings')
+
   const supabase = createAdminClient()
 
   let termsQ = supabase

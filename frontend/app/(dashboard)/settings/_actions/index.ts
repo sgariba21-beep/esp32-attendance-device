@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 import { brandColumns } from '@/lib/theme'
-import { attendanceConfigColumns, type SettingsFormData } from './columns'
+import { attendanceConfigColumns, clubConfigColumns, type SettingsFormData } from './columns'
 
 export type { SettingsFormData } from './columns'
 
@@ -38,6 +38,7 @@ export async function updateInstitutionSettings(data: SettingsFormData) {
       sell_services: data.sell_services,
       loyalty_enabled: data.loyalty_enabled,
       ...attendanceConfigColumns(data),
+      ...clubConfigColumns(data),
       ...brandColumns(data),
     })
     .eq('id', institutionId)

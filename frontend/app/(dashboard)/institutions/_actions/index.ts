@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole } from '@/lib/supabase/dal'
 import { brandColumns } from '@/lib/theme'
-import { attendanceConfigColumns, type SettingsFormData } from '../../settings/_actions/columns'
+import { attendanceConfigColumns, clubConfigColumns, type SettingsFormData } from '../../settings/_actions/columns'
 
 export async function deleteInstitution(id: string): Promise<{ error: string | null }> {
   await requireRole('platform_admin')
@@ -116,6 +116,7 @@ export async function updateInstitutionSettingsById(
       sell_services: data.sell_services,
       loyalty_enabled: data.loyalty_enabled,
       ...attendanceConfigColumns(data),
+      ...clubConfigColumns(data),
       ...brandColumns(data),
     })
     .eq('id', id)

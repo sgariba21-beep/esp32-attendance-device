@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { createAuthClient, createAdminClient } from '@/lib/supabase/server'
 import { resolveInstitutionScope, resolveDeviceScope } from '@/lib/supabase/dal'
 import type { Session } from '@/lib/supabase/dal'
+import { utcToZonedParts } from '@/lib/zoned-time'
 
 export async function GET(req: NextRequest) {
   const authClient = await createAuthClient()
@@ -44,6 +45,16 @@ export async function GET(req: NextRequest) {
   }
   const effectiveInstitutionId = resolveInstitutionScope(session, institutionParam)
 
+  // Club mode: records belong to meetings, so the export filters on and
+  // labels by meeting. Read from the institution being exported (a platform
+  // admin may be exporting someone else's).
+  const { data: inst } = effectiveInstitutionId
+    ? await admin.from('institutions').select('type, timezone').eq('id', effectiveInstitutionId).single()
+    : { data: null }
+  const isClub = inst?.type === 'club'
+  const clubTz = (inst?.timezone as string | undefined) ?? 'UTC'
+  const meetingId = isClub ? (p.get('meeting') ?? undefined) : undefined
+
   // Device scoping — teacher/staff always, admin when bound. resolveDeviceScope
   // does the FK-first / assigned_unit-fallback resolution.
   const deviceScope = await resolveDeviceScope(session)
@@ -68,7 +79,8 @@ export async function GET(req: NextRequest) {
       student:member_id(fullname, sid),
       academic:period_id(term, year),
       device:device_id(group_name, unit_name),
-      institution:institution_id(name)
+      institution:institution_id(name),
+      meeting:meeting_id(title, starts_at)
     `)
     .order('date', { ascending: false })
     .order('time', { ascending: false })
@@ -77,6 +89,7 @@ export async function GET(req: NextRequest) {
   if (fromDate) query = query.gte('date', fromDate)
   if (toDate) query = query.lte('date', toDate)
   if (termId) query = query.eq('period_id', termId)
+  if (meetingId) query = query.eq('meeting_id', meetingId)
   const allMemberIds = [...studentIds, ...staffIds]
   if (allMemberIds.length) query = query.in('member_id', allMemberIds)
   if (effectiveDeviceIds.length) query = query.in('device_id', effectiveDeviceIds)
@@ -86,7 +99,7 @@ export async function GET(req: NextRequest) {
   const { data: records } = teacherNoMatch ? { data: [] } : await query
 
   const isPlatformAdmin = role === 'platform_admin'
-  const headers = ['Date', 'Name', 'ID', 'Unit', 'Period', 'Time', 'Status', 'Scan Type', 'Punctuality']
+  const headers = ['Date', 'Name', 'ID', 'Unit', isClub ? 'Meeting' : 'Period', 'Time', 'Status', 'Scan Type', 'Punctuality']
   if (isPlatformAdmin) headers.push('Institution')
 
   const escape = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -94,7 +107,12 @@ export async function GET(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = (records ?? []).map((r: any) => {
     const unit = r.device ? `${r.device.group_name} ${r.device.unit_name}` : ''
-    const period = r.academic ? `${r.academic.term} ${r.academic.year}` : ''
+    let period = r.academic ? `${r.academic.term} ${r.academic.year}` : ''
+    if (isClub) {
+      // "Weekly circle (2026-10-03 10:00)" — the meeting's start, local to the club.
+      const start = r.meeting ? utcToZonedParts(r.meeting.starts_at, clubTz) : null
+      period = r.meeting ? `${r.meeting.title ?? 'Untitled meeting'} (${start!.date} ${start!.time})` : ''
+    }
     const row = [
       r.date,
       r.student?.fullname ?? '',

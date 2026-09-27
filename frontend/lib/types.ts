@@ -1,7 +1,14 @@
+/**
+ * 'club' takes attendance per MEETING rather than per day (CLUB-MODE-PLAN.md):
+ * scans resolve into a meeting by timestamp, absences are written when each
+ * meeting closes, and weekdays / holidays / periods do not apply.
+ */
+export type InstitutionType = 'school' | 'office' | 'shop' | 'club'
+
 export type InstitutionConfig = {
   id: string
   name: string
-  type: 'school' | 'office' | 'shop'
+  type: InstitutionType
   logo_url: string | null
   label_member: string
   label_members: string
@@ -46,6 +53,14 @@ export type InstitutionConfig = {
   theme_primary: string | null
   /** Curated preset key, or 'custom'. Null → default. */
   theme_preset: string | null
+  /** Club only: write an absent row for each expected member who missed a meeting, when it closes. */
+  track_absences: boolean
+  /** Club only: minutes before a scheduled meeting's start during which a scan still counts for it. */
+  meeting_preroll_minutes: number
+  /** Club only: minutes after a scheduled meeting's end during which a scan still counts for it. */
+  meeting_postroll_minutes: number
+  /** Club only: idle minutes after which an ad-hoc (device-opened) meeting is closed automatically. */
+  meeting_autoclose_minutes: number
 }
 
 export const DEFAULT_INSTITUTION: InstitutionConfig = {
@@ -81,6 +96,10 @@ export const DEFAULT_INSTITUTION: InstitutionConfig = {
   status: 'active',
   theme_primary: null,
   theme_preset: null,
+  track_absences: true,
+  meeting_preroll_minutes: 30,
+  meeting_postroll_minutes: 30,
+  meeting_autoclose_minutes: 240,
 }
 
 export type AttendanceRecord = {
@@ -108,6 +127,11 @@ export type AttendanceRecord = {
     unit_name: string
   } | null
   institution: { name: string } | null
+  /**
+   * Club tenants: the meeting this row was resolved into. Null for daily-mode
+   * rows. absences_written_at is set once the close sweep has run for it.
+   */
+  meeting: { id: string; title: string | null; starts_at: string; absences_written_at: string | null } | null
 }
 
 export type Member = {
@@ -168,4 +192,38 @@ export type Holiday = {
   start_date: string
   end_date: string
   recurring: boolean
+}
+
+/** Club mode: one meeting — a bounded attendance window. */
+export type Meeting = {
+  id: string
+  title: string | null
+  origin: 'scheduled' | 'device'
+  status: 'scheduled' | 'open' | 'closed' | 'cancelled'
+  starts_at: string
+  ends_at: string | null
+  opened_at: string | null
+  closed_at: string | null
+  device_id: string | null
+  schedule_id: string | null
+  device_deleted_at: string | null
+}
+
+/** Club mode: a recurrence rule materialised into meetings ~8 weeks ahead. */
+export type MeetingSchedule = {
+  id: string
+  title: string | null
+  freq: 'weekly' | 'monthly_nth_weekday'
+  interval_n: number
+  /** ISO weekday: 1 = Mon … 7 = Sun. */
+  weekday: number
+  /** Monthly only: 1–4, or -1 for "last". */
+  nth: number | null
+  /** Local to the institution, 'HH:MM:SS'. */
+  start_time: string
+  duration_minutes: number
+  starts_on: string
+  ends_on: string | null
+  active: boolean
+  device_id: string | null
 }

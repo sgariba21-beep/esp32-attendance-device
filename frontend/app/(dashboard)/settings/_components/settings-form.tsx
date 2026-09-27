@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { BrandColorPicker } from '@/components/ui/brand-color-picker'
 import { updateInstitutionSettings, type SettingsFormData } from '../_actions'
-import type { InstitutionConfig } from '@/lib/types'
+import type { InstitutionConfig, InstitutionType } from '@/lib/types'
 
 type Props = {
   institution: InstitutionConfig
@@ -79,7 +79,14 @@ export function SettingsForm({ institution, saveAction }: Props) {
     loyalty_enabled: institution.loyalty_enabled,
     theme_primary: institution.theme_primary ?? '',
     theme_preset: institution.theme_preset ?? '',
+    track_absences: institution.track_absences ?? true,
+    meeting_preroll_minutes: institution.meeting_preroll_minutes ?? 30,
+    meeting_postroll_minutes: institution.meeting_postroll_minutes ?? 30,
+    meeting_autoclose_minutes: institution.meeting_autoclose_minutes ?? 240,
   })
+  // Clubs take attendance per meeting: no weekday schedule, and lateness is
+  // measured from each meeting's own start rather than a fixed daily time.
+  const isClub = form.type === 'club'
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -87,8 +94,9 @@ export function SettingsForm({ institution, saveAction }: Props) {
   function set(field: string, value: string | boolean | number | number[]) {
     setForm((f) => {
       const next = { ...f, [field]: value }
-      // Offices and shops cannot track students
+      // Offices and shops cannot track students; a club's members are its main roster.
       if (field === 'type' && (value === 'office' || value === 'shop')) next.track_students = false
+      if (field === 'type' && value === 'club') next.track_students = true
       return next
     })
     setSaved(false)
@@ -111,15 +119,15 @@ export function SettingsForm({ institution, saveAction }: Props) {
       setError('At least one member type must be tracked.')
       return
     }
-    if (form.tracked_weekdays.length === 0) {
+    if (!isClub && form.tracked_weekdays.length === 0) {
       setError('Select at least one day to track attendance on.')
       return
     }
-    if (form.track_lateness && !form.expected_start_time) {
+    if (!isClub && form.track_lateness && !form.expected_start_time) {
       setError('Set an expected start time, or turn off late-arrival tracking.')
       return
     }
-    if (form.track_early_leaving && !form.expected_end_time) {
+    if (!isClub && form.track_early_leaving && !form.expected_end_time) {
       setError('Set an expected end time, or turn off early-departure tracking.')
       return
     }
@@ -130,7 +138,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
     const action = saveAction ?? updateInstitutionSettings
     const result = await action({
       ...form,
-      type: form.type as 'school' | 'office' | 'shop',
+      type: form.type as InstitutionType,
       time_format: form.time_format as '12h' | '24h',
       student_scan_mode: form.student_scan_mode as 'present_absent' | 'time_in_out',
       staff_scan_mode: form.staff_scan_mode as 'present_absent' | 'time_in_out',
@@ -156,10 +164,12 @@ export function SettingsForm({ institution, saveAction }: Props) {
             <option value="school">School</option>
             <option value="office">Office</option>
             <option value="shop">Shop</option>
+            <option value="club">Club</option>
           </NativeSelect>
           <p className="text-xs text-muted-foreground">
             Office type tracks staff only and hides Academic and Promotion.
             Shop type tracks staff, hides student and promotion features, and enables the retail module.
+            Club type takes attendance per meeting instead of per day, and replaces Academic with Meetings.
           </p>
         </div>
 
@@ -223,7 +233,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
 
       <Section title="Attendance tracking" description="Choose which member types have their attendance recorded and what scan mode each uses.">
         <div className="space-y-4 rounded-lg border border-border p-4">
-          {form.type === 'school' && (
+          {(form.type === 'school' || isClub) && (
             <>
               <div className="flex items-start gap-3">
                 <input
@@ -234,7 +244,9 @@ export function SettingsForm({ institution, saveAction }: Props) {
                   className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
                 />
                 <div className="flex-1 space-y-2">
-                  <Label htmlFor="track_students" className="cursor-pointer font-medium">Track students</Label>
+                  <Label htmlFor="track_students" className="cursor-pointer font-medium">
+                    {isClub ? `Track ${form.label_members.toLowerCase()}` : 'Track students'}
+                  </Label>
                   {form.track_students && (
                     <div className="space-y-1.5">
                       <Label htmlFor="student_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
@@ -263,7 +275,9 @@ export function SettingsForm({ institution, saveAction }: Props) {
               className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
             />
             <div className="flex-1 space-y-2">
-              <Label htmlFor="track_staff" className="cursor-pointer font-medium">Track staff</Label>
+              <Label htmlFor="track_staff" className="cursor-pointer font-medium">
+                {isClub ? `Track ${form.label_staff_plural.toLowerCase()}` : 'Track staff'}
+              </Label>
               {form.track_staff && (
                 <div className="space-y-1.5">
                   <Label htmlFor="staff_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
@@ -281,6 +295,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
           </div>
         </div>
 
+        {!isClub && (
         <div className="space-y-2">
           <Label>Days tracked</Label>
           <div className="flex flex-wrap gap-2">
@@ -308,6 +323,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
             Scans on untracked days are ignored, and no absent records are generated for them. Weekends can be tracked like any other day.
           </p>
         </div>
+        )}
 
         <div className="space-y-4 rounded-lg border border-border p-4">
           <div className="flex items-start gap-3">
@@ -322,6 +338,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
               <Label htmlFor="track_lateness" className="cursor-pointer font-medium">Flag late arrivals</Label>
               {form.track_lateness && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {!isClub && (
                   <div className="space-y-1.5">
                     <Label htmlFor="expected_start_time" className="text-xs text-muted-foreground">Expected start time</Label>
                     <Input
@@ -331,6 +348,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
                       onChange={(e) => set('expected_start_time', e.target.value)}
                     />
                   </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label htmlFor="late_grace_minutes" className="text-xs text-muted-foreground">Grace period (minutes)</Label>
                     <Input
@@ -341,6 +359,11 @@ export function SettingsForm({ institution, saveAction }: Props) {
                       onChange={(e) => set('late_grace_minutes', Math.max(0, Number(e.target.value) || 0))}
                     />
                   </div>
+                  {isClub && (
+                    <p className="text-xs text-muted-foreground sm:col-span-2">
+                      Measured from each scheduled meeting&apos;s start time. Ad-hoc meetings opened at the device are never marked late.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -361,6 +384,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
               {form.track_early_leaving && (
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {!isClub && (
                     <div className="space-y-1.5">
                       <Label htmlFor="expected_end_time" className="text-xs text-muted-foreground">Expected end time</Label>
                       <Input
@@ -370,6 +394,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
                         onChange={(e) => set('expected_end_time', e.target.value)}
                       />
                     </div>
+                    )}
                     <div className="space-y-1.5">
                       <Label htmlFor="early_leave_grace_minutes" className="text-xs text-muted-foreground">Grace period (minutes)</Label>
                       <Input
@@ -382,6 +407,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
+                    {isClub && 'Measured from each scheduled meeting’s end time. '}
                     Only applies to member types on the Time In / Time Out scan mode — a Present / Absent scan has no departure to measure.
                   </p>
                 </>
@@ -434,6 +460,68 @@ export function SettingsForm({ institution, saveAction }: Props) {
           </p>
         </div>
       </Section>
+
+      {isClub && (
+        <Section title="Meetings" description="How meetings accept scans and record absences.">
+          <div className="flex items-start gap-3 rounded-lg border border-border p-4">
+            <input
+              id="track_absences"
+              type="checkbox"
+              checked={form.track_absences}
+              onChange={(e) => set('track_absences', e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+            />
+            <div className="flex-1 space-y-1">
+              <Label htmlFor="track_absences" className="cursor-pointer font-medium">Record absences</Label>
+              <p className="text-xs text-muted-foreground">
+                When a meeting closes, mark every expected {form.label_member.toLowerCase()} who didn&apos;t scan in as absent.
+                Expected means enrolled on the meeting&apos;s device, or everyone for a meeting open to all devices.
+                Turning this on later does not go back and mark past meetings.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="meeting_preroll_minutes">Early arrival (minutes)</Label>
+              <Input
+                id="meeting_preroll_minutes"
+                type="number"
+                min={0}
+                max={240}
+                value={form.meeting_preroll_minutes}
+                onChange={(e) => set('meeting_preroll_minutes', Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="meeting_postroll_minutes">Late check-in (minutes)</Label>
+              <Input
+                id="meeting_postroll_minutes"
+                type="number"
+                min={0}
+                max={240}
+                value={form.meeting_postroll_minutes}
+                onChange={(e) => set('meeting_postroll_minutes', Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="meeting_autoclose_minutes">Auto-close after idle (minutes)</Label>
+              <Input
+                id="meeting_autoclose_minutes"
+                type="number"
+                min={15}
+                max={1440}
+                value={form.meeting_autoclose_minutes}
+                onChange={(e) => set('meeting_autoclose_minutes', Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            A scheduled meeting accepts scans from <em>early arrival</em> minutes before it starts until <em>late check-in</em> minutes after it ends.
+            A meeting opened at the device closes itself after <em>auto-close</em> minutes with no scans, and always by midnight.
+          </p>
+        </Section>
+      )}
 
       {form.type === 'shop' && (
         <Section title="Shop" description="Currency, offerings, and loyalty for the retail module.">

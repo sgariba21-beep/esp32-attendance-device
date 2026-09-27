@@ -12,6 +12,7 @@ import type { InstitutionConfig } from '@/lib/types'
 import {
   LayoutDashboard,
   CalendarDays,
+  CalendarClock,
   Users,
   UserCog,
   Cpu,
@@ -58,6 +59,11 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole, deviceBou
     { href: '/attendance', label: 'Attendance', icon: CalendarDays, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] },
   ]
 
+  // Clubs take attendance per meeting; scheduling them is their main task.
+  if (institution.type === 'club') {
+    items.push({ href: '/meetings', label: 'Meetings', icon: CalendarClock, group: 'records', roles: ['super_admin', 'admin', 'platform_admin'] })
+  }
+
   if (institution.track_students) {
     items.push({ href: '/members', label: institution.label_members, icon: Users, group: 'records', roles: ['super_admin', 'admin', 'teacher', 'staff', 'platform_admin'] })
   }
@@ -89,16 +95,20 @@ function buildNavItems(institution: InstitutionConfig, role: UserRole, deviceBou
   items.push(
     { href: '/devices',    label: 'Devices',    icon: Cpu,           group: 'manage', roles: ['super_admin', 'platform_admin'] },
     { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, group: 'manage', roles: enrollmentRoles },
-    // Periods & holidays: schools get 'Academic', offices get 'Periods & Holidays',
-    // shops get 'Closed Days' (holidays only; feeds mark-absent for shop staff — A-9).
-    {
+  )
+
+  // Periods & holidays: schools get 'Academic', offices get 'Periods & Holidays',
+  // shops get 'Closed Days' (holidays only; feeds mark-absent for shop staff — A-9).
+  // Clubs have neither: their meetings define when attendance is taken.
+  if (institution.type !== 'club') {
+    items.push({
       href: '/academic',
       label: institution.type === 'office' ? 'Periods & Holidays' : institution.type === 'shop' ? 'Closed Days' : 'Academic',
       icon: BookOpen,
       group: 'manage',
       roles: ['super_admin', 'admin', 'platform_admin'],
-    },
-  )
+    })
+  }
 
   // Promotion is a school-only concept (advancing year groups).
   if (institution.type === 'school') {

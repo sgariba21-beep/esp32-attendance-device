@@ -8,13 +8,14 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Building2 } from 'lucide-react'
 import { InstitutionActions } from './_components/institution-actions'
+import type { InstitutionType } from '@/lib/types'
 
 type InstitutionStatus = 'active' | 'suspended' | 'deactivated'
 
 type InstitutionRow = {
   id: string
   name: string
-  type: 'school' | 'office' | 'shop'
+  type: InstitutionType
   status: InstitutionStatus
   members: [{ count: number }]
   devices: [{ count: number }]
@@ -24,6 +25,7 @@ const TYPE_LABELS: Record<InstitutionRow['type'], string> = {
   school: 'School',
   office: 'Office',
   shop: 'Shop',
+  club: 'Club',
 }
 
 export default async function InstitutionsPage() {

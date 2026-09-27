@@ -1,8 +1,39 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution } from '@/lib/supabase/dal'
-import { DevicesView } from './_components/devices-view'
+import { DevicesView, type MeetingImpact } from './_components/devices-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
 import type { Device, UnassignedDevice, InstitutionConfig } from '@/lib/types'
+
+/**
+ * Club mode: what deleting each device would take with it. The delete guard
+ * (a trigger) cancels its not-yet-started meetings and stops its schedules;
+ * the confirm dialog says so up front. Non-club devices simply have none.
+ */
+async function loadMeetingImpact(deviceIds: string[]): Promise<MeetingImpact> {
+  const impact: MeetingImpact = {}
+  if (deviceIds.length === 0) return impact
+  const supabase = createAdminClient()
+  const [meetingsRes, schedulesRes] = await Promise.all([
+    supabase
+      .from('meetings')
+      .select('device_id')
+      .in('device_id', deviceIds)
+      .eq('status', 'scheduled')
+      .gt('starts_at', new Date().toISOString()),
+    supabase
+      .from('meeting_schedules')
+      .select('device_id')
+      .in('device_id', deviceIds)
+      .eq('active', true),
+  ])
+  const bump = (id: string, key: 'meetings' | 'schedules') => {
+    impact[id] ??= { meetings: 0, schedules: 0 }
+    impact[id][key]++
+  }
+  for (const m of meetingsRes.data ?? []) bump(m.device_id as string, 'meetings')
+  for (const s of schedulesRes.data ?? []) bump(s.device_id as string, 'schedules')
+  return impact
+}
 
 export default async function DevicesPage() {
   const { role, institutionId } = await requireRole('super_admin', 'platform_admin')
@@ -50,6 +81,8 @@ export default async function DevicesPage() {
     allInstitutions = (institutionsRes.data ?? []) as Pick<InstitutionConfig, 'id' | 'name'>[]
   }
 
+  const meetingImpact = await loadMeetingImpact(assignedDevices.map((d) => d.id))
+
   return (
     <>
       <RealtimeRefresh />
@@ -60,6 +93,7 @@ export default async function DevicesPage() {
         role={role}
         institution={institution}
         allInstitutions={allInstitutions}
+        meetingImpact={meetingImpact}
       />
     </>
   )

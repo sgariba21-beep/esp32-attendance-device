@@ -7,11 +7,101 @@ import { EmptyState } from '@/components/ui/empty-state'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { CalendarDays, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight, TrendingUp, Scissors, Package, ShoppingBag } from 'lucide-react'
+import { CalendarDays, CalendarClock, Radio, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight, TrendingUp, Scissors, Package, ShoppingBag } from 'lucide-react'
 import { formatMoney, formatClockTime } from '@/lib/utils'
+import { formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
+import { isLive, isUpcoming, meetingTitle } from '@/lib/meetings'
+import type { InstitutionConfig, Meeting } from '@/lib/types'
 import { LOW_STOCK_THRESHOLD } from './reports/page'
 
 export const dynamic = 'force-dynamic'
+
+// ── Club overview data ──────────────────────────────────────────────────────
+// Clubs are judged per meeting. Loaded outside the component so the single
+// clock read (live / next / last) happens once, on the server.
+const CLUB_LOOKBACK_DAYS = 90
+const CLUB_RATED_MEETINGS = 10
+
+type ClubMeeting = Meeting & { absences_written_at: string | null; present: number; absent: number }
+
+async function loadClubOverview(institution: InstitutionConfig, institutionId: string, scopeDeviceId: string | null) {
+  const supabase = createAdminClient()
+  const now = Date.now()
+  const since = new Date(now - CLUB_LOOKBACK_DAYS * 86_400_000).toISOString()
+
+  let meetingsQ = supabase
+    .from('meetings')
+    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at, absences_written_at')
+    .eq('institution_id', institutionId)
+    .neq('status', 'cancelled')
+    .gte('starts_at', since)
+    .order('starts_at')
+  let membersQ = supabase
+    .from('members')
+    .select('id', { count: 'exact', head: true })
+    .eq('institution_id', institutionId)
+    .eq('status', 'active')
+  let recentQ = supabase
+    .from('attendance')
+    .select('id, time, status, student:member_id(fullname, sid), device:device_id(group_name, unit_name), institution:institution_id(name)')
+    .eq('institution_id', institutionId)
+    .order('date', { ascending: false })
+    .order('time', { ascending: false })
+    .limit(8)
+  // Device-scoped sessions: their device's meetings (plus all-device ones).
+  if (scopeDeviceId) {
+    meetingsQ = meetingsQ.or(`device_id.eq.${scopeDeviceId},device_id.is.null`)
+    membersQ = membersQ.eq('device_id', scopeDeviceId)
+    recentQ = recentQ.eq('device_id', scopeDeviceId)
+  }
+
+  const [meetingsRes, membersRes, recentRes, countsRes] = await Promise.all([
+    meetingsQ,
+    membersQ,
+    recentQ,
+    supabase.rpc('meeting_attendance_counts', { p_institution_id: institutionId, p_since: since }),
+  ])
+
+  const counts = new Map<string, { present: number; absent: number }>()
+  for (const c of (countsRes.data ?? []) as { meeting_id: string; present: number; absent: number }[]) {
+    counts.set(c.meeting_id, c)
+  }
+  const meetings: ClubMeeting[] = ((meetingsRes.data ?? []) as ClubMeeting[]).map((m) => ({
+    ...m,
+    present: counts.get(m.id)?.present ?? 0,
+    absent: counts.get(m.id)?.absent ?? 0,
+  }))
+
+  const live = meetings.find((m) => isLive(m, institution, now)) ?? null
+  const next = meetings.find((m) => isUpcoming(m, institution, now)) ?? null
+
+  // A rate needs the absent side: only for meetings the close sweep has
+  // written absences for, and only while the club tracks absences.
+  const rateOf = (m: ClubMeeting) =>
+    institution.track_absences && m.absences_written_at && m.present + m.absent > 0
+      ? m.present / (m.present + m.absent)
+      : null
+
+  const finished = meetings
+    .filter((m) => Date.parse(m.starts_at) <= now && m !== live)
+    .reverse()
+  const lastMeeting = finished[0] ?? null
+  const rated = finished.filter((m) => rateOf(m) !== null).slice(0, CLUB_RATED_MEETINGS)
+  const ratedPresent = rated.reduce((n, m) => n + m.present, 0)
+  const ratedTotal = rated.reduce((n, m) => n + m.present + m.absent, 0)
+
+  return {
+    live,
+    next,
+    last: lastMeeting ? { ...lastMeeting, rate: rateOf(lastMeeting) } : null,
+    // Pooled across meetings (not a mean of rates), so a small meeting
+    // doesn't count as much as a full one.
+    averageRate: ratedTotal > 0 ? ratedPresent / ratedTotal : null,
+    ratedCount: rated.length,
+    members: membersRes.count ?? 0,
+    recent: (recentRes.data ?? []) as unknown as RecentRow[],
+  }
+}
 
 function todayIn(tz: string): string {
   try {
@@ -156,14 +246,71 @@ export default async function OverviewPage() {
     )
   }
 
-  // ─────────────────────────────────────────── Institution overview ──
-  const today = todayIn(institution.timezone)
-
   // Device scoping — teacher/staff always, admin when bound to a device.
   const scope = await resolveDeviceScope(session)
   const isUnitScoped = scope.mode !== 'all'
   const scopeDeviceId: string | null =
     scope.mode === 'device' ? scope.deviceId : scope.mode === 'none' ? '__none__' : null
+
+  // ─────────────────────────────────────────── Club overview ──
+  // Clubs take attendance per meeting, so the day-based cards below would be
+  // meaningless: show the live / next meeting and per-meeting rates instead.
+  if (institution.type === 'club' && institutionId) {
+    const club = await loadClubOverview(institution, institutionId, scopeDeviceId)
+    const tz = institution.timezone
+    const when = (iso: string) => `${formatZonedDate(iso, tz)}, ${formatZonedTime(iso, tz, institution.time_format)}`
+    const pct = (r: number | null) => (r === null ? '—' : `${Math.round(r * 100)}%`)
+
+    return (
+      <div className="space-y-8">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {isUnitScoped && assignedUnit ? assignedUnit : institution.name}
+          </p>
+          <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Overview</h1>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {club.live ? (
+            <StatCard
+              label="Live now"
+              value={`${club.live.present} present`}
+              hint={meetingTitle(club.live)}
+              icon={Radio}
+              tone="success"
+            />
+          ) : club.next ? (
+            <StatCard label="Next meeting" value={when(club.next.starts_at)} hint={meetingTitle(club.next)} icon={CalendarClock} tone="primary" />
+          ) : (
+            <StatCard label="Next meeting" value="None scheduled" hint="Schedule one on the Meetings page" icon={CalendarClock} tone="muted" />
+          )}
+          <StatCard
+            label="Last meeting"
+            value={club.last ? (club.last.rate !== null ? pct(club.last.rate) : `${club.last.present} present`) : '—'}
+            hint={club.last ? `${meetingTitle(club.last)} · ${formatZonedDate(club.last.starts_at, tz)}` : 'No meetings yet'}
+            icon={UserCheck}
+          />
+          <StatCard
+            label="Average attendance"
+            value={institution.track_absences ? pct(club.averageRate) : 'Absences off'}
+            hint={institution.track_absences
+              ? (club.ratedCount > 0 ? `Last ${club.ratedCount} ${club.ratedCount === 1 ? 'meeting' : 'meetings'}` : 'No closed meetings yet')
+              : 'Turn on in Settings to see rates'}
+            icon={Percent}
+            tone={institution.track_absences ? 'primary' : 'muted'}
+          />
+          <StatCard label={`Active ${institution.label_members.toLowerCase()}`} value={club.members.toLocaleString()} icon={Users} />
+        </div>
+
+        <RecentActivity rows={club.recent} unitLabel={institution.label_unit} timeFormat={institution.time_format} />
+
+        <ManageLink href="/meetings" label="Manage meetings" />
+      </div>
+    )
+  }
+
+  // ─────────────────────────────────────────── Institution overview ──
+  const today = todayIn(institution.timezone)
 
   let membersQ = supabase
     .from('members')

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { createInstitutionWithAdmin } from '../_actions'
+import type { InstitutionType } from '@/lib/types'
 
 // T17: common timezones offered in the selector. Africa/Accra is the default.
 const TIMEZONES = [
@@ -62,7 +63,7 @@ function ScanModeSelect({ id, value, onChange }: { id: string; value: string; on
 
 const empty = {
   institution_name: '',
-  institution_type: 'school' as 'school' | 'office' | 'shop',
+  institution_type: 'school' as InstitutionType,
   timezone: 'Africa/Accra',
   track_students: true,
   track_staff: false,
@@ -84,7 +85,7 @@ export function OnboardingForm() {
       const next = { ...f, [field]: value }
       if (field === 'institution_type') {
         if (value === 'office' || value === 'shop') { next.track_students = false; next.track_staff = true }
-        else { next.track_students = true }
+        else { next.track_students = true }  // school, club
       }
       return next
     })
@@ -146,7 +147,14 @@ export function OnboardingForm() {
             <option value="school">School</option>
             <option value="office">Office</option>
             <option value="shop">Shop / Retail</option>
+            <option value="club">Club / Society</option>
           </NativeSelect>
+          {form.institution_type === 'club' && (
+            <p className="text-xs text-muted-foreground">
+              Attendance is taken per meeting — weekly, monthly, or one-off — rather than every weekday.
+              Meetings are scheduled from the Meetings page.
+            </p>
+          )}
         </div>
 
         {/* T17: timezone selector — defaults to Africa/Accra */}
@@ -162,7 +170,9 @@ export function OnboardingForm() {
             ))}
           </NativeSelect>
           <p className="text-xs text-muted-foreground">
-            Used for attendance dates and the daily mark-absent job. Can be changed in Settings.
+            {form.institution_type === 'club'
+              ? 'Used for meeting times and attendance dates. Can be changed in Settings.'
+              : 'Used for attendance dates and the daily mark-absent job. Can be changed in Settings.'}
           </p>
         </div>
       </Section>
@@ -172,7 +182,7 @@ export function OnboardingForm() {
         description="Choose which member types to track and what scan mode each uses. All of this can be changed later in Settings."
       >
         <div className="space-y-4 rounded-lg border border-border p-4">
-          {form.institution_type === 'school' && (
+          {(form.institution_type === 'school' || form.institution_type === 'club') && (
             <>
               <div className="flex items-start gap-3">
                 <input
@@ -183,7 +193,9 @@ export function OnboardingForm() {
                   className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
                 />
                 <div className="flex-1 space-y-2">
-                  <Label htmlFor="track_students" className="cursor-pointer font-medium">Track students</Label>
+                  <Label htmlFor="track_students" className="cursor-pointer font-medium">
+                    {form.institution_type === 'club' ? 'Track members' : 'Track students'}
+                  </Label>
                   {form.track_students && (
                     <div className="space-y-1.5">
                       <Label htmlFor="student_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>
@@ -210,7 +222,9 @@ export function OnboardingForm() {
               className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
             />
             <div className="flex-1 space-y-2">
-              <Label htmlFor="track_staff" className="cursor-pointer font-medium">Track staff</Label>
+              <Label htmlFor="track_staff" className="cursor-pointer font-medium">
+                {form.institution_type === 'club' ? 'Track organisers' : 'Track staff'}
+              </Label>
               {form.track_staff && (
                 <div className="space-y-1.5">
                   <Label htmlFor="staff_scan_mode" className="text-xs text-muted-foreground">Scan mode</Label>

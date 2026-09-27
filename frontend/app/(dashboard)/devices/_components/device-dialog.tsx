@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { updateDevice } from '../_actions'
-import type { Device } from '@/lib/types'
+import type { Device, InstitutionType } from '@/lib/types'
 
 type Props = {
   open: boolean
@@ -18,7 +18,7 @@ type Props = {
   device: Device | null
   labelGroup: string
   labelUnit: string
-  institutionType: 'school' | 'office' | 'shop'
+  institutionType: InstitutionType
   title?: string
 }
 
@@ -26,8 +26,9 @@ const empty = { group_name: '', unit_name: '' }
 
 export function DeviceDialog({ open, onOpenChange, device, labelGroup, labelUnit, institutionType, title }: Props) {
   const isOffice = institutionType === 'office'
-  const groupPlaceholder = isOffice ? 'e.g. Sales, Operations' : 'e.g. Form 1, Year 2'
-  const unitPlaceholder = isOffice ? 'e.g. East Wing, Floor 2' : 'e.g. Science 1'
+  const isClub = institutionType === 'club'
+  const groupPlaceholder = isOffice ? 'e.g. Sales, Operations' : isClub ? 'e.g. Main' : 'e.g. Form 1, Year 2'
+  const unitPlaceholder = isOffice ? 'e.g. East Wing, Floor 2' : isClub ? 'e.g. Hall, Annex' : 'e.g. Science 1'
   const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)

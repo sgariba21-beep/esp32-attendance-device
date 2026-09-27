@@ -19,6 +19,7 @@ import { UserDialog } from './user-dialog'
 import { PasswordDialog } from './password-dialog'
 import { deleteUser } from '../_actions'
 import type { UserRole } from '@/lib/supabase/dal'
+import type { InstitutionType } from '@/lib/types'
 
 const ROLE_RANK: Record<UserRole, number> = {
   platform_admin: 4,
@@ -79,7 +80,7 @@ type Props = {
   devices: DeviceOption[]
   labelUnit: string
   labelStaff: string
-  institutionType: 'school' | 'office' | 'shop'
+  institutionType: InstitutionType
   currentUserRole: UserRole
   institutions: { id: string; name: string }[]
   members: { id: string; fullname: string }[]

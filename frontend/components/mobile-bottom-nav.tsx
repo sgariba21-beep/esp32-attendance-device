@@ -10,6 +10,7 @@ import type { InstitutionConfig } from '@/lib/types'
 import {
   LayoutDashboard,
   CalendarDays,
+  CalendarClock,
   Users,
   UserCog,
   Cpu,
@@ -58,6 +59,10 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole, deviceBoun
     ? ['super_admin', 'admin', 'platform_admin']
     : ['super_admin', 'platform_admin']
   const items: NavItem[] = []
+  // Clubs: Meetings first — scheduling them is a club's main task.
+  if (institution.type === 'club') {
+    items.push({ href: '/meetings', label: 'Meetings', icon: CalendarClock, roles: ['super_admin', 'admin', 'platform_admin'] })
+  }
   // The roster not already shown in the primary bar.
   if (institution.track_students && (institution.track_staff || role === 'platform_admin')) {
     items.push({ href: '/staff', label: institution.label_staff_plural, icon: UserCog, roles: ['super_admin', 'admin', 'teacher', 'platform_admin'] })
@@ -82,16 +87,17 @@ function buildMoreNav(institution: InstitutionConfig, role: UserRole, deviceBoun
     )
   }
 
-  items.push(
-    { href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] },
-    {
+  items.push({ href: '/devices', label: 'Devices', icon: Cpu, roles: ['super_admin', 'platform_admin'] })
+  // Clubs have no periods or holidays: their meetings define when attendance is taken.
+  if (institution.type !== 'club') {
+    items.push({
       href: '/academic',
       label: institution.type === 'office' ? 'Periods & Holidays' : institution.type === 'shop' ? 'Closed Days' : 'Academic',
       icon: BookOpen,
       roles: ['super_admin', 'admin', 'platform_admin'],
-    },
-    { href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: enrollmentRoles },
-  )
+    })
+  }
+  items.push({ href: '/enrollment', label: 'Enrollment', icon: ClipboardList, roles: enrollmentRoles })
   if (institution.type === 'school') {
     items.push({ href: '/promotion', label: 'Promotion', icon: ArrowUpCircle, roles: ['super_admin', 'admin', 'platform_admin'] })
   }
