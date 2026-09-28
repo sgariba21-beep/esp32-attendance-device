@@ -12,8 +12,23 @@
 //   5xx              -> device keeps the scan queued and retries
 // So "no meeting open" is a 200 with code "no_meeting_open", never a 4xx, and
 // a failed meeting lookup is a 500 so the scan is retried rather than lost.
+// Firmware >= 1.11.0 shows code "no_meeting_open" as NO MEETING.
+//
+// Ad-hoc meetings (Phase 4, plan §8 B): the session-master finger opens and
+// closes a meeting at the device, online or offline. The device names the
+// meeting itself (meeting_ref) and every message about it carries that ref
+// and the open time — the open / close events and each scan taken during it —
+// so whichever reaches the server first creates it (public.device_meeting_event),
+// in any order, any number of times.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+
+/** A device meeting ref: 4-64 of [A-Za-z0-9-], as meetings.device_ref's CHECK. */
+export function isMeetingRef(v: unknown): v is string {
+  return typeof v === "string" && /^[A-Za-z0-9-]{4,64}$/.test(v);
+}
+
+export type MeetingRef = { ref: string; openedAt: Date };
 
 export type ClubInstitution = {
   track_students: boolean;
@@ -77,9 +92,11 @@ export async function handleClubScan(
     instant: Date;
     date: string; // local, institution timezone
     time: string; // local "HH:MM:SS"
+    meetingRef?: MeetingRef | null; // the device's ad-hoc meeting, if the scan was taken in one
   },
 ): Promise<ClubScanResult> {
   const { institution_id, institution, authenticatedDeviceId, sid, scan_id, instant, date, time } = args;
+  const meetingRef = args.meetingRef ?? null;
 
   const { data: member, error: memberError } = await supabase
     .from("members")
@@ -102,11 +119,23 @@ export async function handleClubScan(
   // device (legacy shared-secret path).
   const effectiveDeviceId: string | null = authenticatedDeviceId ?? member.device_id;
 
-  const { data: meetings, error: resolveError } = await supabase.rpc("resolve_meeting", {
-    p_institution_id: institution_id,
-    p_device_id: effectiveDeviceId,
-    p_at: instant.toISOString(),
-  });
+  // A scan carrying its ad-hoc meeting's ref goes through resolve_device_scan,
+  // which creates that meeting if this scan beat its open event here, and
+  // prefers it; anything else resolves by timestamp alone. Refs only count on
+  // the per-device-secret path, where the device is authenticated.
+  const { data: meetings, error: resolveError } = meetingRef && authenticatedDeviceId
+    ? await supabase.rpc("resolve_device_scan", {
+      p_institution_id: institution_id,
+      p_device_id: authenticatedDeviceId,
+      p_at: instant.toISOString(),
+      p_ref: meetingRef.ref,
+      p_opened_at: meetingRef.openedAt.toISOString(),
+    })
+    : await supabase.rpc("resolve_meeting", {
+      p_institution_id: institution_id,
+      p_device_id: effectiveDeviceId,
+      p_at: instant.toISOString(),
+    });
 
   if (resolveError) {
     // Transient: 500 keeps the scan queued on the device for a retry.
@@ -203,4 +232,47 @@ export async function handleClubScan(
   }
 
   return { status: 200, body: { message: "Duplicate scan ignored" } };
+}
+
+/**
+ * A session-master open / close of the device's ad-hoc meeting. Idempotent:
+ * the device may deliver it late, twice, or after scans that already created
+ * the meeting. A close carries the device's own close time (press, or its
+ * idle / midnight rule), which only ever moves the meeting's end earlier.
+ */
+export async function handleMeetingEvent(
+  supabase: SupabaseClient,
+  args: { deviceId: string; action: string; ref: string; openedAt: Date; at: Date },
+): Promise<ClubScanResult> {
+  const { deviceId, action, ref, openedAt, at } = args;
+  if (action !== "open" && action !== "close") {
+    return { status: 400, body: { error: "Unknown meeting_action" } };
+  }
+
+  const { data, error } = await supabase.rpc("device_meeting_event", {
+    p_device_id: deviceId,
+    p_ref: ref,
+    p_opened_at: openedAt.toISOString(),
+    p_closed_at: action === "close" ? at.toISOString() : null,
+  });
+  if (error) {
+    // Transient: 500 keeps the event queued on the device for a retry.
+    return { status: 500, body: { error: `Meeting event failed: ${error.message}` } };
+  }
+
+  // NULL (all-null row) when the device is not in an active club.
+  const meeting = data as { id: string | null; status: string | null } | null;
+  if (!meeting?.id) {
+    return { status: 200, body: { message: "Meeting event ignored", code: "meeting_ignored" } };
+  }
+  // The message names the meeting's resulting state, not the action: a late
+  // replayed open of an already-closed meeting leaves it closed.
+  return {
+    status: 200,
+    body: {
+      message: `Meeting ${action} applied — meeting is ${meeting.status}`,
+      meeting_id: meeting.id,
+      meeting_status: meeting.status,
+    },
+  };
 }

@@ -37,9 +37,13 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 // for the identical partial-write risk. See loadDeviceConfig()/saveDeviceConfig().
 #define DEVICE_CONFIG_FILE     "/device_config.json"
 #define DEVICE_CONFIG_TMP_FILE "/device_config.tmp"
+// Club mode (1.11.0): this device's ad-hoc meeting, so a reboot mid-meeting
+// (or offline) keeps it open. Same tmp-then-rename write as device_config.
+#define MEETING_STATE_FILE     "/meeting_state.json"
+#define MEETING_STATE_TMP_FILE "/meeting_state.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.10.0"        // increment on each flash (1.10.0: server-reachability watchdog + durable enrollment reports; enrollment job payload uses member_id)
+#define FIRMWARE_VERSION  "1.11.0"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -262,6 +266,54 @@ unsigned long pendingScanDeadlineMs = 0;  // pendingScanStartMs + 4000 (the corr
 bool          masterConfirmArmed       = false;
 int           masterConfirmFid         = -1;
 unsigned long masterConfirmDeadlineMs  = 0;
+
+/* ---- Club mode: ad-hoc meetings (1.11.0, CLUB-MODE-PLAN.md §8 B) ----
+ * A "session_master" finger opens an ad-hoc meeting with one press and closes
+ * it with a confirmed second press -- online or OFFLINE. The device names the
+ * meeting itself (mtgRef) the moment it opens, and the open event, the close
+ * event, and every scan taken during it all carry that ref + the open time
+ * through the ordinary SPIFFS queue, so whichever reaches the server first
+ * creates the meeting: replay order, retries and lost replies don't matter.
+ * The device also applies the idle / midnight auto-close itself (the server
+ * can't: it never sees scans still queued here) and reports that close with
+ * the deadline's timestamp.
+ *
+ * mtg* and meetingClose* are Core-1-exclusive (FingerprintTask: presses,
+ * scans, auto-close, reconcile, idle screen), persisted to MEETING_STATE_FILE.
+ * srvMtg is the server's view from the latest poll, written by EnrollmentTask
+ * (Core 0) under meetingMutex and folded in on Core 1 by
+ * reconcileMeetingWithServer(). */
+#define MEETING_CONFIRM_MS    8000UL
+#define MEETING_LIVE_FRESH_MS 90000UL   // trust a poll's "live" meeting this long when offline-ish
+
+bool     mtgOpen         = false;
+String   mtgRef          = "";      // also kept after close: the last meeting's ref
+uint32_t mtgOpenedEpoch  = 0;       // UTC epoch, RTC timebase
+uint32_t mtgLastEpoch    = 0;       // last scan in it (or the open) -- the idle rule
+bool     mtgAcked        = false;   // the server has reported it open at least once
+uint32_t mtgSeen[4]      = { 0, 0, 0, 0 };  // fids 0..127 scanned in it -> "N present"
+int      mtgClub         = -1;      // from the poll: -1 unknown, 0 not a club, 1 club
+int      mtgAutocloseMin = 240;     // from the poll: institutions.meeting_autoclose_minutes
+
+bool          meetingCloseArmed      = false;
+int           meetingCloseFid        = -1;
+unsigned long meetingCloseDeadlineMs = 0;
+
+SemaphoreHandle_t meetingMutex = NULL;
+struct ServerMeetingView {
+  bool          valid;
+  unsigned long atMs;             // millis() of the poll -- also the "new view" marker
+  int           club;             // 1 / 0
+  int           autocloseMin;
+  String        openRef;          // this device's ad-hoc meeting the server has open
+  uint32_t      openOpenedEpoch;
+  bool          live;             // a meeting a scan would land in right now
+  String        liveTitle;
+  String        liveOrigin;       // "scheduled" | "device"
+  uint32_t      liveEnds;         // epoch; 0 for an open ad-hoc meeting
+};
+ServerMeetingView srvMtg = { false, 0, 0, 240, "", 0, false, "", "", 0 };
+unsigned long srvMtgAppliedAtMs = 0;  // Core 1: the view last reconciled
 
 /* Forward declarations */
 void showReadyState();
@@ -654,10 +706,13 @@ void postScanVerdict(const String &entryPayload, bool ok, const String &body) {
     JsonDocument respDoc;
     DeserializationError err = deserializeJson(respDoc, body);
     String scanType = "";
-    if (!err) scanType = respDoc["scan_type"] | "";
+    String code = "";
+    if (!err) { scanType = respDoc["scan_type"] | ""; code = respDoc["code"] | ""; }
     if (scanType == "present") verdict = "PRESENT";
     else if (scanType == "time_in") verdict = "TIME IN";
     else if (scanType == "time_out") verdict = "TIME OUT";
+    // Club mode: a scan with no meeting taking scans (still a 200 -- not lost).
+    else if (code == "no_meeting_open") verdict = "NO MEETING";
     // Any other 200 (weekend/holiday/duplicate/not-tracked/period/already-logged)
     // -- full reason is Serial/dashboard-only, this is a compact summary.
     else verdict = "NOT LOGGED";
@@ -954,6 +1009,299 @@ void showBootSplash() {
   display.display();
 }
 
+/* ================== Club mode: ad-hoc meetings (1.11.0) ================== */
+// All Core 1 (FingerprintTask) unless noted -- see the mtg* globals.
+
+String epochToTimestamp(uint32_t epoch) {  // same "YYYY-MM-DD HH:MM:SS" (UTC) as getRTCTimestamp()
+  DateTime d(epoch);
+  char buf[20];
+  sprintf(buf, "%04d-%02d-%02d %02d:%02d:%02d", d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second());
+  return String(buf);
+}
+
+// Local wall-clock HH:MM for a UTC epoch -- the idle clock's own tz math.
+String localHHMM(uint32_t utcEpoch) {
+  DateTime d(utcEpoch + (int32_t)getDeviceConfigTzOffsetSafe() * 60);
+  char buf[6];
+  sprintf(buf, "%02d:%02d", d.hour(), d.minute());
+  return String(buf);
+}
+
+// The RTC holds a real time: set at least once, and not since lost. Meeting
+// events are only as good as their timestamps, so the session master refuses
+// to open or close on a clock that was never set.
+bool rtcTimeValid() {
+  return rtc.now().year() >= 2024 && !rtc.lostPower();
+}
+
+int meetingPresentCount() {
+  int n = 0;
+  for (int i = 0; i < 4; i++) n += __builtin_popcount(mtgSeen[i]);
+  return n;
+}
+
+void saveMeetingState() {
+  JsonDocument doc;
+  doc["open"]      = mtgOpen;
+  doc["ref"]       = mtgRef;
+  doc["opened"]    = mtgOpenedEpoch;
+  doc["last"]      = mtgLastEpoch;
+  doc["acked"]     = mtgAcked;
+  doc["club"]      = mtgClub;
+  doc["autoclose"] = mtgAutocloseMin;
+  JsonArray seen = doc["seen"].to<JsonArray>();
+  for (int i = 0; i < 4; i++) seen.add(mtgSeen[i]);
+
+  xSemaphoreTake(spiffsMutex, portMAX_DELAY);
+  File f = SPIFFS.open(MEETING_STATE_TMP_FILE, FILE_WRITE);
+  if (f) {
+    serializeJson(doc, f);
+    f.close();
+    if (SPIFFS.exists(MEETING_STATE_FILE)) SPIFFS.remove(MEETING_STATE_FILE);
+    if (!SPIFFS.rename(MEETING_STATE_TMP_FILE, MEETING_STATE_FILE)) Serial.println("meeting_state: rename failed");
+  } else {
+    Serial.println("meeting_state: failed to open tmp file for write");
+  }
+  xSemaphoreGive(spiffsMutex);
+}
+
+// setup(), before any task starts.
+void loadMeetingState() {
+  if (!SPIFFS.exists(MEETING_STATE_FILE)) return;
+  File f = SPIFFS.open(MEETING_STATE_FILE, FILE_READ);
+  if (!f) return;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) { Serial.printf("meeting_state: corrupt (%s), ignoring\n", err.c_str()); return; }
+  mtgOpen         = doc["open"] | false;
+  mtgRef          = doc["ref"] | "";
+  mtgOpenedEpoch  = doc["opened"].as<uint32_t>();
+  mtgLastEpoch    = doc["last"].as<uint32_t>();
+  mtgAcked        = doc["acked"] | false;
+  mtgClub         = doc["club"] | -1;
+  mtgAutocloseMin = doc["autoclose"] | 240;
+  for (int i = 0; i < 4; i++) mtgSeen[i] = doc["seen"][i].as<uint32_t>();
+  if (mtgOpen && (mtgRef.length() == 0 || mtgOpenedEpoch == 0)) mtgOpen = false;
+  Serial.printf("meeting_state loaded: open=%d ref=%s club=%d\n", mtgOpen, mtgRef.c_str(), mtgClub);
+}
+
+// Open / close event for the current mtgRef, through the same durable queue
+// as scans (log-attendance). "timestamp" is the event time, so the queue's
+// age trimming treats it exactly like a scan.
+void queueMeetingEvent(const char *action, uint32_t atEpoch) {
+  JsonDocument doc;
+  doc["device_id"]         = deviceId;
+  doc["institution_id"]    = institutionId;
+  doc["meeting_action"]    = action;
+  doc["meeting_ref"]       = mtgRef;
+  doc["meeting_opened_at"] = epochToTimestamp(mtgOpenedEpoch);
+  doc["timestamp"]         = epochToTimestamp(atEpoch);
+  String payload;
+  serializeJson(doc, payload);
+  queueAndSignal(payload);
+}
+
+void openMeetingLocal(uint32_t nowEpoch) {
+  char ref[24];
+  sprintf(ref, "m%08lx-%04lx", (unsigned long)nowEpoch, (unsigned long)(esp_random() & 0xFFFF));
+  mtgOpen        = true;
+  mtgRef         = ref;
+  mtgOpenedEpoch = nowEpoch;
+  mtgLastEpoch   = nowEpoch;
+  mtgAcked       = false;
+  memset(mtgSeen, 0, sizeof(mtgSeen));
+  saveMeetingState();
+  queueMeetingEvent("open", nowEpoch);
+}
+
+// notifyServer=false when the server closed it first (dashboard) -- nothing to report.
+void closeMeetingLocal(uint32_t closeEpoch, bool notifyServer) {
+  if (!mtgOpen) return;
+  if (notifyServer) queueMeetingEvent("close", closeEpoch);
+  mtgOpen  = false;
+  mtgAcked = false;
+  saveMeetingState();
+}
+
+// A scheduled meeting is taking scans now, per the latest poll: fresh, or not
+// yet past its end (the schedule can't change while we're offline anyway).
+bool scheduledMeetingLive(uint32_t nowEpoch, String &title, uint32_t &endsEpoch) {
+  xSemaphoreTake(meetingMutex, portMAX_DELAY);
+  bool live = srvMtg.valid && srvMtg.live && srvMtg.liveOrigin == "scheduled" &&
+              (millis() - srvMtg.atMs < MEETING_LIVE_FRESH_MS ||
+               (srvMtg.liveEnds != 0 && nowEpoch < srvMtg.liveEnds));
+  title = srvMtg.liveTitle;
+  endsEpoch = srvMtg.liveEnds;
+  xSemaphoreGive(meetingMutex);
+  return live;
+}
+
+// Fold the latest poll into the local state, once per new poll.
+void reconcileMeetingWithServer() {
+  xSemaphoreTake(meetingMutex, portMAX_DELAY);
+  if (!srvMtg.valid || srvMtg.atMs == srvMtgAppliedAtMs) { xSemaphoreGive(meetingMutex); return; }
+  srvMtgAppliedAtMs = srvMtg.atMs;
+  int club = srvMtg.club;
+  int autoclose = srvMtg.autocloseMin;
+  String openRef = srvMtg.openRef;
+  uint32_t openOpened = srvMtg.openOpenedEpoch;
+  xSemaphoreGive(meetingMutex);
+
+  bool dirty = false;
+  if (club != mtgClub) { mtgClub = club; dirty = true; }
+  if (club == 1 && autoclose >= 15 && autoclose != mtgAutocloseMin) { mtgAutocloseMin = autoclose; dirty = true; }
+
+  if (mtgOpen) {
+    if (openRef == mtgRef) {
+      if (!mtgAcked) { mtgAcked = true; dirty = true; }
+    } else if (mtgAcked) {
+      // The server had this meeting open and no longer does: closed or
+      // cancelled in the dashboard. Follow it -- the server already holds the
+      // close, so nothing is queued. (Before the first ack a missing open_ref
+      // only means our open event hasn't been delivered yet.)
+      int present = meetingPresentCount();
+      closeMeetingLocal(0, false);
+      dirty = false;
+      pendingScanId = "";
+      postDisplayState(TIER_INTERACTION, 4000, "CLOSED", "Closed in dashboard", String(present) + " present");
+    }
+  } else if (club == 1 && openRef.length() && openRef != mtgRef && openOpened > mtgOpenedEpoch) {
+    // The server has an ad-hoc meeting of ours open that is newer than any we
+    // know of: local state was lost (flash wipe/corruption). Adopt it so the
+    // session master can close it. (openOpened > mtgOpenedEpoch keeps an
+    // older meeting whose close is merely still queued from being re-adopted.)
+    mtgOpen        = true;
+    mtgRef         = openRef;
+    mtgOpenedEpoch = openOpened;
+    DateTime n = rtc.now();
+    mtgLastEpoch   = (n.year() >= 2024 && n.unixtime() > openOpened) ? n.unixtime() : openOpened;
+    mtgAcked       = true;
+    memset(mtgSeen, 0, sizeof(mtgSeen));
+    dirty = true;
+    Serial.printf("Meeting: adopted server-open meeting %s\n", mtgRef.c_str());
+  }
+  if (dirty) saveMeetingState();
+}
+
+// The idle / end-of-day rule, applied here because only the device sees its
+// own queued scans: close at the EARLIER of (last scan or open) + auto-close
+// minutes and local midnight after opening -- the same rule the server's
+// sweep used to apply -- stamped with that deadline, not the time we noticed.
+void checkMeetingAutoClose() {
+  if (!mtgOpen) return;
+  static unsigned long lastCheckMs = 0;
+  if (millis() - lastCheckMs < 1000) return;
+  lastCheckMs = millis();
+
+  DateTime n = rtc.now();
+  if (n.year() < 2024) return;
+  uint32_t now = n.unixtime();
+  uint32_t last = mtgLastEpoch > mtgOpenedEpoch ? mtgLastEpoch : mtgOpenedEpoch;
+  uint32_t idleDeadline = last + (uint32_t)mtgAutocloseMin * 60UL;
+  int32_t tzSec = (int32_t)getDeviceConfigTzOffsetSafe() * 60;
+  uint32_t localOpened = mtgOpenedEpoch + tzSec;
+  uint32_t midnight = (localOpened / 86400UL + 1UL) * 86400UL - tzSec;
+  uint32_t deadline = idleDeadline < midnight ? idleDeadline : midnight;
+  if (now < deadline) return;
+
+  Serial.printf("Meeting %s auto-closed (deadline %lu)\n", mtgRef.c_str(), (unsigned long)deadline);
+  int present = meetingPresentCount();
+  meetingCloseArmed = false;
+  closeMeetingLocal(deadline, true);
+  pendingScanId = "";
+  postDisplayState(TIER_INTERACTION, 4000, "CLOSED", "Meeting auto-closed", String(present) + " present");
+}
+
+// Close-confirm window timeout -- unconditional per loop, like the master's.
+void checkMeetingCloseTimeout() {
+  if (!meetingCloseArmed) return;
+  if (millis() <= meetingCloseDeadlineMs) return;
+  meetingCloseArmed = false;
+  pendingScanId = "";
+  postDisplayState(TIER_INTERACTION, 1500, "KEPT OPEN", "Meeting continues", "");
+}
+
+// Second session-master press inside the window: close now.
+void confirmMeetingClose() {
+  pendingScanId = "";
+  if (!mtgOpen) {  // auto-closed or closed in the dashboard meanwhile
+    postDisplayState(TIER_INTERACTION, 2500, "CLOSED", "Already closed", "");
+    renderDisplayIfDirty();
+    return;
+  }
+  uint32_t now = rtc.now().unixtime();
+  if (now < mtgOpenedEpoch) now = mtgOpenedEpoch;  // clock stepped back since opening
+  int present = meetingPresentCount();
+  closeMeetingLocal(now, true);
+  Serial.printf("Meeting %s closed by session master (%d present)\n", mtgRef.c_str(), present);
+  postDisplayState(TIER_INTERACTION, 4000, "CLOSED", "Meeting ended " + localHHMM(now), String(present) + " present");
+  renderDisplayIfDirty();
+  setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+  vTaskDelay(300 / portTICK_PERIOD_MS);
+  showReadyState();
+}
+
+// First session-master press: open, or arm the close confirmation.
+void handleSessionMasterPress(int fid) {
+  pendingScanId = "";
+  reconcileMeetingWithServer();  // act on the freshest club / meeting view
+
+  if (mtgClub == 0) {
+    postDisplayState(TIER_INTERACTION, 2500, "NO CLUB", "Meetings are off", "for this device");
+  } else if (!rtcTimeValid()) {
+    postDisplayState(TIER_INTERACTION, 2500, "NO CLOCK", "Time not set yet", "Connect to WiFi");
+  } else if (mtgOpen) {
+    meetingCloseArmed = true;
+    meetingCloseFid = fid;
+    meetingCloseDeadlineMs = millis() + MEETING_CONFIRM_MS;  // set before the card: this wins the race
+    postDisplayState(TIER_INTERACTION, MEETING_CONFIRM_MS, "END MTG?", "Scan again to close",
+                     String(meetingPresentCount()) + " present");
+    renderDisplayIfDirty();
+    setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_YELLOW);
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+    showReadyState();
+    return;
+  } else {
+    uint32_t now = rtc.now().unixtime();
+    String title; uint32_t ends = 0;
+    if (scheduledMeetingLive(now, title, ends)) {
+      // Scheduled meetings run on their own times (plan §2); the session
+      // master never opens an ad-hoc one over them.
+      // Titles are free text: cut to one 21-char row, or GFX wraps them.
+      postDisplayState(TIER_INTERACTION, 2500, "SCHEDULED",
+                       title.length() ? sanitizeForDisplay(title).substring(0, 21) : String("Meeting on now"),
+                       ends ? String("Until ") + localHHMM(ends) : String(""));
+    } else {
+      openMeetingLocal(now);
+      Serial.printf("Meeting %s opened by session master\n", mtgRef.c_str());
+      postDisplayState(TIER_INTERACTION, 2500, "OPENED", "Meeting started", localHHMM(now));
+      renderDisplayIfDirty();
+      setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_GREEN);
+      vTaskDelay(300 / portTICK_PERIOD_MS);
+      showReadyState();
+      return;
+    }
+  }
+  renderDisplayIfDirty();
+  setSensorLED(FINGERPRINT_LED_ON, 0, FINGERPRINT_LED_RED);
+  vTaskDelay(300 / portTICK_PERIOD_MS);
+  showReadyState();
+}
+
+// The idle screen's meeting line (clubs only).
+String meetingIdleLine(uint32_t nowEpoch) {
+  if (mtgClub != 1) return "";
+  if (mtgOpen) return "Open " + localHHMM(mtgOpenedEpoch) + " - " + String(meetingPresentCount()) + " in";
+  String title; uint32_t ends = 0;
+  if (scheduledMeetingLive(nowEpoch, title, ends)) {
+    String s = ends ? String("Till ") + localHHMM(ends) + " " : String("");
+    s += title.length() ? title : String("Meeting");
+    return s;
+  }
+  return "No meeting";
+}
+
 // Tier 4 idle content: clock, unit display name, WiFi link state. Local time
 // is UTC (the RTC's own timebase, since NTP sync uses configTime(0,0,...))
 // plus deviceConfigTzOffset minutes, computed on raw unixtime -- NOT via
@@ -1001,6 +1349,14 @@ void renderIdleScreen() {
     if (dropped > 0) banner += " (" + String(dropped) + " lost)";
     display.setCursor(0, 48);
     display.print(banner);
+  }
+
+  // Club mode: open ad-hoc meeting / live scheduled one / none. Below the
+  // offline banner when that's showing (the 5th and last text row).
+  String meetingLine = meetingIdleLine(utcNow.unixtime());
+  if (meetingLine.length()) {
+    display.setCursor(0, degraded ? 56 : 48);
+    display.print(sanitizeForDisplay(meetingLine).substring(0, 21));  // one row; GFX would wrap
   }
 }
 
@@ -2572,6 +2928,8 @@ void EnrollmentTask(void *pvParameters) {
             // inherit the previous tenant's name-display policy.
             if (SPIFFS.exists(DEVICE_CONFIG_FILE)) SPIFFS.remove(DEVICE_CONFIG_FILE);
             if (SPIFFS.exists(DEVICE_CONFIG_TMP_FILE)) SPIFFS.remove(DEVICE_CONFIG_TMP_FILE);
+            // ...nor an ad-hoc meeting from the old one.
+            if (SPIFFS.exists(MEETING_STATE_FILE)) SPIFFS.remove(MEETING_STATE_FILE);
             // Brief, visible confirmation before the wipe -- Core-0-safe post
             // (never touches `display` itself); FingerprintTask's own render
             // loop (Core 1, still running -- not suspended here) picks it up
@@ -2607,6 +2965,27 @@ void EnrollmentTask(void *pvParameters) {
           if (serverDisplayName.length() > 0 && serverDisplayName != getDisplayNameSafe()) {
             setDisplayName(serverDisplayName);
             saveDeviceIdentity();
+          }
+
+          // Club mode (1.11.0): the server's meeting view, every poll. Only
+          // recorded here; FingerprintTask folds it into the device's own
+          // meeting state (reconcileMeetingWithServer). Absent -> an older
+          // server, or the lookup failed: keep the last view.
+          JsonObject ms = doc["meeting_state"];
+          if (!ms.isNull()) {
+            JsonObject live = ms["live"];
+            xSemaphoreTake(meetingMutex, portMAX_DELAY);
+            srvMtg.valid           = true;
+            srvMtg.atMs            = millis() | 1UL;  // never 0: 0 means "never applied"
+            srvMtg.club            = (ms["club"] | false) ? 1 : 0;
+            srvMtg.autocloseMin    = ms["autoclose_min"] | 240;
+            srvMtg.openRef         = ms["open_ref"] | "";
+            srvMtg.openOpenedEpoch = ms["open_opened_at"].as<uint32_t>();
+            srvMtg.live            = !live.isNull();
+            srvMtg.liveTitle       = live["title"] | "";
+            srvMtg.liveOrigin      = live["origin"] | "";
+            srvMtg.liveEnds        = live["ends_at"].as<uint32_t>();
+            xSemaphoreGive(meetingMutex);
           }
 
           // Job fields are read from the nested "job" object rather than
@@ -2663,6 +3042,12 @@ void FingerprintTask(void *pvParameters) {
     // Unconditional -- must resolve an armed master-confirm window at its
     // actual 8s deadline even if no new scan ever arrives.
     checkMasterConfirmTimeout();
+    // Club mode: same for the session master's close window; then the
+    // latest poll's meeting view, and the idle / midnight auto-close. All
+    // cheap no-ops for a device with no meeting open and no new poll.
+    checkMeetingCloseTimeout();
+    reconcileMeetingWithServer();
+    checkMeetingAutoClose();
     // Display owner is this task (Core 1) only -- runs every iteration but is
     // a cheap no-op unless something's actually dirty (see renderDisplayIfDirty).
     renderDisplayIfDirty();
@@ -2697,7 +3082,10 @@ void FingerprintTask(void *pvParameters) {
           enrollment_doRegister(job, "student");
         } else if (job.command == "register-master") {
           enrollment_doRegister(job, "master");
-        } else if (job.command == "delete" || job.command == "delete-master") {
+        } else if (job.command == "register-session-master") {
+          enrollment_doRegister(job, "session_master");
+        } else if (job.command == "delete" || job.command == "delete-master" ||
+                   job.command == "delete-session-master") {
           if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
           else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);
           else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.memberId);
@@ -2774,6 +3162,25 @@ void FingerprintTask(void *pvParameters) {
           Serial.println("Master confirm cancelled: different finger scanned.");
           masterConfirmArmed = false;
         }
+      }
+
+      // Session-master close confirmation -- same shape as the master's: the
+      // same finger again confirms, any other finger cancels and is then
+      // processed normally below.
+      if (meetingCloseArmed) {
+        meetingCloseArmed = false;
+        if (fid == meetingCloseFid) {
+          confirmMeetingClose();
+          continue;
+        }
+        Serial.println("Meeting close cancelled: different finger scanned.");
+      }
+
+      // Club mode: the session master opens an ad-hoc meeting, or arms its
+      // close. Not an attendance event -- never touches the cooldown.
+      if (role == "session_master") {
+        handleSessionMasterPress(fid);
+        continue;
       }
 
       if (role == "master") {
@@ -2860,11 +3267,24 @@ void FingerprintTask(void *pvParameters) {
         doc["sid"]            = mapped;
         doc["scan_id"]        = scanId;
         doc["timestamp"]      = ts;
+        // Club mode: taken during this device's ad-hoc meeting -- say which,
+        // so the server files it there (creating the meeting if this scan
+        // gets there before the open event does).
+        if (mtgOpen) {
+          doc["meeting_ref"]       = mtgRef;
+          doc["meeting_opened_at"] = epochToTimestamp(mtgOpenedEpoch);
+        }
         String payload;
         serializeJson(doc, payload);
         vTaskDelay(feedbackDuration / portTICK_PERIOD_MS);
         showReadyState();
         queueAndSignal(payload);
+        if (mtgOpen) {
+          mtgSeen[fid >> 5] |= (1UL << (fid & 31));
+          uint32_t scanEpoch = rtc.now().unixtime();
+          if (scanEpoch > mtgLastEpoch) mtgLastEpoch = scanEpoch;
+          saveMeetingState();
+        }
         appendScanLog(getRTCTimestamp() + " | fid=" + String(fid) + " | SENT | id=" + mapped +
                       " | name=" + fidMapName[fid]);
         vTaskDelay(200 / portTICK_PERIOD_MS);
@@ -2934,7 +3354,8 @@ void setup() {
   enrollMutex  = xSemaphoreCreateMutex();
   enrollSem    = xSemaphoreCreateBinary();
   displayMutex = xSemaphoreCreateMutex();
-  if (!memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem || !displayMutex) {
+  meetingMutex = xSemaphoreCreateMutex();
+  if (!memQueueSem || !spiffsMutex || !enrollMutex || !enrollSem || !displayMutex || !meetingMutex) {
     Serial.println("Failed to create RTOS primitives");
     // Draw directly, bypassing the mutex/mailbox entirely -- displayMutex
     // itself may be one of the things that just failed to create, and no
@@ -2978,6 +3399,8 @@ void setup() {
   // immediately, and a card rendered before the policy loads could show a
   // full name under a stricter (e.g. "none") configured policy.
   loadDeviceConfig();
+  // Club mode: an ad-hoc meeting open before the reboot stays open.
+  loadMeetingState();
 
   // display_name is already resolved above if this device was previously
   // provisioned; a fresh device just shows the version until assigned.

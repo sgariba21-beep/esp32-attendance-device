@@ -16,6 +16,9 @@ import type { Device } from '@/lib/types'
 import { indefiniteArticle } from '@/lib/utils'
 
 type Command = 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
+  | 'register-session-master' | 'delete-session-master'
+
+const SESSION_COMMANDS: Command[] = ['register-session-master', 'delete-session-master']
 type FingerSlot = 'fin1' | 'fin2'
 
 type Props = {
@@ -27,6 +30,8 @@ type Props = {
   labelMembers: string
   /** Device-bound admin: lock to the one device, offer register/delete only. */
   restrictedToDevice?: boolean
+  /** Devices belonging to a club: these also offer the session-master commands. */
+  clubDeviceIds?: string[]
 }
 
 const FINGER_SLOTS: { value: FingerSlot; label: string }[] = [
@@ -47,7 +52,7 @@ const empty = {
   force_overwrite: false,
 }
 
-export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers, restrictedToDevice = false }: Props) {
+export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember, labelMembers, restrictedToDevice = false, clubDeviceIds = [] }: Props) {
   const member = labelMember.toLowerCase()
   const article = indefiniteArticle(labelMember)
   const ALL_COMMANDS: { value: Command; label: string; description: string }[] = [
@@ -55,15 +60,18 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
     { value: 'delete',          label: 'Delete',        description: `Remove ${article} ${member}'s fingerprint from the device.` },
     { value: 'register-master', label: 'Reg. master',   description: 'Enroll a master fingerprint. When scanned, opens the device config portal.' },
     { value: 'delete-master',   label: 'Del. master',   description: 'Remove a master fingerprint from the device by its sensor slot number.' },
+    { value: 'register-session-master', label: 'Reg. session master', description: 'Enroll a session-master fingerprint. One press at the device opens an ad-hoc meeting; to close it, press, then press again to confirm. Works offline.' },
+    { value: 'delete-session-master',   label: 'Del. session master', description: 'Remove a session-master fingerprint from the device by its sensor slot number.' },
     { value: 'clearall',        label: 'Clear all',     description: 'Wipe all fingerprints stored on the device.' },
   ]
   // A device-bound admin gets register / delete only — no master fingerprints,
-  // no clear-all.
+  // no clear-all. Session masters are offered only for a club's device.
+  const [form, setForm] = useState(empty)
+  const deviceIsClub = clubDeviceIds.includes(form.device_id)
   const COMMANDS = restrictedToDevice
     ? ALL_COMMANDS.filter((c) => c.value === 'register' || c.value === 'delete')
-    : ALL_COMMANDS
+    : ALL_COMMANDS.filter((c) => deviceIsClub || !SESSION_COMMANDS.includes(c.value))
 
-  const [form, setForm] = useState(empty)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [deviceMembers, setDeviceMembers] = useState<MemberOption[]>([])
@@ -99,7 +107,8 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
     setForm((f) => ({ ...f, [field]: value }))
   }
   const needsFid       = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
-  const needsMasterName = form.command === 'register-master'
+    || SESSION_COMMANDS.includes(form.command)
+  const needsMasterName = form.command === 'register-master' || form.command === 'register-session-master'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -130,9 +139,9 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
         member_id: form.member_id,
         finger_slot: form.finger_slot,
       }
-    } else if (form.command === 'register-master') {
+    } else if (form.command === 'register-master' || form.command === 'register-session-master') {
       jobData = {
-        command: 'register-master',
+        command: form.command,
         device_id: form.device_id,
         fid: Number(form.fid),
         name: form.master_name.trim(),
@@ -140,7 +149,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
       }
     } else {
       jobData = {
-        command: 'delete-master',
+        command: form.command === 'delete-session-master' ? 'delete-session-master' : 'delete-master',
         device_id: form.device_id,
         fid: Number(form.fid),
       }
@@ -160,7 +169,8 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   }
 
   async function confirmOverwrite() {
-    if (!pendingJob || (pendingJob.command !== 'register' && pendingJob.command !== 'register-master')) return
+    if (!pendingJob || (pendingJob.command !== 'register' && pendingJob.command !== 'register-master'
+      && pendingJob.command !== 'register-session-master')) return
     setConfirming(true)
     setError(null)
     const result = await createEnrollmentJob({ ...pendingJob, confirmOverwrite: true })
@@ -224,7 +234,12 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
                   : `${d.group_name} ${d.unit_name}`,
               }))}
               value={form.device_id}
-              onChange={(v) => { set('device_id', v); set('member_id', '') }}
+              onChange={(v) => {
+                set('device_id', v)
+                set('member_id', '')
+                // A session-master command makes no sense on a non-club device.
+                if (SESSION_COMMANDS.includes(form.command) && !clubDeviceIds.includes(v)) set('command', 'register')
+              }}
               placeholder="Select a device…"
               searchPlaceholder="Search devices…"
               disabled={restrictedToDevice}
@@ -239,7 +254,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
                 id="master_name"
                 value={form.master_name}
                 onChange={(e) => set('master_name', e.target.value)}
-                placeholder="e.g. Principal"
+                placeholder={form.command === 'register-session-master' ? 'e.g. Chairperson' : 'e.g. Principal'}
                 required
               />
               <p className="text-xs text-muted-foreground">
@@ -288,7 +303,7 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
             </div>
           )}
 
-          {/* FID (register / register-master / delete-master) */}
+          {/* FID (register / master / session-master commands) */}
           {needsFid && (
             <div className="space-y-2">
               <Label htmlFor="fid">Sensor slot (1–127)</Label>
@@ -306,8 +321,8 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
             </div>
           )}
 
-          {/* Force-overwrite escape hatch (register / register-master) */}
-          {(form.command === 'register' || form.command === 'register-master') && (
+          {/* Force-overwrite escape hatch (register / register-master / register-session-master) */}
+          {(form.command === 'register' || needsMasterName) && (
             <div className="flex items-start gap-3">
               <input
                 id="force_overwrite"

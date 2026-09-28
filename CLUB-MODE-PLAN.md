@@ -1,8 +1,10 @@
 # Club Mode — Session-Based Attendance
 
 **Status:** Phases 1 and 2 **live in cloud** (2026-09-26) and verified end to end.
-Phase 3 migrations **live in cloud** (2026-09-27); dashboard committed on `club-mode`
-but not deployed (Vercel prod tracks `oled-integration`). Phase 4 not started.
+Phase 3 migrations **live in cloud** (2026-09-27); dashboard on `club-mode`.
+Phase 4 backend **live in cloud** (2026-09-28): migration applied, `log-attendance` v17
+and `get-enrollment-job` v16 deployed, verified over HTTPS. Firmware 1.11.0 built but
+**not released** (no `firmware-v1.11.0` tag) and not yet tested on hardware.
 **Target:** A 4th institution type, `club`, whose unit of attendance is a *meeting*
 rather than a *day*.
 
@@ -138,7 +140,10 @@ violate it.
 
 Also deliberately left out until Phase 4, because they depend on how the offline
 master press is replayed (§8 B): "at most one open meeting per device", and an
-idempotency key for replayed device events. Both are additive when they land.
+idempotency key for replayed device events. *Phase 4:* the key is
+`meetings.device_ref` with `UNIQUE (device_id, device_ref)`; "one open ad-hoc meeting
+per device" is enforced by `device_meeting_event()` (a newer one closes an older one
+at its open time), not by a constraint, because events may arrive in any order.
 
 ### 4.2 New table: `meeting_schedules` (Phase 3)
 
@@ -295,6 +300,26 @@ transitional state rather than a hard refusal during that window.
 and queue the scan; the server resolves it by timestamp on flush, so scans for a
 *scheduled* meeting land correctly and only genuinely orphaned scans are dropped.
 This is deliberately inconsistent with the online path — see Open Decision A.
+
+**As built (Phase 4)** the shape differs from the sketch above: the state rides in a
+nested `meeting_state` object, so the flat `device_config_*` keys — and
+`DEVICE_CONFIG_VERSION` — are unchanged and older firmware simply ignores it. The
+device also does **not** refuse scans locally: online, the server's verdict
+(`no_meeting_open`) comes back within the existing 4 s correlation window and is shown
+as **NO MEETING**; offline, scans are saved (§8 A).
+
+```jsonc
+"meeting_state": {                 // clubs; other tenants get {"club": false}
+  "club": true,
+  "autoclose_min": 240,            // the idle rule the DEVICE applies (§8 B)
+  "open_ref": "m66f7a3c1-3f2a",    // this device's ad-hoc meeting the server has open
+  "open_opened_at": 1790550000,
+  "live": {                        // resolve_meeting(now) for this device, or null
+    "title": "Weekly Circle", "origin": "scheduled", "ref": null,
+    "starts_at": 1790546400, "ends_at": 1790553600
+  }
+}
+```
 
 ---
 
@@ -541,24 +566,104 @@ ending the weekly schedule removed 7; deleting the device cancelled the rest and
 deactivated both schedules. Afterwards: no test rows, 3 tenants, 973 attendance rows
 (unchanged); advisors unchanged.
 
-### Phase 4 — Firmware
+### Phase 4 — Firmware and ad-hoc meetings
 
-Bump `FIRMWARE_VERSION` from `1.10.0`
-([firmware:42](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:42)).
+**Backend live** (2026-09-28, steps 1–2 of the deploy order below); firmware built,
+not released. Decided at the start of Phase 4 (§8): **self-describing
+events** for the offline press, **confirm-to-close** (open = one press; close = press,
+then press again within 8 s), and offline scans with no known meeting are **saved**.
 
-| Item | Detail |
+**How an ad-hoc meeting works.** The session-master press flips the device's own
+state at once, online or offline, and names the meeting (`mtgRef`, e.g.
+`m66f7a3c1-3f2a`: open epoch + random). The open event, the close event and *every
+scan taken during the meeting* carry that ref and the open time through the ordinary
+SPIFFS queue to `log-attendance`. Whichever reaches the server first creates the
+meeting, so replay order, retries and lost replies can neither lose a meeting nor
+create two, and the queue's re-append-at-the-end retry path needed no change. The
+device applies the idle rule (last scan + `meeting_autoclose_minutes`) and the
+local-midnight backstop itself, because only it sees scans still queued offline, and
+reports the close stamped with the deadline. The server's sweep keeps only the
+midnight backstop, for a device that died mid-meeting; a close only ever moves
+`closed_at` earlier, so the device's later, truer close always wins.
+
+**Database** — `20260928120000_device_meetings.sql`:
+
+| Piece | What it does |
 |---|---|
-| `toggle-meeting` *(moved from Phase 2)* | Edge function: `POST` with `{ device_id }` + `x-device-secret`, opens or closes the device's ad-hoc meeting. Must accept a **device timestamp** and a **replay id** (offline, §8 B). |
-| Poll meeting fields *(moved from Phase 2)* | `get-enrollment-job`: bump `DEVICE_CONFIG_VERSION` → 2 and add meeting state (§6), sent every poll. May need the upcoming schedule too, so an offline device can decide locally (§8 A/B). |
-| `session_master` role | New value in `fidMapRole`. No format change — the fid map CSV already carries a free-form role column. |
-| Enrollment commands | `register-session-master` / `delete-session-master`, mirroring the existing `register-master` handling at [firmware:2698](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:2698). Widen the `enrollment_jobs.command` CHECK in a Phase 4 migration. |
-| Scan-loop branch | At [firmware:2779](firmware/ClassAttendance_Current_RTC/ClassAttendance_Current_RTC.ino:2779), before the existing `role == "master"` branch: `session_master` calls `toggle-meeting`. **The existing double-press → captive-portal gesture is untouched**, because this is a different finger. |
-| Meeting state cache | Parse the new `device_config_meeting_*` fields; persist alongside the existing `device_config.json` so state survives a reboot mid-meeting. |
-| OLED cards | "No meeting open" (refusal), "Meeting opened HH:MM", "Meeting closed · N present". Post to the existing Core-0-safe mailbox; never touch `display` directly from a task. |
-| Offline path | When WiFi is down, skip the local meeting check and queue the scan (§6). The session-master press **must also work offline** — mechanism to be designed at the start of this phase (§8 B). |
+| `meetings.device_ref` | The device's id for the meeting; CHECK `^[A-Za-z0-9-]{4,64}$`; `UNIQUE (device_id, device_ref)` |
+| `device_meeting_event(device, ref, opened_at, closed_at?)` | Create-if-missing, apply a close (`least()`), idempotent, advisory-locked per device. A new meeting closes an earlier still-open one at its open time; a late event for an earlier meeting is created closed at the later one's open time. `NULL` unless the device is in an **active club** |
+| `resolve_device_scan(inst, device, at, ref, opened_at)` | Ensures the ref's meeting exists and files the scan there if its time is inside it (beating an overlapping scheduled meeting); otherwise `resolve_meeting` |
+| `device_meeting_state(device, now?)` | The poll's `meeting_state` (§6) |
+| `close_due_meetings` | Step (b) is now the **midnight backstop only** (idle rule moved to the device). Step (b) runs in a `MATERIALIZED` CTE: flattened into the UPDATE, the planner evaluated `AT TIME ZONE` before the timezone filter and one bad zone failed the whole sweep (caught by the Phase 2 regression suite) |
+| `enrollment_jobs.command` | + `register-session-master`, `delete-session-master` |
 
-**Release:** tag `firmware-v1.11.0`. OTA compares against the compiled-in version and
-only flashes a strictly newer one.
+**Edge functions:**
+
+| Function | Change |
+|---|---|
+| `log-attendance` | `meeting_action: open\|close` events (need `device_id`, `meeting_ref`, `meeting_opened_at`, `timestamp` → 400 otherwise; 200 `not_club` / `meeting_ignored` when there's nothing to do; 500 on RPC error so the device retries). Scans may carry `meeting_ref` + `meeting_opened_at` → `resolve_device_scan` (a malformed ref is ignored, never loses the scan) |
+| `get-enrollment-job` | `meeting_state` on every poll (one RPC for club devices; `{club:false}` for others, no query). `register-session-master` jobs carry their name like master jobs. Fixed a pre-existing `deno check` error (`job.member` cast) |
+
+**Firmware 1.11.0:**
+
+| Item | As built |
+|---|---|
+| `session_master` role | New `fidMapRole` value; enrolled by `register-session-master`, removed by `delete-session-master` |
+| Press | First press: **OPENED** (or **END MTG?** if one is open → same finger within 8 s → **CLOSED · N present**; another finger cancels and is processed normally; timeout → **KEPT OPEN**). Refuses with **SCHEDULED · title · Until HH:MM** while a scheduled meeting is live (per a poll < 90 s old, or not yet past its end), **NO CLUB** for a non-club device, **NO CLOCK** on an RTC that was never set. The config master's double press → portal is untouched |
+| Meeting state | `/meeting_state.json` (tmp + rename): open, ref, open time, last scan, fids seen, acked, club flag, auto-close minutes. Survives reboots; wiped on decommission |
+| Reconcile with the poll | `open_ref` = our ref → acked; acked and then missing → closed/cancelled in the dashboard → **CLOSED · Closed in dashboard**, nothing queued. An open ref newer than anything we know (state lost) is adopted so the finger can close it |
+| Auto-close | Earlier of (last scan or open) + auto-close minutes and local midnight, stamped with that deadline → **CLOSED · Meeting auto-closed** |
+| Idle screen | Clubs get a meeting line: `Open 18:05 - 12 in` / `Till 20:00 Weekly Circle` / `No meeting` (under the offline banner when that shows) |
+| Verdict | Server code `no_meeting_open` → **NO MEETING** (was NOT LOGGED) |
+| Size | 1,261,112 bytes = 96% of the 1,310,720-byte app partition (+10.4 KB; ~49 KB left) |
+
+**Dashboard:** `/enrollment` offers **Reg. / Del. session master** for club devices only
+(per device, so a platform admin across tenants sees them where they apply; the
+server action refuses them for non-clubs). Slot-occupancy checks cover session masters
+too. Meetings opened at the device already appear on `/meetings` as "Ad-hoc meeting"
+(Phase 3), with Close now / Cancel reaching the device within one poll.
+
+**Tested:** PGlite — Phases 1–3 suites before the migration (43/69/38), Phase 2 again
+after it with the idle-close expectations switched to the midnight backstop (70/70),
+Phase 3 after it (38/38), Phase 4 72/72 twice (idempotent open, scan-before-open,
+close-before-open, delayed events between meetings, `least()` closes, clamp, scheduled
+overlap, dashboard close / cancel, non-club / suspended / unassigned devices, poll
+state, midnight backstop with absences and a late device close, device delete,
+grants). Deno: 24/24 (`club_test.ts`: + ref validation, `resolve_device_scan` routing,
+event handling); `deno check` clean on both functions. Firmware compiles (arduino-cli,
+ESP32 core 3.3.7, same FQBN as the IDE build) with no new warnings; the device-side
+midnight arithmetic matched a reference on 56 cases across ±14 h zones. `tsc` clean;
+ESLint unchanged (the enrollment folder's 4 errors are the pre-existing ones).
+*Not* tested: anything on real hardware (§11).
+
+**Deploy order** (each step safe on its own):
+
+1. Apply `20260928120000_device_meetings.sql` — additive; the sweep change only
+   affects device meetings, and none exist yet.
+2. Deploy `log-attendance` and `get-enrollment-job` (`--no-verify-jwt`). Current
+   firmware ignores `meeting_state` and never sends events or refs.
+3. Release firmware: tag `firmware-v1.11.0`. OTA compares against the compiled-in
+   version and only flashes a strictly newer one. A 1.10 device that receives a
+   session-master job fails it as `unknown-cmd` — harmless.
+
+**Deployed 2026-09-28 ~00:00 UTC:** step 1 via `apply_migration`; step 2 via
+`supabase functions deploy … --no-verify-jwt --use-api` (uploads the exact repo files;
+`log-attendance` v17 after a follow-up that makes the event reply name the meeting's
+resulting state — a late replayed open of a closed meeting had answered "Meeting
+opened"). Both `verify_jwt=false`. **Verified in cloud:**
+- Database: column, key, widened CHECK, grants (service_role only), new sweep in
+  place; a rolled-back smoke test (scan-before-open, idempotent open, poll state, close,
+  later close ignored, school device → `{club:false}` and no meeting).
+- Over HTTPS with throwaway "ZZ E2E" club + school tenants (deleted afterwards): poll
+  before / while open / after close carried the right `meeting_state`; open event →
+  replayed open → same meeting; scan with the ref → PRESENT in it; the same scan
+  retried → duplicate; close event → closed at the device's time; a late replayed open
+  left it closed; a scan with no meeting → `no_meeting_open`; bad ref and unknown
+  action → 400; wrong secret → 401; school poll → `{"club": false}`, school event →
+  `not_club`.
+- Afterwards: 4 tenants, 973 attendance rows, 0 meetings (unchanged); security
+  advisors unchanged. No real device polled in the preceding 24 h, so live-fleet
+  traffic on the new versions is still to be observed.
 
 ---
 
@@ -571,10 +676,19 @@ it means the same action gives two different results depending on WiFi. The
 alternative — refuse when offline too — loses every scan of a meeting held during an
 outage. *Recommendation:* accept the inconsistency, and make the OLED say
 "Queued — offline" so it is visible rather than silent.
+*Decided at Phase 4 start: save it* (the existing **SAVED · Offline** card). Online,
+the refusal is the server's verdict (**NO MEETING**), not a local check.
 
 **B — How the ad-hoc master press works offline.** *Decided: it must work offline.*
-The mechanism is still open and gets designed at the start of Phase 4. What that
-design has to answer:
+*Mechanism decided at Phase 4 start: self-describing events* — the device names the
+meeting and every open / close / scan message carries the name and open time, so any
+of them can create it (§7 Phase 4). How it answers each point below: events go through
+the scan queue with RTC timestamps; `UNIQUE (device_id, device_ref)` + create-if-
+missing is the idempotency; ordering stops mattering because a scan can create its
+own meeting; the device tracks "open" itself; the device owns the idle / midnight
+close and the server keeps only a midnight backstop, with closes merged by `least()`;
+a scan's own meeting beats an overlapping scheduled one, and the session master won't
+open over a scheduled meeting it knows is live. The original questions:
 
 - **Queueing.** Open/close presses become durable SPIFFS events, like scans, and are
   replayed on reconnect with their RTC timestamps — so `toggle-meeting` must accept
@@ -614,8 +728,10 @@ decided.
   meeting at its idle deadline using only the scans the *server* has seen. If a
   device opens a meeting online and then loses WiFi for longer than
   `meeting_autoclose_minutes`, scans it keeps taking offline land after the
-  meeting's `closed_at` and are rejected when they flush. Part of the Phase 4
-  offline design (§8 B).
+  meeting's `closed_at` and are rejected when they flush. *Resolved in Phase 4:* the
+  device applies the idle rule itself; the server keeps only the midnight backstop.
+  Residual: a device offline *across* local midnight still has its meeting cut at
+  midnight — by both sides, consistently.
 - **DST and timezone edits.** Meeting windows are `timestamptz`; a tenant changing
   `institutions.timezone` shifts the local rendering of already-scheduled meetings.
   Decide whether existing rows re-anchor or hold their instant — probably hold, and
@@ -627,7 +743,12 @@ decided.
   immediately scans may be refused once. Show a transitional OLED state.
 - **`DEVICE_CONFIG_VERSION` 1 → 2**: old firmware must tolerate unknown fields, and new
   firmware must tolerate a `ver: 1` server during a partial rollout. Check the existing
-  parse path before assuming it degrades gracefully.
+  parse path before assuming it degrades gracefully. *Avoided in Phase 4:* the version
+  is unchanged; meeting state is a separate nested `meeting_state` key that 1.10
+  ignores, and 1.11 keeps its last view when a server doesn't send it.
+- **Flash headroom.** 1.11.0 is 96% of the 1.25 MB OTA app partition (~49 KB left).
+  The next big firmware feature may need a partition-scheme change, which cannot be
+  done over OTA.
 
 ---
 
@@ -680,10 +801,34 @@ a dashboard pointed at cloud — local `.env.local` targets a local Supabase sta
 overview deliberately uses `verifySession()` so every role can see it); `/meetings`
 passes.
 
-**Phase 4** — session master opens and closes a meeting; the *config* master finger
-still opens the captive portal on double press; a scan with no meeting shows the
-refusal card; power-cycling mid-meeting preserves meeting state; scans queued while
-offline flush into the right meeting.
+**Phase 4** — on a real device running 1.11.0, in a club tenant, after the migration
+and both edge functions are live:
+
+1. Enrollment → **Reg. session master** is offered for the club's device only; enrol
+   a finger → the job completes.
+2. Session master once → **OPENED**; within ~12 s `/meetings` shows a live "Ad-hoc
+   meeting"; the idle line reads `Open HH:MM - 0 in`.
+3. Member scans → **PRESENT**, the live count rises, the idle line counts them.
+4. Session master → **END MTG?**; wait 8 s → **KEPT OPEN**. Again, then again within
+   8 s → **CLOSED · N present**; `/meetings` shows it closed.
+5. With no meeting open, a member scan → **NO MEETING** (not NOT LOGGED).
+6. The *config* master: double press still opens the captive portal.
+7. **Offline:** disconnect WiFi (or the router's uplink). Open with the session master,
+   scan 2 members (**SAVED · Offline**), close it. Reconnect → the queue drains and
+   the meeting appears with its offline open/close times and both members present.
+8. **Offline longer than auto-close** (the old §9 failure): set auto-close to 15 min,
+   open online, go offline, scan a member every ~10 min for 30 min, reconnect → one
+   meeting, still open, every scan inside it (the old server rule would have closed
+   it 15 min after the last scan it had seen).
+9. Power-cycle mid-meeting → still open after boot (idle line), and closes normally.
+10. Close from the dashboard (**Close now**) while it's open → the device shows
+    **CLOSED · Closed in dashboard** within ~10 s.
+11. Set Settings → auto-close to 15 min, open, scan once, wait 16 min → the device
+    shows **Meeting auto-closed**; `/meetings` shows it ended 15 min after the scan.
+12. During a scheduled meeting's window, session master → **SCHEDULED · title · Until
+    HH:MM**, nothing opened.
+13. A school device on 1.11.0: scanning, the idle screen and the portal are unchanged
+    (no meeting line).
 
 Add the passing cases to [docs/for-operators/e2e-testing-checklist.md](docs/for-operators/e2e-testing-checklist.md)
 as each phase lands.

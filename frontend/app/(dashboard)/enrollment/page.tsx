@@ -9,6 +9,7 @@ export type { MemberOption } from './_actions'
 export type EnrollmentJob = {
   id: string
   command: 'register' | 'delete' | 'clearall' | 'register-master' | 'delete-master'
+    | 'register-session-master' | 'delete-session-master'
   status: 'pending' | 'in_progress' | 'completed' | 'failed'
   finger_slot: 'fin1' | 'fin2' | null
   fid: number | null
@@ -62,7 +63,7 @@ export default async function EnrollmentPage({
   // group/unit labels that collide across tenants.
   let devicesQ = supabase
     .from('devices')
-    .select('id, group_name, unit_name, display_name, institution:institution_id(id, name)')
+    .select('id, group_name, unit_name, display_name, institution:institution_id(id, name, type)')
     .not('institution_id', 'is', null)
     .order('group_name')
     .order('unit_name')
@@ -84,6 +85,11 @@ export default async function EnrollmentPage({
     : []
 
   const [jobsRes, devicesRes] = await Promise.all([jobsQ, devicesQ])
+  // Club devices get the session-master commands (per device, so a platform
+  // admin looking across tenants sees them only where they apply).
+  const clubDeviceIds = ((devicesRes.data ?? []) as unknown as { id: string; institution: { type: string } | null }[])
+    .filter((d) => d.institution?.type === 'club')
+    .map((d) => d.id)
 
   // Build label from whichever member types the institution actually tracks.
   let labelMemberSingular: string
@@ -110,6 +116,7 @@ export default async function EnrollmentPage({
       institutions={allInstitutions}
       institutionFilter={institutionFilter ?? ''}
       restrictedToDevice={!!adminDeviceId}
+      clubDeviceIds={clubDeviceIds}
     />
   )
 }

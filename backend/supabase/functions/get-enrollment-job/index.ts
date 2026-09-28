@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
     .from("devices")
     .select(`
       id, institution_id, display_name, device_secret, revoked,
-      institutions ( config_rev, member_name_display, timezone )
+      institutions ( config_rev, member_name_display, timezone, type )
     `)
     .eq("id", device_id)
     .single();
@@ -110,7 +110,7 @@ Deno.serve(async (req: Request) => {
   // devices.institution_id -> institutions.id is many-to-one, so PostgREST
   // embeds a single object here, not an array.
   const institution = device.institutions as unknown as
-    { config_rev: number; member_name_display: string; timezone: string } | null;
+    { config_rev: number; member_name_display: string; timezone: string; type: string } | null;
 
   const configRev = institution?.config_rev ?? 1;
   // 0 (no cached config yet, or pre-Phase-2 firmware that omits the field)
@@ -128,6 +128,21 @@ Deno.serve(async (req: Request) => {
   };
   if (deviceRev < configRev) {
     deviceConfig.device_config_name_display = institution?.member_name_display ?? "first";
+  }
+
+  // Club mode (firmware >= 1.11.0; older firmware ignores the key). Sent every
+  // poll, not rev-gated: meetings open and close without any config change.
+  // A nested object, so DEVICE_CONFIG_VERSION (the flat device_config_* shape)
+  // is unchanged. Non-clubs get {club:false} without a query, so the device
+  // refuses the session-master finger. If the lookup fails the key is left
+  // out and the device keeps its last known state.
+  if (institution?.type === "club") {
+    const { data: meetingState, error: meetingError } = await supabase.rpc("device_meeting_state", {
+      p_device_id: device.id,
+    });
+    if (!meetingError && meetingState) deviceConfig.meeting_state = meetingState;
+  } else {
+    deviceConfig.meeting_state = { club: false };
   }
 
   // Dispatch the oldest actionable job for this device: a fresh `pending`, or
@@ -190,8 +205,8 @@ Deno.serve(async (req: Request) => {
     return json({ job: null, ...deviceConfig });
   }
 
-  const member = job.member as { id: string; sid: string; fullname: string } | null;
-  const isMaster = job.command === "register-master";
+  const member = job.member as unknown as { id: string; sid: string; fullname: string } | null;
+  const isMaster = job.command === "register-master" || job.command === "register-session-master";
 
   return json({
     job: {

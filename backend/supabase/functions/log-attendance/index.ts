@@ -1,5 +1,5 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { handleClubScan } from "./club.ts";
+import { handleClubScan, handleMeetingEvent, isMeetingRef } from "./club.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -58,6 +58,12 @@ Deno.serve(async (req: Request) => {
       sid?: string;
       scan_id?: string;
       timestamp?: string;
+      // Club mode (firmware >= 1.11.0): the device's ad-hoc meeting. On a
+      // scan, the meeting it was taken in; with meeting_action, an open /
+      // close event for it (no sid / scan_id). See ./club.ts.
+      meeting_action?: string;
+      meeting_ref?: string;
+      meeting_opened_at?: string;
     };
     try {
       parsed = await req.json();
@@ -66,8 +72,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const { device_id, institution_id: bodyInstitutionId, sid, scan_id, timestamp } = parsed;
+    const isMeetingEvent = parsed.meeting_action !== undefined;
 
-    if (!sid || !scan_id || !timestamp) {
+    if (isMeetingEvent) {
+      // Events exist only on the per-device-secret path (new firmware).
+      if (!device_id || !isMeetingRef(parsed.meeting_ref) || !parsed.meeting_opened_at || !timestamp) {
+        return json({ error: "Missing or invalid meeting event fields" }, 400);
+      }
+    } else if (!sid || !scan_id || !timestamp) {
       return json({ error: "Missing required fields" }, 400);
     }
 
@@ -75,6 +87,17 @@ Deno.serve(async (req: Request) => {
     if (!instant) {
       return json({ error: "Invalid timestamp" }, 400);
     }
+
+    // The open time of the device's ad-hoc meeting: required on an event;
+    // on a scan an unreadable one just means "no meeting ref" (never lose
+    // the scan over it — it still resolves by timestamp).
+    const meetingOpenedAt = parseInstant(parsed.meeting_opened_at);
+    if (isMeetingEvent && !meetingOpenedAt) {
+      return json({ error: "Invalid meeting_opened_at" }, 400);
+    }
+    const meetingRef = isMeetingRef(parsed.meeting_ref) && meetingOpenedAt
+      ? { ref: parsed.meeting_ref, openedAt: meetingOpenedAt }
+      : null;
 
     let institution_id: string;
     let authenticatedDeviceId: string | null = null;
@@ -151,6 +174,26 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Institution inactive" }, 403);
     }
 
+    // Session-master open / close of the device's ad-hoc meeting. A 200 for
+    // a non-club tenant: nothing to retry, and not data loss either.
+    if (isMeetingEvent) {
+      if (institution.type !== "club") {
+        return json({ message: "Not a club — meeting event ignored", code: "not_club" });
+      }
+      const { status, body } = await handleMeetingEvent(supabase, {
+        deviceId: authenticatedDeviceId!,
+        action: parsed.meeting_action!,
+        ref: meetingRef!.ref,
+        openedAt: meetingRef!.openedAt,
+        at: instant,
+      });
+      return json(body, status);
+    }
+
+    // Past this point it is a scan: sid / scan_id were checked above.
+    const scanSid = sid!;
+    const scanId = scan_id!;
+
     const tz = institution.timezone || "UTC";
     const { date, time, weekday } = zonedParts(instant, tz);
 
@@ -162,11 +205,12 @@ Deno.serve(async (req: Request) => {
         institution_id,
         institution,
         authenticatedDeviceId,
-        sid,
-        scan_id,
+        sid: scanSid,
+        scan_id: scanId,
         instant,
         date,
         time,
+        meetingRef,
       });
       return json(body, status);
     }
@@ -198,7 +242,7 @@ Deno.serve(async (req: Request) => {
     const { data: member, error: memberError } = await supabase
       .from("members")
       .select("id, device_id, member_type")
-      .eq("sid", sid)
+      .eq("sid", scanSid)
       .eq("institution_id", institution_id)
       .eq("status", "active")
       .single();
@@ -300,7 +344,7 @@ Deno.serve(async (req: Request) => {
       time,
       status: "present",
       scan_type,
-      scan_id,
+      scan_id: scanId,
       punctuality,
     });
 
@@ -327,7 +371,7 @@ Deno.serve(async (req: Request) => {
               device_id: effectiveDeviceId,
               time,
               status: "present",
-              scan_id,
+              scan_id: scanId,
               punctuality,
             })
             .eq("id", conflicting.id);

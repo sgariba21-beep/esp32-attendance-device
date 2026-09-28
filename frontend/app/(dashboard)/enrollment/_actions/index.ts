@@ -52,14 +52,19 @@ export type JobFormData =
   | { command: 'delete'; device_id: string; member_id: string; finger_slot: 'fin1' | 'fin2' }
   | { command: 'register-master'; device_id: string; fid: number; name: string; confirmOverwrite?: boolean }
   | { command: 'delete-master'; device_id: string; fid: number }
+  // Club mode: the session master opens / closes ad-hoc meetings at the device.
+  | { command: 'register-session-master'; device_id: string; fid: number; name: string; confirmOverwrite?: boolean }
+  | { command: 'delete-session-master'; device_id: string; fid: number }
 
 export type CreateJobResult = { error: string | null; needsConfirm?: boolean; conflict?: string }
 
+const MASTER_COMMANDS = ['register-master', 'delete-master', 'register-session-master', 'delete-session-master']
+
 // M8: a device's sensor slot can be occupied by either a member's fingerprint
-// (tracked in members.fin1/fin2) or a master fingerprint (tracked only as
-// enrollment_jobs history — there's no separate "current occupant" table, so
-// occupancy is the most recent completed register-master/delete-master job
-// for that device+fid).
+// (tracked in members.fin1/fin2) or a master / session-master fingerprint
+// (tracked only as enrollment_jobs history — there's no separate "current
+// occupant" table, so occupancy is the most recent completed master job of
+// either kind for that device+fid).
 async function getMemberOccupant(
   supabase: ReturnType<typeof createAdminClient>,
   deviceId: string,
@@ -84,12 +89,14 @@ async function getMasterOccupant(
     .select('command, note')
     .eq('device_id', deviceId)
     .eq('fid', fid)
-    .in('command', ['register-master', 'delete-master'])
+    .in('command', MASTER_COMMANDS)
     .eq('status', 'completed')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-  return data?.command === 'register-master' ? (data.note || 'an unnamed master') : null
+  if (data?.command === 'register-master') return { label: data.note || 'an unnamed master', session: false }
+  if (data?.command === 'register-session-master') return { label: `${data.note || 'unnamed'}, session master`, session: true }
+  return null
 }
 
 export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobResult> {
@@ -107,9 +114,16 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   // Derive institution_id from the device so the job is correctly scoped
   const { data: device } = await supabase
     .from('devices')
-    .select('institution_id')
+    .select('institution_id, institution:institution_id(type)')
     .eq('id', data.device_id)
     .single()
+
+  // Session masters only mean something on a club's device (older firmware,
+  // or a non-club, would just fail the job as an unknown command).
+  if (data.command === 'register-session-master' || data.command === 'delete-session-master') {
+    const type = (device?.institution as unknown as { type: string } | null)?.type
+    if (type !== 'club') return { error: 'Session masters are only available for clubs.' }
+  }
 
   // M8: warn before overwriting another member's fingerprint slot on this device.
   // The operator may proceed, but only after an explicit (second) confirmation.
@@ -147,12 +161,14 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
       return {
         error: null,
         needsConfirm: true,
-        conflict: `Sensor slot ${data.fid} on this device is a master fingerprint (${masterOccupant}). Enrolling here will overwrite it and disable WiFi setup recovery for whoever relies on that finger.`,
+        conflict: masterOccupant.session
+          ? `Sensor slot ${data.fid} on this device is a master fingerprint (${masterOccupant.label}). Enrolling here will overwrite it, and that finger will no longer open or close meetings.`
+          : `Sensor slot ${data.fid} on this device is a master fingerprint (${masterOccupant.label}). Enrolling here will overwrite it and disable WiFi setup recovery for whoever relies on that finger.`,
       }
     }
   }
 
-  if (data.command === 'register-master' && !data.confirmOverwrite) {
+  if ((data.command === 'register-master' || data.command === 'register-session-master') && !data.confirmOverwrite) {
     const memberConflict = await getMemberOccupant(supabase, data.device_id, data.fid)
     if (memberConflict) {
       return {
@@ -167,7 +183,7 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
       return {
         error: null,
         needsConfirm: true,
-        conflict: `Sensor slot ${data.fid} is already a master fingerprint (${masterOccupant}). Enrolling here will overwrite it.`,
+        conflict: `Sensor slot ${data.fid} is already a master fingerprint (${masterOccupant.label}). Enrolling here will overwrite it.`,
       }
     }
   }
@@ -190,11 +206,11 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   } else if (data.command === 'delete') {
     row.member_id = data.member_id
     row.finger_slot = data.finger_slot
-  } else if (data.command === 'register-master') {
+  } else if (data.command === 'register-master' || data.command === 'register-session-master') {
     row.fid = data.fid
     row.note = data.name.trim()
     row.allow_overwrite = data.confirmOverwrite === true
-  } else if (data.command === 'delete-master') {
+  } else if (data.command === 'delete-master' || data.command === 'delete-session-master') {
     row.fid = data.fid
   }
 
@@ -250,7 +266,7 @@ export async function retryEnrollmentJob(
     note: job.note,
     status: 'pending',
     allow_overwrite:
-      (job.command === 'register' || job.command === 'register-master') &&
+      (job.command === 'register' || job.command === 'register-master' || job.command === 'register-session-master') &&
       (opts.withOverwrite === true || job.allow_overwrite === true),
   }
 

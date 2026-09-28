@@ -48,6 +48,8 @@ type Props = {
   institutionFilter?: string
   /** Device-bound admin: one device, register/delete only, no master/clearall. */
   restrictedToDevice?: boolean
+  /** Devices belonging to a club: they also offer the session-master commands. */
+  clubDeviceIds?: string[]
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -95,7 +97,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
 
 export function EnrollmentView({
   initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution,
-  institutions = [], institutionFilter = '', restrictedToDevice = false,
+  institutions = [], institutionFilter = '', restrictedToDevice = false, clubDeviceIds = [],
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -248,7 +250,8 @@ export function EnrollmentView({
             <TableBody>
               {jobs.map((job) => {
                 const badge = STATUS_BADGE[job.status]
-                const noteText = job.command === 'register-master'
+                const isRegMaster = job.command === 'register-master' || job.command === 'register-session-master'
+                const noteText = isRegMaster
                   ? '—'
                   : job.status === 'failed'
                     ? (job.last_error ?? job.note ?? '—')
@@ -257,7 +260,7 @@ export function EnrollmentView({
                 const stuckMinutes = jobStuckMinutes(job, now)
                 const stuck = stuckMinutes !== null
                 const canOverwriteRetry =
-                  jobSlotOccupied(job) && (job.command === 'register' || job.command === 'register-master')
+                  jobSlotOccupied(job) && (job.command === 'register' || isRegMaster)
                 return (
                   <TableRow key={job.id}>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
@@ -277,14 +280,16 @@ export function EnrollmentView({
                           : job.command === 'delete' ? 'Delete'
                           : job.command === 'register-master' ? 'Reg. master'
                           : job.command === 'delete-master' ? 'Del. master'
+                          : job.command === 'register-session-master' ? 'Reg. session master'
+                          : job.command === 'delete-session-master' ? 'Del. session master'
                           : 'Clear all'}
                       </Badge>
                     </TableCell>
                     <TableCell>{job.device ? formatClass(job.device) : '—'}</TableCell>
                     <TableCell>
-                      {job.command === 'register-master'
+                      {isRegMaster
                         ? <span className="text-xs text-muted-foreground italic">{job.note ?? 'master'}</span>
-                        : (job.command === 'delete-master' || job.command === 'clearall')
+                        : (job.command === 'delete-master' || job.command === 'delete-session-master' || job.command === 'clearall')
                           ? <span className="text-xs text-muted-foreground">—</span>
                           : job.member?.fullname ?? '—'}
                     </TableCell>
@@ -367,6 +372,7 @@ export function EnrollmentView({
         labelMember={labelMember}
         labelMembers={labelMembers}
         restrictedToDevice={restrictedToDevice}
+        clubDeviceIds={clubDeviceIds}
       />
     </div>
   )
