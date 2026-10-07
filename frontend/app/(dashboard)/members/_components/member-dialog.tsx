@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Check, Loader2 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -12,8 +11,8 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { SingleSelect } from '@/components/ui/single-select'
 import { createMember, updateMember } from '../_actions'
-import { createEnrollmentJob } from '../../enrollment/_actions'
 import { indefiniteArticle } from '@/lib/utils'
+import { FingerEnrollRow, FingerEditRow, freeSlots } from '@/components/finger-rows'
 import type { MemberWithDevice } from '../page'
 import type { Device } from '@/lib/types'
 
@@ -40,150 +39,6 @@ type EnrollStep = {
   deviceId: string
   fullname: string
   deviceName: string
-}
-
-function nextAvailableFid(deviceId: string, usedFids: Record<string, number[]>): number {
-  const used = new Set(usedFids[deviceId] ?? [])
-  for (let i = 1; i <= 127; i++) {
-    if (!used.has(i)) return i
-  }
-  return 1
-}
-
-type FingerRowProps = {
-  label: string
-  slot: 'fin1' | 'fin2'
-  memberId: string
-  deviceId: string
-  defaultFid: number
-}
-
-function FingerEnrollRow({ label, slot, memberId, deviceId, defaultFid }: FingerRowProps) {
-  const [open, setOpen] = useState(false)
-  const [fid, setFid] = useState(String(defaultFid))
-  const [loading, setLoading] = useState(false)
-  const [done, setDone] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleEnroll() {
-    const fidNum = parseInt(fid, 10)
-    if (!fidNum || fidNum < 1 || fidNum > 127) {
-      setError('Enter a slot number between 1 and 127.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    const result = await createEnrollmentJob({
-      command: 'register',
-      device_id: deviceId,
-      member_id: memberId,
-      finger_slot: slot,
-      fid: fidNum,
-    })
-    setLoading(false)
-    if (result?.error) { setError(result.error); return }
-    setDone(true)
-  }
-
-  if (done) {
-    return (
-      <Alert variant="success">
-        <Check className="mt-0.5 size-4 shrink-0" />
-        <AlertDescription>
-          {label} — job queued (sensor slot {fid}). Tell the member to scan when prompted.
-        </AlertDescription>
-      </Alert>
-    )
-  }
-
-  return (
-    <div className="space-y-2">
-      {!open ? (
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          + Enroll {label}
-        </Button>
-      ) : (
-        <div className="flex items-center gap-2">
-          <span className="text-sm w-20 shrink-0">{label}:</span>
-          <Input
-            type="number"
-            min={1}
-            max={127}
-            value={fid}
-            onChange={(e) => setFid(e.target.value)}
-            className="h-8 w-24"
-            placeholder="Slot"
-          />
-          <Button size="sm" onClick={handleEnroll} disabled={loading}>
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Queue job'}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-        </div>
-      )}
-      {error && <Alert variant="error"><AlertDescription>{error}</AlertDescription></Alert>}
-    </div>
-  )
-}
-
-type FingerEditRowProps = {
-  label: string
-  slot: 'fin1' | 'fin2'
-  fid: number
-  memberId: string
-  deviceId: string
-  defaultFid: number
-}
-
-function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid }: FingerEditRowProps) {
-  const [deleting, setDeleting] = useState(false)
-  const [deleted, setDeleted] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-
-  async function handleDelete() {
-    setDeleting(true)
-    setDeleteError(null)
-    const result = await createEnrollmentJob({
-      command: 'delete',
-      device_id: deviceId,
-      member_id: memberId,
-      finger_slot: slot,
-    })
-    setDeleting(false)
-    if (result?.error) { setDeleteError(result.error); return }
-    setDeleted(true)
-  }
-
-  if (fid && !deleted) {
-    return (
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm w-20 shrink-0 text-muted-foreground">{label}</span>
-          <span className="tabular-nums text-sm">Slot {fid}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="h-7 px-2 text-xs text-destructive hover:text-destructive ml-auto"
-          >
-            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Delete'}
-          </Button>
-        </div>
-        {deleteError && <Alert variant="error"><AlertDescription>{deleteError}</AlertDescription></Alert>}
-      </div>
-    )
-  }
-
-  return (
-    <FingerEnrollRow
-      label={label}
-      slot={slot}
-      memberId={memberId}
-      deviceId={deviceId}
-      defaultFid={defaultFid}
-    />
-  )
 }
 
 const emptyForm = { sid: '', fullname: '', device_id: '', member_type: 'student' as 'student' | 'staff', institution_id: '' }
@@ -254,7 +109,7 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
   }
 
   if (enrollStep) {
-    const baseFid = nextAvailableFid(enrollStep.deviceId, usedFids)
+    const [fid1, fid2] = freeSlots(usedFids[enrollStep.deviceId], 2)
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
@@ -268,8 +123,8 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
             </p>
             <p className="text-sm font-medium">Enroll fingerprints now?</p>
             <div className="space-y-3">
-              <FingerEnrollRow label="Finger 1" slot="fin1" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={baseFid} />
-              <FingerEnrollRow label="Finger 2" slot="fin2" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
+              <FingerEnrollRow label="Finger 1" slot="fin1" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={fid1} />
+              <FingerEnrollRow label="Finger 2" slot="fin2" memberId={enrollStep.memberId} deviceId={enrollStep.deviceId} defaultFid={fid2} />
             </div>
             <p className="text-xs text-muted-foreground">You can also enroll later from the {labels.label_member.toLowerCase()} row.</p>
           </div>
@@ -345,13 +200,13 @@ export function MemberDialog({ open, onOpenChange, member, devices, usedFids, la
 
           {member && member.device_id && (() => {
             const deviceId = member.device_id
-            const baseFid = nextAvailableFid(deviceId, usedFids)
+            const [fid1, fid2] = freeSlots(usedFids[deviceId], 2)
             return (
               <div className="space-y-2">
                 <Label>Fingerprints</Label>
                 <div className="space-y-2 rounded-lg border p-3">
-                  <FingerEditRow label="Finger 1" slot="fin1" fid={member.fin1 ?? 0} memberId={member.id} deviceId={deviceId} defaultFid={baseFid} />
-                  <FingerEditRow label="Finger 2" slot="fin2" fid={member.fin2 ?? 0} memberId={member.id} deviceId={deviceId} defaultFid={baseFid + 1 <= 127 ? baseFid + 1 : baseFid} />
+                  <FingerEditRow label="Finger 1" slot="fin1" fid={member.fin1 ?? 0} memberId={member.id} deviceId={deviceId} defaultFid={fid1} />
+                  <FingerEditRow label="Finger 2" slot="fin2" fid={member.fin2 ?? 0} memberId={member.id} deviceId={deviceId} defaultFid={member.fin1 ? fid1 : fid2} />
                 </div>
               </div>
             )

@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution, resolveDeviceScope } from '@/lib/supabase/dal'
 import { MembersView } from './_components/members-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
+import { loadOccupiedSlots } from '@/lib/enrollment-slots'
 import type { Device } from '@/lib/types'
 
 export default async function MembersPage() {
@@ -50,11 +51,15 @@ export default async function MembersPage() {
       ? []
       : allMembers
 
+  // Every finger on each device (staff and masters too), not just this list.
+  const usedFids = await loadOccupiedSlots(allDevices.map((d) => d.id))
+
   return (
     <>
       <RealtimeRefresh />
       <MembersView
         members={visibleMembers}
+        usedFids={usedFids}
         devices={allDevices}
         role={role}
         institutions={institutions}

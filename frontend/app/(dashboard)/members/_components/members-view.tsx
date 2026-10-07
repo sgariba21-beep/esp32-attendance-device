@@ -34,11 +34,13 @@ type Props = {
   role: UserRole
   institutions: { id: string; name: string }[]
   labels: Labels
+  /** Occupied sensor slots per device (loadOccupiedSlots), for suggesting a free one. */
+  usedFids: Record<string, number[]>
 }
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 
-export function MembersView({ members, devices, role, institutions, labels }: Props) {
+export function MembersView({ members, devices, role, institutions, labels, usedFids }: Props) {
   const isTeacher = role === 'teacher' || role === 'staff'
   const isPlatformAdmin = role === 'platform_admin'
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -54,17 +56,6 @@ export function MembersView({ members, devices, role, institutions, labels }: Pr
   const [page, setPage] = useState(1)
 
   const PAGE_SIZE = 50
-
-  const usedFids = useMemo(() => {
-    const map: Record<string, number[]> = {}
-    for (const m of members) {
-      if (!m.device_id) continue
-      if (!map[m.device_id]) map[m.device_id] = []
-      if (m.fin1) map[m.device_id].push(m.fin1)
-      if (m.fin2) map[m.device_id].push(m.fin2)
-    }
-    return map
-  }, [members])
 
   // When a platform admin filters by institution, the unit dropdown should only
   // offer that institution's units.

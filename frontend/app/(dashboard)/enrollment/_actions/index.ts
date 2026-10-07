@@ -132,10 +132,11 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   // The operator may proceed, but only after an explicit (second) confirmation.
   // T4f: validate that the student belongs to the device's institution and is
   // assigned to this specific device, before inserting any enrollment job.
+  let memberSlots: { fin1: number; fin2: number } | null = null
   if ((data.command === 'register' || data.command === 'delete') && data.member_id) {
     const { data: memberCheck } = await supabase
       .from('members')
-      .select('id, institution_id, device_id, status')
+      .select('id, institution_id, device_id, status, fin1, fin2')
       .eq('id', data.member_id)
       .single()
 
@@ -147,9 +148,21 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
     if (memberCheck.device_id !== data.device_id) {
       return { error: 'Member is not assigned to this device.' }
     }
+    memberSlots = { fin1: memberCheck.fin1 ?? 0, fin2: memberCheck.fin2 ?? 0 }
   }
 
   if (data.command === 'register' && !data.confirmOverwrite) {
+    // The member's OTHER finger already in this slot: getMemberOccupant skips
+    // the member themself (re-enrolling a finger into its own slot is fine).
+    const otherSlot = data.finger_slot === 'fin1' ? 'fin2' : 'fin1'
+    if (memberSlots && memberSlots[otherSlot] === data.fid) {
+      return {
+        error: null,
+        needsConfirm: true,
+        conflict: `This member's ${otherSlot === 'fin1' ? 'Finger 1' : 'Finger 2'} already uses sensor slot ${data.fid}. Enrolling here will overwrite it.`,
+      }
+    }
+
     const memberConflict = await getMemberOccupant(supabase, data.device_id, data.fid, data.member_id)
     if (memberConflict) {
       return {

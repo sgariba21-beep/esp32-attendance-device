@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution } from '@/lib/supabase/dal'
 import { StaffView, type StaffMemberWithDevice } from './_components/staff-view'
 import { RealtimeRefresh } from '@/components/realtime-refresh'
+import { loadOccupiedSlots } from '@/lib/enrollment-slots'
 import type { Device } from '@/lib/types'
 
 export default async function StaffPage() {
@@ -41,11 +42,15 @@ export default async function StaffPage() {
   const allMembers = (membersRes.data ?? []) as unknown as StaffMemberWithDevice[]
   const institutions = (institutionsRes.data ?? []) as { id: string; name: string }[]
 
+  // Every finger on each device (members and masters too), not just staff.
+  const usedFids = await loadOccupiedSlots(allDevices.map((d) => d.id))
+
   return (
     <>
       <RealtimeRefresh />
       <StaffView
         members={allMembers}
+        usedFids={usedFids}
         devices={allDevices}
         role={role}
         institutions={institutions}
