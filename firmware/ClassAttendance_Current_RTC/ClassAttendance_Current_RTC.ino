@@ -43,7 +43,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define MEETING_STATE_TMP_FILE "/meeting_state.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.11.0"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict)
+#define FIRMWARE_VERSION  "1.11.1"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict. 1.11.1: deleting one finger deletes THAT finger's slot, verified against the fid map)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -235,6 +235,7 @@ struct EnrollJob {
   String command;
   int    requestedFid;
   bool   allowOverwrite;   // operator approved clobbering an occupied sensor slot
+  int    deleteFid;        // member-finger delete: the finger's recorded slot (0 = unknown)
 };
 volatile bool enrollmentJobPending = false;
 EnrollJob currentEnrollJob;
@@ -330,6 +331,7 @@ int enrollID_toFid(const EnrollJob &job, int requestedFid);
 void enrollment_doRegister(const EnrollJob &job, const String &role);
 void enrollment_doDeleteByFid(const EnrollJob &job, int fid);
 void enrollment_doDeleteByUnique(const EnrollJob &job);
+void enrollment_doDeleteMemberFinger(const EnrollJob &job);
 void reportEnrollUpdate(const String &jobId, const String &status, int fingerId,
                         const String &note, const String &fingerSlot, const String &memberId);
 bool initRTC();
@@ -2244,6 +2246,40 @@ void enrollment_doDeleteByUnique(const EnrollJob &job) {
   enrollment_doDeleteByFid(job, fid);
 }
 
+// Delete ONE finger of a member (1.11.1). Both of a member's fingers map to
+// the same ID in the fid map, so the ID alone can't say which finger: the old
+// by-ID lookup (enrollment_doDeleteByUnique) took whichever slot came first --
+// often Finger 1 when Finger 2 was asked for -- while the dashboard cleared
+// Finger 2. The server now sends the finger's recorded slot (delete_fid):
+//   holds this member -> delete exactly that slot;
+//   doesn't           -> the finger isn't where the dashboard thinks: delete
+//                        NOTHING ("not-found"; the server then frees that slot).
+//                        Never a slot that may now be another member's (a stale
+//                        record after a clear-all or an overwrite), and never
+//                        this member's other finger;
+//   no slot sent      -> (older job) by ID, but only if the member has exactly
+//                        one finger here -- otherwise "ambiguous", not a guess.
+void enrollment_doDeleteMemberFinger(const EnrollJob &job) {
+  const int fid = job.deleteFid;
+  if (fid >= 1 && fid <= MAX_FID && job.uniqueId.length() && fidMap[fid] == job.uniqueId) {
+    enrollment_doDeleteByFid(job, fid);
+    return;
+  }
+  int found = -1, count = 0;
+  if (fid <= 0 && job.uniqueId.length()) {
+    for (int f = 1; f <= MAX_FID; ++f) {
+      if (fidMap[f] == job.uniqueId) { if (found < 0) found = f; count++; }
+    }
+    if (count == 1) { enrollment_doDeleteByFid(job, found); return; }
+  }
+  Serial.printf("Delete %s %s: slot %d not theirs / %d candidate(s) -- nothing deleted\n",
+                job.uniqueId.c_str(), job.fingerSlot.c_str(), fid, count);
+  pendingScanId = "";
+  postDisplayState(TIER_INTERACTION, 1500, "DEL FAILED", job.name, count > 1 ? "Which finger?" : "Not found");
+  renderDisplayIfDirty();
+  reportEnrollUpdate(job.id, "failed", -1, count > 1 ? "ambiguous" : "not-found", job.fingerSlot, job.memberId);
+}
+
 /* =============== Finger search =============== */
 int fingerSearch() {
   uint8_t p = finger.getImage();
@@ -3005,6 +3041,7 @@ void EnrollmentTask(void *pvParameters) {
             job.name          = jobObj["fullname"]        | "";
             job.requestedFid  = jobObj["fid"]             | 0;
             job.allowOverwrite = jobObj["allow_overwrite"] | false;
+            job.deleteFid      = jobObj["delete_fid"] | 0;
 
             if (job.id.length() > 0 && job.command.length() > 0) {
               xSemaphoreTake(enrollMutex, portMAX_DELAY);
@@ -3084,8 +3121,9 @@ void FingerprintTask(void *pvParameters) {
           enrollment_doRegister(job, "master");
         } else if (job.command == "register-session-master") {
           enrollment_doRegister(job, "session_master");
-        } else if (job.command == "delete" || job.command == "delete-master" ||
-                   job.command == "delete-session-master") {
+        } else if (job.command == "delete") {
+          enrollment_doDeleteMemberFinger(job);
+        } else if (job.command == "delete-master" || job.command == "delete-session-master") {
           if (job.requestedFid > 0) enrollment_doDeleteByFid(job, job.requestedFid);
           else if (job.uniqueId.length()) enrollment_doDeleteByUnique(job);
           else reportEnrollUpdate(job.id, "failed", -1, "no-id-specified", job.fingerSlot, job.memberId);

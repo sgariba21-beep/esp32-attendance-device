@@ -207,12 +207,20 @@ Deno.serve(async (req: Request) => {
 
   const member = job.member as unknown as { id: string; sid: string; fullname: string } | null;
   const isMaster = job.command === "register-master" || job.command === "register-session-master";
+  // A member-finger delete carries the finger's recorded slot. NOT as `fid`:
+  // firmware <= 1.11.0 deletes a delete job's fid blindly, and a stale slot
+  // (a clear-all, an overwrite) can hold ANOTHER member's finger by now. It
+  // goes out as delete_fid, which only firmware >= 1.11.1 reads — and checks
+  // against its own fid map before deleting. Older firmware keeps deleting by
+  // sid, as before.
+  const isMemberDelete = job.command === "delete";
 
   return json({
     job: {
       id: job.id,
       command: job.command,
-      fid: job.fid ?? 0,
+      fid: isMemberDelete ? 0 : (job.fid ?? 0),
+      delete_fid: isMemberDelete ? (job.fid ?? 0) : 0,
       finger_slot: job.finger_slot ?? "",
       // member_id is the current key; student_id kept transiently so firmware
       // older than 1.10.0 (which reads student_id) keeps working.

@@ -138,6 +138,8 @@ export function FingerEditRow({ label, slot, fid, memberId, deviceId, defaultFid
   async function handleDelete() {
     setDeleting(true)
     setDeleteError(null)
+    // The server attaches this finger's recorded slot, so the device deletes
+    // exactly this finger rather than the member's first one.
     const result = await createEnrollmentJob({
       command: 'delete',
       device_id: deviceId,

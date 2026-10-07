@@ -222,6 +222,12 @@ export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobR
   } else if (data.command === 'delete') {
     row.member_id = data.member_id
     row.finger_slot = data.finger_slot
+    // The finger's recorded sensor slot. Both of a member's fingers map to the
+    // same ID on the device, so the ID alone can't say WHICH finger to delete;
+    // get-enrollment-job forwards this as delete_fid, and firmware >= 1.11.1
+    // deletes that slot only if it really holds this member.
+    const recorded = memberSlots?.[data.finger_slot] ?? 0
+    if (recorded > 0) row.fid = recorded
   } else if (data.command === 'register-master' || data.command === 'register-session-master') {
     row.fid = data.fid
     row.note = data.name.trim()

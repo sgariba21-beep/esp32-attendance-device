@@ -3,8 +3,9 @@
 **Status:** Phases 1 and 2 **live in cloud** (2026-09-26) and verified end to end.
 Phase 3 migrations **live in cloud** (2026-09-27); dashboard on `club-mode`.
 Phase 4 backend **live in cloud** (2026-09-28): migration applied, `log-attendance` v17
-and `get-enrollment-job` v16 deployed, verified over HTTPS. Firmware 1.11.0 built but
-**not released** (no `firmware-v1.11.0` tag) and not yet tested on hardware.
+and `get-enrollment-job` v16 deployed, verified over HTTPS. Firmware built but
+**not released** and not yet tested on hardware: now **1.11.1** (1.11.0 + a fix for deleting
+one finger of a two-finger member), so release as `firmware-v1.11.1`.
 **Target:** A 4th institution type, `club`, whose unit of attendance is a *meeting*
 rather than a *day*.
 
@@ -642,7 +643,8 @@ ESLint unchanged (the enrollment folder's 4 errors are the pre-existing ones).
    affects device meetings, and none exist yet.
 2. Deploy `log-attendance` and `get-enrollment-job` (`--no-verify-jwt`). Current
    firmware ignores `meeting_state` and never sends events or refs.
-3. Release firmware: tag `firmware-v1.11.0`. OTA compares against the compiled-in
+3. Release firmware: tag `firmware-v1.11.1` (1.11.0 was never tagged; 1.11.1 adds the
+   verified single-finger delete, so a device hand-flashed with 1.11.0 still updates). OTA compares against the compiled-in
    version and only flashes a strictly newer one. A 1.10 device that receives a
    session-master job fails it as `unknown-cmd` — harmless.
 
@@ -801,7 +803,7 @@ a dashboard pointed at cloud — local `.env.local` targets a local Supabase sta
 overview deliberately uses `verifySession()` so every role can see it); `/meetings`
 passes.
 
-**Phase 4** — on a real device running 1.11.0, in a club tenant, after the migration
+**Phase 4** — on a real device running 1.11.1, in a club tenant, after the migration
 and both edge functions are live:
 
 1. Enrollment → **Reg. session master** is offered for the club's device only; enrol
@@ -827,7 +829,7 @@ and both edge functions are live:
     shows **Meeting auto-closed**; `/meetings` shows it ended 15 min after the scan.
 12. During a scheduled meeting's window, session master → **SCHEDULED · title · Until
     HH:MM**, nothing opened.
-13. A school device on 1.11.0: scanning, the idle screen and the portal are unchanged
+13. A school device on 1.11.1: scanning, the idle screen and the portal are unchanged
     (no meeting line).
 
 Add the passing cases to [docs/for-operators/e2e-testing-checklist.md](docs/for-operators/e2e-testing-checklist.md)
