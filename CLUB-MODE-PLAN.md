@@ -667,6 +667,39 @@ opened"). Both `verify_jwt=false`. **Verified in cloud:**
   advisors unchanged. No real device polled in the preceding 24 h, so live-fleet
   traffic on the new versions is still to be observed.
 
+### Follow-up (2026-10-06) — several meetings on one day
+
+**Checked:** a day can hold any number of meetings. No key is per-day any more (the
+old `(member_id, date, scan_type)` key was dropped in Phase 2); attendance is unique
+per meeting, and meetings have no per-day constraint. Verified in cloud in a
+rolled-back transaction: morning + afternoon scheduled and an evening ad-hoc meeting on
+one device and one date — each scan resolved to its own meeting, the same member was
+present in all three, a second scan into the same meeting was still a duplicate, the
+sweep wrote per-meeting absences, and time in / time out worked in two meetings on one
+day.
+
+**Fixed — back-to-back meetings:**
+
+| Gap | Fix |
+|---|---|
+| The dashboard's overlap check treated an open ad-hoc meeting (no `ends_at`) as never ending: while one was open, no meeting ending after it began could be created — later that day or any future day | `findOverlap` (meetings actions): an open ad-hoc meeting only clashes with a meeting starting at or before its open time |
+| A meeting closed early ("Close now") kept blocking the rest of its slot | `findOverlap` uses `least(ends_at, closed_at)` |
+| An ad-hoc meeting left open when a scheduled meeting started kept every scan (scans carry its ref), so the scheduled meeting's attendees were marked absent | `20261006120000_scheduled_meeting_takes_over.sql`: a scheduled meeting whose core window contains the scan and that **started after the ad-hoc meeting opened** takes precedence (`scheduled_meeting_at`, `resolve_device_scan`); the poll's `live` follows it, and firmware 1.11.1 closes the ad-hoc meeting at the scheduled start (**CLOSED · Scheduled mtg started**). An ad-hoc meeting opened *during* a scheduled one keeps its scans, as before |
+| After a scheduled meeting ended, its post-roll still counted as live on the device, so the session master refused to open the next meeting for up to 30 min | Firmware 1.11.1: a scheduled meeting counts as live up to its own end, not through its post-roll (late scans still reach it while no ad-hoc meeting is open) |
+
+**Tested:** PGlite — every suite after the new migration (Phase 2 70, Phase 3 38,
+Phase 4 72, clear-all 16) plus 21 takeover checks twice (before / during / after the
+scheduled meeting, an all-devices meeting, an early close, cancelled and deleted-device
+meetings, an ad-hoc meeting opened mid-meeting, poll `live`, grants).
+
+**Deployed 2026-10-07 ~17:19 UTC** (with the 2026-10-05/06 enrollment fixes): `20261005120000`
+and `20261006120000` applied via `apply_migration`; `update-enrollment-job` v11 and
+`get-enrollment-job` v17 deployed (`--no-verify-jwt`). Verified in cloud in a rolled-back
+transaction (clear-all reset keeps a re-enrolled slot; a scheduled meeting takes over at
+14:10; the poll reports it live) and against OLAG's live device state. Still to do: push
+the dashboard (only AFTER get-enrollment-job v17, which it now is), then tag
+`firmware-v1.11.1`.
+
 ---
 
 ## 8. Open decisions

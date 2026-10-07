@@ -74,7 +74,7 @@ async function findOverlap(
 ): Promise<string | null> {
   let q = createAdminClient()
     .from('meetings')
-    .select('id, title, origin, starts_at, device_id')
+    .select('id, title, origin, starts_at, ends_at, closed_at, device_id')
     .eq('institution_id', ctx.session.institutionId!)
     .neq('status', 'cancelled')
     .is('device_deleted_at', null)
@@ -82,9 +82,20 @@ async function findOverlap(
     .or(`ends_at.gt.${startsAt},ends_at.is.null`)
   if (excludeId) q = q.neq('id', excludeId)
   const { data } = await q
-  const clash = (data ?? []).find(
-    (m) => deviceId === null || m.device_id === null || m.device_id === deviceId,
-  )
+  const start = Date.parse(startsAt)
+  const clash = (data ?? []).find((m) => {
+    if (!(deviceId === null || m.device_id === null || m.device_id === deviceId)) return false
+    // An ad-hoc meeting still open has no end yet. A scheduled meeting that
+    // starts after it was opened takes over from it at that start (see
+    // 20261006120000), so only a meeting starting at or before its open
+    // time clashes — an open ad-hoc meeting must not block every later
+    // meeting, today's or any future day's.
+    if (m.ends_at === null) return start <= Date.parse(m.starts_at)
+    // A meeting closed early ("Close now") ends at closed_at, freeing the
+    // rest of its slot for the next meeting that day.
+    const end = m.closed_at ? Math.min(Date.parse(m.ends_at), Date.parse(m.closed_at)) : Date.parse(m.ends_at)
+    return end > start
+  })
   if (!clash) return null
   const tz = ctx.institution.timezone
   const when = `${formatZonedDate(clash.starts_at, tz)} ${formatZonedTime(clash.starts_at, tz, ctx.institution.time_format)}`

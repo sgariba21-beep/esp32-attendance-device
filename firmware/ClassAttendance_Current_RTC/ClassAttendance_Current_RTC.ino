@@ -43,7 +43,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define MEETING_STATE_TMP_FILE "/meeting_state.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.11.1"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict. 1.11.1: deleting one finger deletes THAT finger's slot, verified against the fid map)
+#define FIRMWARE_VERSION  "1.11.1"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict. 1.11.1: deleting one finger deletes THAT finger's slot, verified against the fid map; back-to-back meetings -- a scheduled meeting takes over an ad-hoc one left open, post-roll no longer blocks the session master)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -285,7 +285,6 @@ unsigned long masterConfirmDeadlineMs  = 0;
  * (Core 0) under meetingMutex and folded in on Core 1 by
  * reconcileMeetingWithServer(). */
 #define MEETING_CONFIRM_MS    8000UL
-#define MEETING_LIVE_FRESH_MS 90000UL   // trust a poll's "live" meeting this long when offline-ish
 
 bool     mtgOpen         = false;
 String   mtgRef          = "";      // also kept after close: the last meeting's ref
@@ -312,8 +311,9 @@ struct ServerMeetingView {
   String        liveTitle;
   String        liveOrigin;       // "scheduled" | "device"
   uint32_t      liveEnds;         // epoch; 0 for an open ad-hoc meeting
+  uint32_t      liveStarts;       // epoch: when a scheduled meeting takes over an ad-hoc one
 };
-ServerMeetingView srvMtg = { false, 0, 0, 240, "", 0, false, "", "", 0 };
+ServerMeetingView srvMtg = { false, 0, 0, 240, "", 0, false, "", "", 0, 0 };
 unsigned long srvMtgAppliedAtMs = 0;  // Core 1: the view last reconciled
 
 /* Forward declarations */
@@ -1126,13 +1126,15 @@ void closeMeetingLocal(uint32_t closeEpoch, bool notifyServer) {
   saveMeetingState();
 }
 
-// A scheduled meeting is taking scans now, per the latest poll: fresh, or not
-// yet past its end (the schedule can't change while we're offline anyway).
+// A scheduled meeting is on now, per the latest poll: from its pre-roll up to
+// its own END (the schedule can't change while we're offline anyway). Not
+// through its post-roll: once a meeting is over the session master must be
+// able to open the next one straight away -- late scans still reach the
+// scheduled meeting while no ad-hoc one is open.
 bool scheduledMeetingLive(uint32_t nowEpoch, String &title, uint32_t &endsEpoch) {
   xSemaphoreTake(meetingMutex, portMAX_DELAY);
   bool live = srvMtg.valid && srvMtg.live && srvMtg.liveOrigin == "scheduled" &&
-              (millis() - srvMtg.atMs < MEETING_LIVE_FRESH_MS ||
-               (srvMtg.liveEnds != 0 && nowEpoch < srvMtg.liveEnds));
+              srvMtg.liveEnds != 0 && nowEpoch < srvMtg.liveEnds;
   title = srvMtg.liveTitle;
   endsEpoch = srvMtg.liveEnds;
   xSemaphoreGive(meetingMutex);
@@ -1148,11 +1150,28 @@ void reconcileMeetingWithServer() {
   int autoclose = srvMtg.autocloseMin;
   String openRef = srvMtg.openRef;
   uint32_t openOpened = srvMtg.openOpenedEpoch;
+  bool liveScheduled = srvMtg.live && srvMtg.liveOrigin == "scheduled";
+  uint32_t liveStarts = srvMtg.liveStarts;
   xSemaphoreGive(meetingMutex);
 
   bool dirty = false;
   if (club != mtgClub) { mtgClub = club; dirty = true; }
   if (club == 1 && autoclose >= 15 && autoclose != mtgAutocloseMin) { mtgAutocloseMin = autoclose; dirty = true; }
+
+  // Back-to-back meetings: a scheduled meeting that began after our ad-hoc
+  // one was opened has taken over (the server already files scans there --
+  // 20261006120000). Our meeting ended when it began: close it at that start.
+  DateTime n = rtc.now();
+  if (mtgOpen && liveScheduled && liveStarts > mtgOpenedEpoch &&
+      n.year() >= 2024 && n.unixtime() >= liveStarts) {
+    int present = meetingPresentCount();
+    meetingCloseArmed = false;
+    closeMeetingLocal(liveStarts, true);
+    Serial.printf("Meeting %s closed: scheduled meeting began at %lu\n", mtgRef.c_str(), (unsigned long)liveStarts);
+    pendingScanId = "";
+    postDisplayState(TIER_INTERACTION, 4000, "CLOSED", "Scheduled mtg started", String(present) + " present");
+    return;  // closeMeetingLocal saved the state (club / autoclose included)
+  }
 
   if (mtgOpen) {
     if (openRef == mtgRef) {
@@ -3021,6 +3040,7 @@ void EnrollmentTask(void *pvParameters) {
             srvMtg.liveTitle       = live["title"] | "";
             srvMtg.liveOrigin      = live["origin"] | "";
             srvMtg.liveEnds        = live["ends_at"].as<uint32_t>();
+            srvMtg.liveStarts      = live["starts_at"].as<uint32_t>();
             xSemaphoreGive(meetingMutex);
           }
 
