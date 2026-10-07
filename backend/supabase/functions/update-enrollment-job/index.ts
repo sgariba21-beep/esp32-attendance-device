@@ -74,10 +74,24 @@ Deno.serve(async (req: Request) => {
   // Fetch the job scoped to institution to know its command.
   const { data: job } = await supabase
     .from("enrollment_jobs")
-    .select("command")
+    .select("command, device_id, status")
     .eq("id", id)
     .eq("institution_id", institution_id)
     .maybeSingle();
+
+  // A "clear all" wiped the sensor and the device's fid map, so none of this
+  // device's members has a finger on it any more: free their slots, except any
+  // re-enrolled after the wipe (this report may arrive late — see
+  // 20261005120000). Done BEFORE the job is marked completed, so if it fails
+  // the 500 makes the device retry with the job still open; a duplicate report
+  // for an already-completed job is skipped.
+  if (status === "completed" && job?.command === "clearall" &&
+      job.device_id === device.id && job.status !== "completed") {
+    const { error: resetError } = await supabase.rpc("reset_slots_after_clearall", { p_job_id: id });
+    if (resetError) {
+      return json({ error: `Slot reset failed: ${resetError.message}` }, 500);
+    }
+  }
 
   const jobUpdate: Record<string, unknown> = { status };
   if (note) jobUpdate.note = note;
@@ -126,6 +140,25 @@ Deno.serve(async (req: Request) => {
           .eq("id", member_id)
           .eq("institution_id", institution_id); // T4: tenant-scoped write
       }
+    }
+  }
+
+  // A delete the device couldn't carry out because it has no finger for this
+  // member at all ("not-found" — e.g. after a clear all, or a lost register)
+  // still leaves the finger not enrolled: free the slot so the dashboard
+  // agrees with the device instead of showing a finger nobody can remove.
+  if (status === "failed" && note === "not-found" && member_id && finger_slot &&
+      job?.command === "delete" && job.device_id === device.id) {
+    const memberUpdate: Record<string, number> = {};
+    if (finger_slot === "fin1") memberUpdate.fin1 = 0;
+    else if (finger_slot === "fin2") memberUpdate.fin2 = 0;
+    if (Object.keys(memberUpdate).length > 0) {
+      await supabase
+        .from("members")
+        .update(memberUpdate)
+        .eq("id", member_id)
+        .eq("institution_id", institution_id) // T4: tenant-scoped write
+        .eq("device_id", device.id);          // only this device's finger is known absent
     }
   }
 

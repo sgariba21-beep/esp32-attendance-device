@@ -64,7 +64,8 @@ const MASTER_COMMANDS = ['register-master', 'delete-master', 'register-session-m
 // (tracked in members.fin1/fin2) or a master / session-master fingerprint
 // (tracked only as enrollment_jobs history — there's no separate "current
 // occupant" table, so occupancy is the most recent completed master job of
-// either kind for that device+fid).
+// either kind for that device+fid, unless a completed clear-all on the device
+// came after it: that wiped every slot, masters included).
 async function getMemberOccupant(
   supabase: ReturnType<typeof createAdminClient>,
   deviceId: string,
@@ -84,12 +85,14 @@ async function getMasterOccupant(
   deviceId: string,
   fid: number,
 ) {
+  // The newest completed master job for this slot OR clear-all for the device
+  // (a clear-all row has no fid); a clear-all on top means the slot is empty.
   const { data } = await supabase
     .from('enrollment_jobs')
     .select('command, note')
     .eq('device_id', deviceId)
-    .eq('fid', fid)
-    .in('command', MASTER_COMMANDS)
+    .or(`fid.eq.${fid},command.eq.clearall`)
+    .in('command', [...MASTER_COMMANDS, 'clearall'])
     .eq('status', 'completed')
     .order('created_at', { ascending: false })
     .limit(1)
