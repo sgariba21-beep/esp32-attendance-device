@@ -103,7 +103,7 @@ A platform admin has no institution. Signed in, you see **Institutions** and **C
 ### 4.1 Prerequisites
 
 - Arduino IDE 2.x with the Espressif **ESP32** board package
-- Libraries: **Adafruit Fingerprint Sensor Library**, **RTClib**, **Adafruit GFX Library**, **Adafruit SSD1306**, and **ArduinoJson** (version 7)
+- Libraries: **Adafruit Fingerprint Sensor Library**, **RTClib**, **Adafruit GFX Library**, **Adafruit SH110X**, and **ArduinoJson** (version 7)
 - WiFi, HTTPS, the web server, DNS, SPIFFS, and OTA updates come with the ESP32 core -- nothing extra to install
 - A USB cable
 

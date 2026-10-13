@@ -43,7 +43,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define MEETING_STATE_TMP_FILE "/meeting_state.tmp"
 
 /* ========= OTA CONFIG ========= */
-#define FIRMWARE_VERSION  "1.11.1"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict. 1.11.1: deleting one finger deletes THAT finger's slot, verified against the fid map; back-to-back meetings -- a scheduled meeting takes over an ad-hoc one left open, post-roll no longer blocks the session master)
+#define FIRMWARE_VERSION  "1.12.0"        // increment on each flash (1.11.0: club mode -- session-master finger opens/closes ad-hoc meetings, offline too; NO MEETING verdict. 1.11.1: deleting one finger deletes THAT finger's slot, verified against the fid map; back-to-back meetings -- a scheduled meeting takes over an ad-hoc one left open, post-roll no longer blocks the session master. 1.12.0: 1.3" SH1106 OLED replaces the 0.96" SSD1306 -- the SSD1306 driver left an SH1106 panel full of noise)
 #define OTA_REPO_API      "https://api.github.com/repos/sgariba21-beep/esp32-attendance-device/releases/latest"
 #define OTA_TAG_PREFIX    "firmware-v"    // was "OLAG-v" before Phase 3
 /* ============================== */
@@ -87,9 +87,12 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #define SCAN_LOG_FILE "/scan_log.txt"
 #define SCAN_LOG_MAX_BYTES (200UL * 1024UL)
 
-/* SSD1306 OLED (Phase 3). Same I2C bus as the DS3231 RTC (0x68) -- no address
- * clash at 0x3C. Display owner is Core 1 (FingerprintTask) only; see
- * renderDisplayIfDirty(). */
+/* 1.3" SH1106 OLED (1.12.0; was a 0.96" SSD1306 in Phase 3). Same I2C bus as
+ * the DS3231 RTC (0x68) -- no address clash at 0x3C. The SH1106 has 132-column
+ * RAM, page addressing only, and ignores the SSD1306's horizontal-addressing
+ * commands: driving it with Adafruit_SSD1306 updates only the top page and
+ * leaves the rest as power-on RAM noise. Display owner is Core 1
+ * (FingerprintTask) only; see renderDisplayIfDirty(). */
 #define SCREEN_WIDTH  128
 #define SCREEN_HEIGHT 64
 #define OLED_ADDR     0x3C
@@ -109,7 +112,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #include <Wire.h>
 #include <RTClib.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SH110X.h>
 #include <WebServer.h>
 #include <DNSServer.h>
 #include "esp_task_wdt.h"
@@ -121,7 +124,7 @@ const char* ASSIGNMENT_POLL_URL = "https://lxpemewonievaazboyez.supabase.co/func
 #include "freertos/semphr.h"
 
 RTC_DS3231 rtc;
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_SH1106G display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 HardwareSerial r503Serial(2);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&r503Serial);
@@ -172,7 +175,7 @@ enum DisplayTier {
 // here (not next to setBlockedReason() itself, further down) so it's visible
 // to that function's forward declaration in the block below.
 enum BlockedReason { BLOCKED_NONE, BLOCKED_PENDING, BLOCKED_REJECTED, BLOCKED_REVOKED };
-bool          displayAvailable      = false;  // false if SSD1306 init failed -- no hard dependency on the panel
+bool          displayAvailable      = false;  // false if SH1106 init failed -- no hard dependency on the panel
 volatile bool tierActive[TIER_COUNT]     = { false, false, false, false, true };
 unsigned long tierExpiresAtMs[TIER_COUNT] = { 0, 0, 0, 0, 0 };  // 0 = no expiry
 // Card content (Phase 4 OLED): headline is size-2 text, line2/line3 are size-1.
@@ -661,7 +664,7 @@ void saveDeviceConfig(long ver, long rev, int tzOffset, const String &nameDispla
                 rev, tzOffset, nameDisplay.c_str());
 }
 
-/* ================== Display (SSD1306, Phase 3/4) ================== */
+/* ================== Display (SH1106 1.3", Phase 3/4) ================== */
 // Mailbox API -- Core 0 (NetworkTask/EnrollmentTask) callable. Only touches the
 // shared tier table under displayMutex; never draws. Tier 1 (scan cards) is
 // wired up as of Phase 4; tiers 0/2/3 remain content-less infrastructure
@@ -1001,7 +1004,7 @@ void showBootSplash() {
   if (!displayAvailable) return;
   String nameSnapshot = sanitizeForDisplay(getDisplayNameSafe());
   display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(SH110X_WHITE);
   display.setTextSize(2);
   display.setCursor(0, 0);
   display.print("v" FIRMWARE_VERSION);
@@ -1336,7 +1339,7 @@ void renderIdleScreen() {
   char clockBuf[6];
   sprintf(clockBuf, "%02d:%02d", local.hour(), local.minute());
 
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(SH110X_WHITE);
   display.setTextSize(2);
   display.setCursor(0, 0);
   display.print(clockBuf);
@@ -1397,7 +1400,7 @@ void renderCard(DisplayTier tier) {
   String l3 = tierLine3[tier];
   xSemaphoreGive(displayMutex);
 
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(SH110X_WHITE);
   display.setTextSize(2);
   display.setCursor(0, 0);
   display.print(sanitizeForDisplay(headline));
@@ -1492,12 +1495,12 @@ void renderDisplayIfDirty() {
 
   if (displayAsleep) {
     if (!wakeRequested && !neverSleeps) return;  // stay asleep, nothing to draw
-    display.ssd1306_command(SSD1306_DISPLAYON);
+    display.oled_command(SH110X_DISPLAYON);
     displayAsleep = false;
     displayDirty = true;
     Serial.println("Display: waking");
   } else if (!neverSleeps && (now - displayLastActivityMs > DISPLAY_SLEEP_MS)) {
-    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    display.oled_command(SH110X_DISPLAYOFF);
     displayAsleep = true;
     Serial.println("Display: sleeping (120s idle)");
     return;
@@ -3397,13 +3400,18 @@ void setup() {
   // if init fails, displayAvailable stays false and every display.* call
   // downstream is a no-op guarded on it.
   Wire.begin(21, 22);
-  // periphBegin=false: Wire is already begun above with our pins (21/22).
-  // The default (true) would have begin() call Wire.begin() again internally
-  // with the board's default pins -- harmless here since those also happen
-  // to be 21/22 on plain ESP32, but not something to rely on.
-  displayAvailable = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR, true, false);
-  if (!displayAvailable) {
-    Serial.println("SSD1306 not found -- continuing without display.");
+  // Adafruit_SH1106G::begin() calls Wire.begin() again internally (BusIO has
+  // no opt-out like Adafruit_SSD1306's periphBegin). Harmless: on the ESP32
+  // core a second begin() on a started bus is a no-op that keeps pins 21/22.
+  displayAvailable = display.begin(OLED_ADDR, true);
+  if (displayAvailable) {
+    // begin() turns the panel on over whatever the SH1106's RAM held at
+    // power-up (noise) -- blank it now rather than at showBootSplash(),
+    // which is a SPIFFS load away.
+    display.clearDisplay();
+    display.display();
+  } else {
+    Serial.println("SH1106 not found -- continuing without display.");
   }
 
   // T2/T12: memQueueMutex removed; spiffsMutex guards the SPIFFS-only queue.
@@ -3422,7 +3430,7 @@ void setup() {
     // draw is safe -- unlike every other display write in this codebase.
     if (displayAvailable) {
       display.clearDisplay();
-      display.setTextColor(SSD1306_WHITE);
+      display.setTextColor(SH110X_WHITE);
       display.setTextSize(2);
       display.setCursor(0, 0);
       display.print("INIT FAIL");

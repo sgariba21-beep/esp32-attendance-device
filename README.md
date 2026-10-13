@@ -74,7 +74,7 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 
 | Layer | Technology |
 |---|---|
-| Firmware | Arduino (ESP32), FreeRTOS, R503 fingerprint library, SSD1306 OLED (Adafruit SSD1306 + GFX) |
+| Firmware | Arduino (ESP32), FreeRTOS, R503 fingerprint library, SH1106 OLED (Adafruit SH110X + GFX) |
 | Database | Supabase (cloud PostgreSQL + Auth + Storage + pg_cron) |
 | Edge functions | Deno (Supabase Edge Functions) |
 | Dashboard | Next.js App Router, shadcn/ui, TailwindCSS |
@@ -94,7 +94,7 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 | Microcontroller | ESP32 (dual-core, 240 MHz) |
 | Fingerprint Sensor | R503 Capacitive |
 | RTC Module | DS3231 |
-| Display (optional) | SSD1306 0.96" 128×64 I²C OLED @ address 0x3C — the firmware runs headless if it is absent or fails to init |
+| Display (optional) | SH1106 1.3" 128×64 I²C OLED @ address 0x3C (a 0.96" SSD1306 needs the pre-1.12.0 driver) — the firmware runs headless if it is absent or fails to init |
 | Carrier PCB | Custom 2-layer KiCad interconnect board — no active parts; seats the ESP32 module and provides keyed connectors for the R503 (JST-SH), the RTC + OLED I²C group, and a JST-GH 5 V input. Source in [`hardware/PCBs/`](hardware/PCBs/) |
 | Enclosure | 3D-printed base + lid (+ an OLED bezel variant for display builds). FreeCAD source and print-ready 3MF in [`hardware/CAD files/`](hardware/CAD%20files/) |
 
@@ -131,7 +131,7 @@ Inter-task communication:
 
 ### Display (OLED)
 
-An optional SSD1306 128×64 panel on the shared I²C bus. `display.begin()` is attempted once in `setup()`; on failure `displayAvailable = false` and the firmware runs headless with no behaviour change. There is no dedicated display task — rendering is driven from a Core-0-safe mailbox. Tasks post card state (idle clock, scan verdict, enrollment step, master-finger confirm, provisioning, OTA) into the mailbox and never touch the `display` object directly. Tier-2 status (queue depth, dropped-record count, degraded / offline) is overlaid on the idle screen; the panel sleeps after 120 s idle and wakes on the next event. The per-institution `member_name_display` setting (fetched via `get-enrollment-job`, cached in SPIFFS with `config_rev`) controls how much of a member's name a scan card shows.
+An optional 1.3" SH1106 128×64 panel on the shared I²C bus. `display.begin()` is attempted once in `setup()`; on failure `displayAvailable = false` and the firmware runs headless with no behaviour change. There is no dedicated display task — rendering is driven from a Core-0-safe mailbox. Tasks post card state (idle clock, scan verdict, enrollment step, master-finger confirm, provisioning, OTA) into the mailbox and never touch the `display` object directly. Tier-2 status (queue depth, dropped-record count, degraded / offline) is overlaid on the idle screen; the panel sleeps after 120 s idle and wakes on the next event. The per-institution `member_name_display` setting (fetched via `get-enrollment-job`, cached in SPIFFS with `config_rev`) controls how much of a member's name a scan card shows.
 
 ### Offline queue
 

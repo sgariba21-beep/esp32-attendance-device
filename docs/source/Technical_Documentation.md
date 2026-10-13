@@ -27,7 +27,7 @@ The system replaces paper roll-calls with a tamper-resistant fingerprint scan. R
 - **Tracked weekdays** -- an explicit Monday-to-Sunday set; scans on untracked days are ignored and generate no absences.
 - **Offline resilience** -- every scan is written to SPIFFS before any network attempt; a rotate-then-process queue survives reboots and power loss.
 - **Automatic absence marking** -- pg_cron invokes `mark-absent` daily; it respects holidays, tracked weekdays, and periods.
-- **On-device OLED** -- an optional SSD1306 128 x 64 screen shows a live status card; the firmware runs headless without it.
+- **On-device OLED** -- an optional 1.3" SH1106 128 x 64 screen shows a live status card; the firmware runs headless without it.
 - **Remote enrollment** -- jobs queued on the dashboard are collected, executed, and reported by the scanner; stuck jobs are re-delivered and self-heal.
 - **OTA updates** -- scanners check GitHub Releases at boot (after a random delay) and install a strictly newer build.
 - **Academic calendar** -- terms or periods, plus recurring and one-off holidays.
@@ -47,7 +47,7 @@ Three tiers: the ESP32 firmware, the Supabase backend (PostgreSQL, Edge Function
 | ESP32 firmware | Arduino / FreeRTOS, one sketch | Scan, queue to flash, drive the OLED, provision, and self-update over HTTPS |
 | R503 sensor | UART, capacitive | Capture, template storage, and matching -- entirely on the sensor |
 | DS3231 RTC | I2C | Wall-clock time across reboots and outages; re-synced from NTP on boot and reconnect |
-| SSD1306 OLED | I2C, optional | Status display; shares the I2C bus with the RTC |
+| SH1106 OLED (1.3") | I2C, optional | Status display; shares the I2C bus with the RTC |
 | Supabase Edge Functions | Deno / TypeScript | HTTPS API for provisioning, attendance, enrollment, and the daily absence job |
 | Supabase PostgreSQL | PostgreSQL 17, pg_cron, pg_net | Multi-tenant store; schedules and drives absence marking |
 | Next.js dashboard | App Router, shadcn/ui, Tailwind CSS | The admin interface; all Supabase access server-side |
@@ -74,7 +74,7 @@ A scanner is built from off-the-shelf modules on a custom passive carrier PCB, i
 | Microcontroller | ESP32 dev module -- dual-core Xtensa LX6, 240 MHz, 4 MB flash, WiFi | Seats in two 15-pin headers on the carrier |
 | Fingerprint sensor | R503 capacitive -- UART, 127 slots, ~0.3 s match, ring LED | 6-pin JST-SH 1.0 mm cable |
 | RTC module | DS3231 -- I2C, TCXO, battery-backed, +/-2 ppm | 6-pin 2.54 mm header; shares I2C with the OLED |
-| Display (optional) | SSD1306 0.96" 128 x 64 OLED, I2C address 0x3C | Firmware runs headless if absent |
+| Display (optional) | SH1106 1.3" 128 x 64 OLED, I2C address 0x3C | Firmware runs headless if absent |
 | Carrier PCB | Custom 2-layer interconnect board (KiCad) | No active parts |
 | Enclosure | 3D-printed base and lid, plus an OLED bezel variant | FDM, PLA or PETG |
 | Power | 5 V USB supply into the carrier's JST-GH 1.25 mm input | 3V3 comes from the ESP32 module's regulator |
@@ -88,7 +88,7 @@ A 2-layer KiCad design in `hardware/PCBs/Attendance System_v1/`, with an earlier
 | --- | --- | --- |
 | J1 / J2 | 2 x 1x15, 2.54 mm pin socket | ESP32 dev-module headers |
 | J3 | 1x6, JST-SH 1.0 mm vertical | R503 sensor -- VCC, TX, RX, GND, touch |
-| J4 | 1x6, 2.54 mm pin socket | DS3231 + SSD1306 -- shared SDA/SCL, 3V3, GND; DS3231 32K and SQW broken out |
+| J4 | 1x6, 2.54 mm pin socket | DS3231 + SH1106 -- shared SDA/SCL, 3V3, GND; DS3231 32K and SQW broken out |
 | J5 | 1x2, JST-GH 1.25 mm vertical | 5 V power input |
 
 The DS3231's 32K and SQW outputs are broken out but unused by the firmware.
@@ -113,7 +113,7 @@ Print in PLA or PETG. The sensor sits flush behind the front aperture and the li
 | DS3231 and OLED SDA | GPIO 21 (shared I2C bus) |
 | DS3231 and OLED SCL | GPIO 22 (shared I2C bus) |
 
-The R503 runs on hardware UART `Serial2` at 8N1. The DS3231 (0x68) and SSD1306 (0x3C) share one bus brought up with `Wire.begin(21, 22)`.
+The R503 runs on hardware UART `Serial2` at 8N1. The DS3231 (0x68) and SH1106 OLED (0x3C) share one bus brought up with `Wire.begin(21, 22)`.
 
 ## 4. Firmware
 
