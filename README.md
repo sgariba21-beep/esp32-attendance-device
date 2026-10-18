@@ -2,7 +2,7 @@
 
 Ghanaian schools and institutions still take attendance on paper. A teacher calls a register, marks each name by hand, then copies the totals into another book or a spreadsheet. Roll-call takes class time and the handwritten tallies are easy to miscount and slow to total across a term. This system replaces the register with a fingerprint scan.
 
-An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js dashboard backed by Supabase handles reporting and the day-to-day management of devices and members. One cloud Supabase project serves every institution, with each tenant's data isolated from the rest. The hardware and software are complete; the first institutional deployment is pending.
+An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js dashboard backed by Supabase handles reporting and the day-to-day management of devices and members. One cloud Supabase project serves every institution, with each tenant's data isolated from the rest. It is in use at two schools and an office, with 13 devices and about 400 active members between them (see [Real-World Deployment](#real-world-deployment)).
 
 ---
 
@@ -18,12 +18,19 @@ An ESP32 device with an R503 fingerprint sensor records each scan, and a Next.js
 
 ## Real-World Deployment
 
-- Status: hardware and software complete; first institutional deployment pending
-- Site: [institution name], [town/region]
-- Enrolled members: [N]
-- Running since: [start date]
+The system is in use at three sites: two schools and an office.
 
-![Device installed at [institution name]](images/deployment.jpg)
+| Deployment | Sites | Devices | Active members |
+|---|---|---|---|
+| This repo (hosted service) | 1 school, 1 office | 2 | ~100 |
+| OLAG (private repo) | 1 school | 11 | ~300 |
+| **Total** | **3** | **13** | **~400** |
+
+- **This repo.** One school and one office run on the hosted multi-tenant service, with one device each.
+- **OLAG.** The second school has 11 devices: 10 for classes and 1 for its robotics club, which runs in club (meeting-based) mode. OLAG runs the same attendance system, with the same firmware, dashboard, and backend design. It lives in a separate repository with its own Supabase project and Vercel deployment because the school wanted private ownership of its source code.
+
+<!-- TODO: add the deployment photo at images/deployment.jpg -->
+![Fingerprint attendance device installed on site](images/deployment.jpg)
 
 ---
 
