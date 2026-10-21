@@ -29,9 +29,6 @@ The system is in use at three sites: two schools and an office.
 - **This repo.** One school and one office run on the hosted multi-tenant service, with one device each.
 - **OLAG.** The second school has 11 devices: 10 for classes and 1 for its robotics club, which runs in club (meeting-based) mode. OLAG runs the same attendance system, with the same firmware, dashboard, and backend design. It lives in a separate repository with its own Supabase project and Vercel deployment because the school wanted private ownership of its source code.
 
-<!-- TODO: add the deployment photo at images/deployment.jpg -->
-![Fingerprint attendance device installed on site](images/deployment.jpg)
-
 ---
 
 ## Architecture
@@ -104,6 +101,7 @@ The system is in use at three sites: two schools and an office.
 | Display (optional) | SH1106 1.3" 128×64 I²C OLED @ address 0x3C (a 0.96" SSD1306 needs the pre-1.12.0 driver) — the firmware runs headless if it is absent or fails to init |
 | Carrier PCB | Custom 2-layer KiCad interconnect board — no active parts; seats the ESP32 module and provides keyed connectors for the R503 (JST-SH), the RTC + OLED I²C group, and a JST-GH 5 V input. Source in [`hardware/PCBs/`](hardware/PCBs/) |
 | Enclosure | 3D-printed base + lid (+ an OLED bezel variant for display builds). FreeCAD source and print-ready 3MF in [`hardware/CAD files/`](hardware/CAD%20files/) |
+| Fasteners | M3 screws + M3 heat-set inserts — the brass inserts are melted into the printed enclosure with a soldering iron, and the screws thread into them |
 
 ### Wiring
 
@@ -488,17 +486,6 @@ esp32-attendance-device/
 | 7 | Security hardening — per-device secrets, SPIFFS-only durable queue, tenant isolation fixes, polling watermark | ✅ Complete |
 | 8 | OLED display — device-side status screen: idle clock, scan / enrollment / portal / master-confirm cards, degraded & offline states | ✅ Complete |
 | 9 | Reliability & reach — enrollment-job self-healing (re-delivery, retry/cancel, status guard), firmware server-reachability watchdog, per-institution tracked weekdays / time format / punctuality thresholds, installable PWA | ✅ Complete |
-
----
-
-## Roadmap
-
-- [x] Installable PWA (add-to-home-screen) — native iOS/Android app still TBD
-- [ ] GES-formatted report exports
-- [ ] SMS attendance notifications
-- [ ] Analytics dashboard with term-over-term trends
-- [ ] Offline-first mobile enrollment app
-- [ ] Multi-device per unit support
 
 ---
 
