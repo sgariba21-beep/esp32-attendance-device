@@ -7,7 +7,8 @@ real institutions are untouched and never appear in these shots — every captur
 was taken while signed in as the demo tenant's own `super_admin`, which the app
 hard-scopes to that tenant). All 18 `shop--*` shots plus the two settings shots
 were re-taken after the `7bd44ab` "drop salon vocabulary" cleanup reached the
-live deployment, so nothing here reads "stylist".
+live deployment, so nothing here reads "stylist". The 12 `club--*` shots were
+added on 2026-10-21 the same way, against a fourth demo tenant.
 
 Filenames: `<type>--<nn>-<page>.jpg`. JPEG because that is what the capture path
 produces; ~1250–1570 px wide.
@@ -19,6 +20,7 @@ produces; ~1250–1570 px wide.
 | `school` | Riverdale High School | Africa/Accra | GHS | Indigo `#6366f1` | `riverdale.admin@example.com` |
 | `office` | Northwind Logistics | Europe/London | GBP | Emerald `#10b981` | `northwind.admin@example.com` |
 | `shop`  | Curbside Cycle Co.    | Africa/Accra | GHS | Rose `#f43f5e`   | `curbside.admin@example.com` |
+| `club`  | Lakeside Chess Club   | Africa/Accra | —   | Violet `#7C3AED` | `lakeside.admin@example.com` |
 
 Each was created through the platform-admin **Create institution** flow, then
 seeded via SQL: ~8–26 members, 3 devices, an active + a past period, 1–2
@@ -26,6 +28,16 @@ holidays, 5 enrolment jobs, and ~12–18 days of attendance history plus a parti
 current day. Riverdale and Northwind track late arrivals / early departures;
 Curbside adds the full retail module — 15 clients, 8 products, 6 services, 26
 sales, 3 loyalty rules with 5 issuances.
+
+Lakeside is meeting-based rather than day-based: 24 members and 3 organisers
+across 3 venue devices (Seniors — Club Room, Juniors — Library Annex, Open —
+Tournament Hall), 4 recurring schedules (weekly club night, weekly juniors
+training, a first-Sunday rapid tournament, a fortnightly blitz evening), 16
+closed meetings since 2026-09-09 with present / late / absent rows, one
+cancelled session, one ad-hoc meeting opened at the device, a club night live at
+capture time, a one-off AGM, and 6 enrolment jobs including a session-master
+registration. It records absences and flags arrivals more than 10 minutes after
+a meeting's start.
 
 ## Inventory
 
@@ -79,6 +91,22 @@ sales, 3 loyalty rules with 5 issuances.
 | `shop--17-accounts.jpg` | Accounts |
 | `shop--18-settings.jpg` | Settings (identity + branding; "Shop type tracks staff") |
 
+### club/ — Lakeside Chess Club (12)
+| File | Page |
+|---|---|
+| `club--01-overview.jpg` | Overview (live meeting, last meeting, average attendance) |
+| `club--02-attendance.jpg` | Attendance (records) |
+| `club--03-meetings.jpg` | Meetings → Live now + Upcoming |
+| `club--04-meetings-recurring-past.jpg` | Meetings → Recurring + Past 60 days |
+| `club--05-meeting-attendance.jpg` | Attendance filtered to one meeting (present / late / absent) |
+| `club--06-members.jpg` | Members |
+| `club--07-organisers.jpg` | Organisers |
+| `club--08-devices.jpg` | Devices |
+| `club--09-enrollment.jpg` | Enrollment (incl. a session-master job) |
+| `club--10-accounts.jpg` | Accounts |
+| `club--11-settings.jpg` | Settings (identity + branding) |
+| `club--12-settings-meetings.jpg` | Settings → Meetings (absences, early / late window, auto-close) |
+
 ## Notes
 
 - **Promotion (school):** shows the "no devices set up" empty state. The
@@ -91,3 +119,8 @@ sales, 3 loyalty rules with 5 issuances.
   "Add account" flow.
 - `member_name_display` and a couple of `discount`-driven zero-total sales were
   left at defaults / tidied; nothing else was hand-corrected.
+- **Meetings (club):** at capture time the live `/meetings` page lost dark mode
+  on load — a hydration mismatch from the locale-dependent date format in
+  `formatZonedDate` makes React re-render the root, dropping the `dark` class.
+  Dark mode was re-applied with the sidebar theme toggle before `club--03` and
+  `club--04` were taken; the page content is unchanged.
