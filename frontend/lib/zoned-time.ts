@@ -64,18 +64,38 @@ export function utcToZonedParts(iso: string, timeZone: string): { date: string; 
   return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` }
 }
 
-/** "Sat 3 Oct 2026" in `timeZone`. */
+// Display strings below are assembled from numeric parts and fixed English
+// names rather than toLocaleDateString / toLocaleTimeString. They render on the
+// server AND in the browser, so any difference — the runtime's default locale,
+// or ICU wording that shifts between versions ("Sep" vs "Sept", a narrow
+// no-break space before "PM") — is a hydration mismatch. On a route with no
+// Suspense boundary React then re-renders the whole root, which drops the
+// `dark` class the theme script put on <html>.
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * "Sat, 3 Oct 2026" for a 'YYYY-MM-DD' calendar date; `weekday: false` →
+ * "3 Oct 2026", `year: false` → "Sat, 3 Oct". No timezone is involved.
+ */
+export function formatCalendarDate(date: string, { weekday = true, year = true } = {}): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const dayMonth = `${d} ${MONTHS[m - 1]}`
+  const withYear = year ? `${dayMonth} ${y}` : dayMonth
+  return weekday ? `${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}, ${withYear}` : withYear
+}
+
+/** "Sat, 3 Oct 2026" in `timeZone`. */
 export function formatZonedDate(iso: string, timeZone: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    timeZone, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  })
+  return formatCalendarDate(utcToZonedParts(iso, timeZone).date)
 }
 
 /** "10:00" / "10:00 AM" in `timeZone`, honouring institutions.time_format. */
 export function formatZonedTime(iso: string, timeZone: string, format: '12h' | '24h' = '24h'): string {
-  return new Date(iso).toLocaleTimeString(format === '12h' ? 'en-US' : 'en-GB', {
-    timeZone, hour: format === '12h' ? 'numeric' : '2-digit', minute: '2-digit', hour12: format === '12h',
-  })
+  const time = utcToZonedParts(iso, timeZone).time
+  if (format === '24h') return time
+  const [h, m] = time.split(':')
+  return `${Number(h) % 12 || 12}:${m} ${Number(h) < 12 ? 'AM' : 'PM'}`
 }
 
 /** Today's 'YYYY-MM-DD' in `timeZone`. */

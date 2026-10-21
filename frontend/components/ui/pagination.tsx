@@ -30,8 +30,8 @@ function Pagination({
       className={cn("flex items-center justify-between", className)}
     >
       <p className="tabular-nums text-xs text-muted-foreground">
-        {from.toLocaleString()}–{to.toLocaleString()} of{" "}
-        {totalCount.toLocaleString()}
+        {from.toLocaleString("en-GB")}–{to.toLocaleString("en-GB")} of{" "}
+        {totalCount.toLocaleString("en-GB")}
       </p>
       <div className="flex items-center gap-1.5">
         <Button

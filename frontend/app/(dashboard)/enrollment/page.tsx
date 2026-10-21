@@ -117,6 +117,8 @@ export default async function EnrollmentPage({
       institutionFilter={institutionFilter ?? ''}
       restrictedToDevice={!!adminDeviceId}
       clubDeviceIds={clubDeviceIds}
+      timezone={institution.timezone}
+      timeFormat={institution.time_format}
     />
   )
 }

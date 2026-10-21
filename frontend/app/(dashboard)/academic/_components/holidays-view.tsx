@@ -12,25 +12,18 @@ import {
 } from '@/components/ui/table'
 import { HolidayDialog } from './holiday-dialog'
 import { deleteHoliday } from '../_actions'
+import { formatCalendarDate } from '@/lib/zoned-time'
 import type { Holiday } from '@/lib/types'
 
 type Props = { holidays: Holiday[]; labelOverride?: string }
 
 function formatDate(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  return formatCalendarDate(iso)
 }
 
 // Recurring holidays match on day + month only, so we drop the (meaningless) year.
 function formatDayMonth(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-  })
+  return formatCalendarDate(iso, { weekday: false, year: false })
 }
 
 function formatRange(h: Holiday) {

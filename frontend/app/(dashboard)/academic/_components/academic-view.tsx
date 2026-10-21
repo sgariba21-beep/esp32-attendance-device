@@ -13,24 +13,15 @@ import {
 import { AcademicDialog } from './academic-dialog'
 import { setActiveTerm, deleteAcademicTerm } from '../_actions'
 import { pluralize } from '@/lib/utils'
+import { formatCalendarDate } from '@/lib/zoned-time'
 import type { AcademicTerm } from '@/lib/types'
 
 type Props = { terms: AcademicTerm[]; labelPeriod: string }
 
 function formatDateRange(start: string, end: string) {
-  const s = new Date(start + 'T00:00:00')
-  const e = new Date(end + 'T00:00:00')
-  const sameYear = s.getFullYear() === e.getFullYear()
-  const startStr = s.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    ...(sameYear ? {} : { year: 'numeric' }),
-  })
-  const endStr = e.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  const sameYear = start.slice(0, 4) === end.slice(0, 4)
+  const startStr = formatCalendarDate(start, { weekday: false, year: !sameYear })
+  const endStr = formatCalendarDate(end, { weekday: false })
   return `${startStr} – ${endStr}`
 }
 

@@ -15,6 +15,7 @@ import {
 import { Toolbar, ToolbarField } from '@/components/ui/toolbar'
 import { JobDialog } from './job-dialog'
 import { retryEnrollmentJob, cancelEnrollmentJob } from '../_actions'
+import { formatZonedTime, utcToZonedParts } from '@/lib/zoned-time'
 import type { EnrollmentJob } from '../page'
 import type { Device } from '@/lib/types'
 
@@ -50,6 +51,8 @@ type Props = {
   restrictedToDevice?: boolean
   /** Devices belonging to a club: they also offer the session-master commands. */
   clubDeviceIds?: string[]
+  timezone: string
+  timeFormat: '12h' | '24h'
 }
 
 const STATUS_BADGE: Record<EnrollmentJob['status'], { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }> = {
@@ -63,11 +66,11 @@ function formatClass(device: { group_name: string; unit_name: string }) {
   return `${device.group_name} ${device.unit_name}`
 }
 
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
+// "21/10/2026, 20:47" in the institution's timezone — not the viewer's, which
+// the server (UTC) and the browser would disagree on.
+function formatTime(iso: string, timeZone: string, timeFormat: '12h' | '24h') {
+  const [y, m, d] = utcToZonedParts(iso, timeZone).date.split('-')
+  return `${d}/${m}/${y}, ${formatZonedTime(iso, timeZone, timeFormat)}`
 }
 
 function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'error' }) {
@@ -98,6 +101,7 @@ function SseStatusBadge({ status }: { status: 'connecting' | 'connected' | 'erro
 export function EnrollmentView({
   initialJobs, devices, labelUnit, labelMember, labelMembers, showInstitution,
   institutions = [], institutionFilter = '', restrictedToDevice = false, clubDeviceIds = [],
+  timezone, timeFormat,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -264,7 +268,7 @@ export function EnrollmentView({
                 return (
                   <TableRow key={job.id}>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                      {formatTime(job.created_at)}
+                      {formatTime(job.created_at, timezone, timeFormat)}
                     </TableCell>
                     {showInstitution && (
                       <TableCell className="text-sm text-muted-foreground">{job.institution?.name ?? '—'}</TableCell>

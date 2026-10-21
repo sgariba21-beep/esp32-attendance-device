@@ -23,7 +23,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { Toolbar, ToolbarField, ToolbarSeparator } from '@/components/ui/toolbar'
 import { MultiSelect } from './multi-select'
 import { pluralize, formatClockTime } from '@/lib/utils'
-import { formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
+import { formatCalendarDate, formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
 import type { AttendanceRecord, Device, AcademicTerm, InstitutionType } from '@/lib/types'
 
 type MemberOption = { id: string; sid: string; fullname: string; group_name: string; device_id: string }
@@ -96,20 +96,11 @@ function formatClass(device: { group_name: string; unit_name: string }) {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  return formatCalendarDate(iso)
 }
 
 function formatShortDate(iso: string) {
-  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+  return formatCalendarDate(iso, { weekday: false })
 }
 
 function memberRateColor(rate: number | null): string {
@@ -578,7 +569,7 @@ export function AttendanceView({
       <div className={`transition-opacity duration-150 ${isPending ? 'opacity-50 pointer-events-none' : ''}`}>
         <Tabs defaultValue="records">
           <TabsList>
-            <TabsTrigger value="records">Records ({totalCount.toLocaleString()})</TabsTrigger>
+            <TabsTrigger value="records">Records ({totalCount.toLocaleString('en-GB')})</TabsTrigger>
             <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="by-member">By {memberTabLabel} ({memberStats.length})</TabsTrigger>
           </TabsList>
