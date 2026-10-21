@@ -474,7 +474,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
             <div className="flex-1 space-y-1">
               <Label htmlFor="track_absences" className="cursor-pointer font-medium">Record absences</Label>
               <p className="text-xs text-muted-foreground">
-                When a meeting closes, mark every expected {form.label_member.toLowerCase()} who didn&apos;t scan in as absent.
+                When a meeting closes, mark every expected {form.label_member.toLowerCase()}{' '}who didn&apos;t scan in as absent.
                 Expected means enrolled on the meeting&apos;s device, or everyone for a meeting open to all devices.
                 Turning this on later does not go back and mark past meetings.
               </p>
