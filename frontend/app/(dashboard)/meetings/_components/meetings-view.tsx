@@ -73,7 +73,9 @@ export function MeetingsView({ live, upcoming, past, schedules, devices, pinnedD
   const range = (m: Meeting) => `${time(m.starts_at)} – ${m.ends_at ? time(m.ends_at) : 'open'}`
 
   // Dialogs are remounted per open (key) so each starts from fresh state.
-  const [dialog, setDialog] = useState<{ kind: 'meeting'; meeting?: MeetingRow } | { kind: 'schedule' } | null>(null)
+  const [dialog, setDialog] = useState<
+    { kind: 'meeting'; meeting?: MeetingRow } | { kind: 'schedule'; schedule?: MeetingSchedule } | null
+  >(null)
   const [dialogKey, setDialogKey] = useState(0)
   const openDialog = (d: NonNullable<typeof dialog>) => { setDialogKey((k) => k + 1); setDialog(d) }
 
@@ -272,7 +274,8 @@ export function MeetingsView({ live, upcoming, past, schedules, devices, pinnedD
                     <TableCell className="whitespace-nowrap text-muted-foreground text-sm">
                       From {s.starts_on}{s.ends_on ? ` to ${s.ends_on}` : ''}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right whitespace-nowrap">
+                      <Button variant="ghost" size="sm" onClick={() => openDialog({ kind: 'schedule', schedule: s })}>Edit</Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -387,14 +390,12 @@ export function MeetingsView({ live, upcoming, past, schedules, devices, pinnedD
           key={dialogKey}
           open
           onOpenChange={(v) => { if (!v) setDialog(null) }}
+          schedule={dialog.schedule}
           devices={deviceOptions}
           pinnedDeviceId={pinnedDeviceId}
           timezone={tz}
           labelUnit={config.label_unit}
-          onCreated={(n) => setNotice({
-            kind: 'success',
-            text: `Recurring meeting created — ${n} ${n === 1 ? 'meeting' : 'meetings'} scheduled for the next 8 weeks.`,
-          })}
+          onSaved={(text) => setNotice({ kind: 'success', text })}
         />
       )}
     </div>
