@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SingleSelect } from '@/components/ui/single-select'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { createEnrollmentJob, getMembersByDevice } from '../_actions'
+import { createEnrollmentJob, getFreeSlot, getMembersByDevice } from '../_actions'
 import type { MemberOption } from '../_actions'
 import type { Device } from '@/lib/types'
 import { indefiniteArticle } from '@/lib/utils'
@@ -80,6 +80,10 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   const [overwriteMsg, setOverwriteMsg] = useState<string | null>(null)
   const [pendingJob, setPendingJob] = useState<Parameters<typeof createEnrollmentJob>[0] | null>(null)
   const [confirming, setConfirming] = useState(false)
+  // Lowest free sensor slot of the device it was looked up for (null: all taken).
+  const [freeSlot, setFreeSlot] = useState<{ deviceId: string; fid: number | null } | null>(null)
+  // The operator typed their own slot: don't replace it with the lookup.
+  const fidEdited = useRef(false)
 
   useEffect(() => {
     if (open) {
@@ -87,11 +91,32 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
       setDeviceMembers([])
       setOverwriteMsg(null)
       setPendingJob(null)
+      setFreeSlot(null)
       setForm({ ...empty, device_id: devices[0]?.id ?? '' })
     }
   }, [open, devices])
 
   const needsMember = form.command === 'register' || form.command === 'delete'
+  const needsFid       = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
+    || SESSION_COMMANDS.includes(form.command)
+  const needsMasterName = form.command === 'register-master' || form.command === 'register-session-master'
+  const takesSlot = form.command === 'register' || needsMasterName
+
+  // Prefill the lowest free slot when a register command meets a device, and
+  // on every open, so the slot of a job just queued isn't offered again.
+  useEffect(() => {
+    if (!open || !form.device_id || !takesSlot) return
+    const deviceId = form.device_id
+    fidEdited.current = false
+    let cancelled = false
+    getFreeSlot(deviceId).then((fid) => {
+      if (cancelled) return
+      setFreeSlot({ deviceId, fid })
+      if (fid !== null && !fidEdited.current) setForm((f) => (f.device_id === deviceId ? { ...f, fid } : f))
+    })
+    return () => { cancelled = true }
+  }, [open, form.device_id, takesSlot])
+  const findingSlot = takesSlot && freeSlot?.deviceId !== form.device_id
 
   useEffect(() => {
     if (!form.device_id || !needsMember) { setDeviceMembers([]); return }
@@ -106,9 +131,6 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
   function set<K extends keyof typeof empty>(field: K, value: (typeof empty)[K]) {
     setForm((f) => ({ ...f, [field]: value }))
   }
-  const needsFid       = form.command === 'register' || form.command === 'register-master' || form.command === 'delete-master'
-    || SESSION_COMMANDS.includes(form.command)
-  const needsMasterName = form.command === 'register-master' || form.command === 'register-session-master'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -313,10 +335,14 @@ export function JobDialog({ open, onOpenChange, devices, labelUnit, labelMember,
                 min={1}
                 max={127}
                 value={form.fid}
-                onChange={(e) => set('fid', parseInt(e.target.value) || 1)}
+                onChange={(e) => { fidEdited.current = true; set('fid', parseInt(e.target.value) || 1) }}
               />
               <p className="text-xs text-muted-foreground">
-                The slot number to store the template in on the R503 sensor.
+                {!takesSlot ? 'The slot number to store the template in on the R503 sensor.'
+                  : findingSlot ? 'Finding the lowest free slot…'
+                  : freeSlot?.fid === null ? 'Every slot on this device is in use. Delete a fingerprint first, or pick a slot to overwrite.'
+                  : form.fid === freeSlot?.fid ? 'The lowest free slot on this device. You can change it.'
+                  : 'The slot number to store the template in on the R503 sensor.'}
               </p>
             </div>
           )}

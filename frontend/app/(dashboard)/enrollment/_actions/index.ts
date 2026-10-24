@@ -102,6 +102,65 @@ async function getMasterOccupant(
   return null
 }
 
+// Highest sensor slot the firmware uses (MAX_FID).
+const MAX_FID = 127
+
+/**
+ * The lowest sensor slot on a device that nothing holds or is about to:
+ * no member's finger (members.fin1/fin2), no master or session master (same
+ * job-history rule as getMasterOccupant), and no register job still queued
+ * or running. Null when every slot is taken. A suggestion for the form only:
+ * createEnrollmentJob and the device both still check the slot itself.
+ */
+export async function getFreeSlot(deviceId: string): Promise<number | null> {
+  const session = await requireRole('super_admin', 'admin', 'platform_admin')
+  if (!(await ownsRecord('devices', deviceId, session))) return null
+  const guard = await adminDeviceGuard(session, deviceId)
+  if ('error' in guard) return null
+  const supabase = createAdminClient()
+
+  const [membersRes, mastersRes, queuedRes] = await Promise.all([
+    supabase
+      .from('members')
+      .select('fin1, fin2')
+      .eq('device_id', deviceId)
+      .or('fin1.gt.0,fin2.gt.0'),
+    supabase
+      .from('enrollment_jobs')
+      .select('command, fid')
+      .eq('device_id', deviceId)
+      .in('command', [...MASTER_COMMANDS, 'clearall'])
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('enrollment_jobs')
+      .select('fid')
+      .eq('device_id', deviceId)
+      .in('command', ['register', 'register-master', 'register-session-master'])
+      .in('status', ['pending', 'in_progress'])
+      .not('fid', 'is', null),
+  ])
+
+  const taken = new Set<number>()
+  for (const m of membersRes.data ?? []) {
+    if (m.fin1 > 0) taken.add(m.fin1)
+    if (m.fin2 > 0) taken.add(m.fin2)
+  }
+  // Newest first: a slot's latest master job decides it; a clear-all wiped
+  // every slot, so nothing older counts.
+  const decided = new Set<number>()
+  for (const job of mastersRes.data ?? []) {
+    if (job.command === 'clearall') break
+    if (job.fid === null || decided.has(job.fid)) continue
+    decided.add(job.fid)
+    if (job.command === 'register-master' || job.command === 'register-session-master') taken.add(job.fid)
+  }
+  for (const job of queuedRes.data ?? []) taken.add(job.fid)
+
+  for (let fid = 1; fid <= MAX_FID; fid++) if (!taken.has(fid)) return fid
+  return null
+}
+
 export async function createEnrollmentJob(data: JobFormData): Promise<CreateJobResult> {
   const session = await requireRole('super_admin', 'admin', 'platform_admin')
   const supabase = createAdminClient()
