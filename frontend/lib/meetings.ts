@@ -62,6 +62,21 @@ export function describeRecurrence(s: Pick<MeetingSchedule, 'freq' | 'interval_n
   return s.interval_n > 1 ? `Every ${s.interval_n} weeks on ${day}` : `Every ${day}`
 }
 
+/** 'HH:MM' (or 'HH:MM:SS') → minutes after midnight. */
+const clockMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+
+/** Minutes from a start to an end time ('HH:MM'). An end at or before the start is on the next day. */
+export function minutesBetween(start: string, end: string): number {
+  const d = clockMinutes(end) - clockMinutes(start)
+  return d > 0 ? d : d + 1440
+}
+
+/** 'HH:MM' a schedule's meetings end at, which may be on the next day. */
+export function scheduleEndTime(s: Pick<MeetingSchedule, 'start_time' | 'duration_minutes'>): string {
+  const t = (clockMinutes(s.start_time) + s.duration_minutes) % 1440
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+}
+
 /** "2 h", "1 h 30 min", "45 min". */
 export function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60)

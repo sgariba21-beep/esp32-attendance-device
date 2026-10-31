@@ -14,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
-import { meetingTitle, describeRecurrence, formatDuration } from '@/lib/meetings'
+import { meetingTitle, describeRecurrence, scheduleEndTime } from '@/lib/meetings'
 import { formatClockTime, pluralize } from '@/lib/utils'
 import { cancelMeeting, closeMeetingNow, deleteMeeting, endSchedule } from '../_actions'
 import { MeetingDialog } from './meeting-dialog'
@@ -266,7 +266,7 @@ export function MeetingsView({ live, upcoming, past, schedules, devices, pinnedD
                     <TableCell className="font-medium">{s.title ?? 'Untitled'}</TableCell>
                     <TableCell>{describeRecurrence(s)}</TableCell>
                     <TableCell className="whitespace-nowrap tabular-nums">
-                      {formatClockTime(s.start_time, config.time_format)} · {formatDuration(s.duration_minutes)}
+                      {formatClockTime(s.start_time, config.time_format)} – {formatClockTime(scheduleEndTime(s), config.time_format)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {s.device_id ? (deviceOptions.find((d) => d.id === s.device_id)?.label ?? '—') : 'All devices'}

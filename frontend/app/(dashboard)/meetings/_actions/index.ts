@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { requireRole, getInstitution, resolveDeviceScope } from '@/lib/supabase/dal'
 import { ownsRecord } from '@/lib/supabase/ownership'
 import { zonedToUtcIso, utcToZonedParts, todayInZone, formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
-import { meetingTitle } from '@/lib/meetings'
+import { meetingTitle, minutesBetween } from '@/lib/meetings'
 import type { Meeting, MeetingSchedule } from '@/lib/types'
 
 type Result = { error: string | null }
@@ -289,11 +289,14 @@ export type ScheduleInput = {
   nth: number | null
   /** 'HH:MM', local to the club. */
   start_time: string
-  duration_minutes: number
+  /** 'HH:MM', local to the club. At or before start_time means the next day. */
+  end_time: string
   starts_on: string
   ends_on: string | null
   device_id: string | null
 }
+
+const CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 
 /** The rule's columns as stored, or the first problem with the input. */
 function scheduleFields(input: ScheduleInput) {
@@ -303,10 +306,11 @@ function scheduleFields(input: ScheduleInput) {
   if (!monthly && (!Number.isInteger(input.interval_n) || input.interval_n < 1 || input.interval_n > 12)) {
     return { error: 'Repeat every 1 to 12 weeks.' }
   }
-  if (!/^\d{2}:\d{2}$/.test(input.start_time)) return { error: 'Enter a start time.' }
-  if (!Number.isInteger(input.duration_minutes) || input.duration_minutes < 5 || input.duration_minutes > 1440) {
-    return { error: 'Length must be between 5 minutes and 24 hours.' }
-  }
+  if (!CLOCK_RE.test(input.start_time)) return { error: 'Enter a start time.' }
+  if (!CLOCK_RE.test(input.end_time)) return { error: 'Enter an end time.' }
+  // Stored as a length (the generator adds it to each start), so it is at most 24 hours.
+  const duration = minutesBetween(input.start_time, input.end_time)
+  if (duration < 5) return { error: 'A meeting must last at least 5 minutes.' }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.starts_on)) return { error: 'Enter a start date.' }
   if (input.ends_on && input.ends_on < input.starts_on) return { error: 'The end date must be on or after the start date.' }
   return {
@@ -319,7 +323,7 @@ function scheduleFields(input: ScheduleInput) {
       weekday: input.weekday,
       nth: monthly ? input.nth : null,
       start_time: input.start_time,
-      duration_minutes: input.duration_minutes,
+      duration_minutes: duration,
       starts_on: input.starts_on,
       ends_on: input.ends_on || null,
     },

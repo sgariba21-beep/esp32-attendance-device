@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { todayInZone } from '@/lib/zoned-time'
-import { describeRecurrence, formatDuration, weekdayName } from '@/lib/meetings'
+import { describeRecurrence, formatDuration, minutesBetween, scheduleEndTime, weekdayName } from '@/lib/meetings'
 import { createSchedule, updateSchedule } from '../_actions'
 import type { MeetingSchedule } from '@/lib/types'
 import type { DeviceOption } from './meetings-view'
@@ -31,7 +31,6 @@ type Props = {
 type Repeat = `w${number}` | 'm'
 
 const INTERVALS = [1, 2, 3, 4]
-const LENGTHS = [30, 45, 60, 90, 120, 150, 180, 240]
 
 const meetings = (n: number) => `${n} ${n === 1 ? 'meeting' : 'meetings'}`
 
@@ -47,7 +46,7 @@ export function ScheduleDialog({ open, onOpenChange, schedule, devices, pinnedDe
   const [weekday, setWeekday] = useState(schedule?.weekday ?? 6)
   const [nth, setNth] = useState(schedule?.nth ?? 1)
   const [startTime, setStartTime] = useState(schedule?.start_time.slice(0, 5) ?? '')
-  const [duration, setDuration] = useState(schedule?.duration_minutes ?? 120)
+  const [endTime, setEndTime] = useState(schedule ? scheduleEndTime(schedule) : '')
   const [startsOn, setStartsOn] = useState(schedule?.starts_on ?? today)
   const [endsOn, setEndsOn] = useState(schedule?.ends_on ?? '')
   const [deviceId, setDeviceId] = useState(
@@ -68,9 +67,8 @@ export function ScheduleDialog({ open, onOpenChange, schedule, devices, pinnedDe
   const intervals = schedule && !INTERVALS.includes(schedule.interval_n) && schedule.freq === 'weekly'
     ? [...INTERVALS, schedule.interval_n].sort((a, b) => a - b)
     : INTERVALS
-  const lengths = schedule && !LENGTHS.includes(schedule.duration_minutes)
-    ? [...LENGTHS, schedule.duration_minutes].sort((a, b) => a - b)
-    : LENGTHS
+  const overnight = !!startTime && !!endTime && endTime <= startTime
+  const length = startTime && endTime ? minutesBetween(startTime, endTime) : null
   // Mirrors updateSchedule: a change of days re-creates the upcoming meetings.
   const datesChanged = !!schedule && (
     repeat !== initialRepeat || weekday !== schedule.weekday
@@ -79,7 +77,7 @@ export function ScheduleDialog({ open, onOpenChange, schedule, devices, pinnedDe
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!startTime) { setError('Enter a start time.'); return }
+    if (!startTime || !endTime) { setError('Enter a start and end time.'); return }
     setLoading(true)
     setError(null)
     const input = {
@@ -89,7 +87,7 @@ export function ScheduleDialog({ open, onOpenChange, schedule, devices, pinnedDe
       weekday,
       nth: monthly ? nth : null,
       start_time: startTime,
-      duration_minutes: duration,
+      end_time: endTime,
       starts_on: startsOn,
       ends_on: endsOn || null,
       device_id: deviceId || null,
@@ -173,14 +171,13 @@ export function ScheduleDialog({ open, onOpenChange, schedule, devices, pinnedDe
               <Input id="schedule-start" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="schedule-length">Length</Label>
-              <NativeSelect id="schedule-length" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-                {lengths.map((m) => (
-                  <option key={m} value={m}>{formatDuration(m)}</option>
-                ))}
-              </NativeSelect>
+              <Label htmlFor="schedule-end">Ends at</Label>
+              <Input id="schedule-end" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
             </div>
           </div>
+          {overnight && (
+            <p className="text-xs text-muted-foreground">Ends the next day.</p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
@@ -215,7 +212,8 @@ export function ScheduleDialog({ open, onOpenChange, schedule, devices, pinnedDe
           </div>
 
           <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
-            {summary}{startTime ? ` at ${startTime}` : ''}, {formatDuration(duration)}
+            {summary}
+            {length !== null ? `, ${startTime} – ${endTime} (${formatDuration(length)})` : startTime ? ` at ${startTime}` : ''}
             {endsOn ? `, until ${endsOn}` : ''}.
           </p>
 
