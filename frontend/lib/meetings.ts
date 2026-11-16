@@ -39,6 +39,15 @@ export function isUpcoming(m: Meeting, cfg: WindowConfig, now: number = Date.now
   return !!w && now < w[0]
 }
 
+/**
+ * Closed with no one scanned in, so the close sweep recorded no absences for
+ * it. A late (offline) scan makes it held again at the next sweep; until
+ * then that scan already shows in `present`, which wins here.
+ */
+export function isNotHeld(m: Pick<Meeting, 'status' | 'not_held'> & { present: number }): boolean {
+  return m.status === 'closed' && m.not_held && m.present === 0
+}
+
 /** Display name; ad-hoc meetings are untitled until someone names them. */
 export function meetingTitle(m: Pick<Meeting, 'title' | 'origin'>): string {
   if (m.title) return m.title

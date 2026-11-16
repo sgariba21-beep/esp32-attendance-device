@@ -46,7 +46,7 @@ async function loadMeeting(ctx: Ctx, id: string): Promise<{ meeting: Meeting } |
   if (!(await ownsRecord('meetings', id, ctx.session))) return { error: 'Meeting not found.' }
   const { data } = await createAdminClient()
     .from('meetings')
-    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at')
+    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at, not_held')
     .eq('id', id)
     .single()
   if (!data) return { error: 'Meeting not found.' }

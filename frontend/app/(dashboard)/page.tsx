@@ -10,7 +10,7 @@ import {
 import { CalendarDays, CalendarClock, Radio, UserCheck, UserX, Percent, Users, Cpu, Building2, Activity, ArrowRight, TrendingUp, Scissors, Package, ShoppingBag } from 'lucide-react'
 import { formatMoney, formatClockTime } from '@/lib/utils'
 import { formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
-import { isLive, isUpcoming, meetingTitle } from '@/lib/meetings'
+import { isLive, isNotHeld, isUpcoming, meetingTitle } from '@/lib/meetings'
 import type { InstitutionConfig, Meeting } from '@/lib/types'
 import { LOW_STOCK_THRESHOLD } from './reports/page'
 
@@ -31,7 +31,7 @@ async function loadClubOverview(institution: InstitutionConfig, institutionId: s
 
   let meetingsQ = supabase
     .from('meetings')
-    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at, absences_written_at')
+    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at, not_held, absences_written_at')
     .eq('institution_id', institutionId)
     .neq('status', 'cancelled')
     .gte('starts_at', since)
@@ -286,7 +286,10 @@ export default async function OverviewPage() {
           )}
           <StatCard
             label="Last meeting"
-            value={club.last ? (club.last.rate !== null ? pct(club.last.rate) : `${club.last.present} present`) : '—'}
+            value={club.last
+              ? (isNotHeld(club.last) ? 'Not held'
+                : club.last.rate !== null ? pct(club.last.rate) : `${club.last.present} present`)
+              : '—'}
             hint={club.last ? `${meetingTitle(club.last)} · ${formatZonedDate(club.last.starts_at, tz)}` : 'No meetings yet'}
             icon={UserCheck}
           />

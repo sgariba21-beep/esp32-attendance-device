@@ -30,7 +30,7 @@ async function loadMeetings(institutionId: string, institution: InstitutionConfi
     .order('unit_name')
   let meetingsQ = supabase
     .from('meetings')
-    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at')
+    .select('id, title, origin, status, starts_at, ends_at, opened_at, closed_at, device_id, schedule_id, device_deleted_at, not_held')
     .eq('institution_id', institutionId)
     .gte('starts_at', since)
     .order('starts_at')

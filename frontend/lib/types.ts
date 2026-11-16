@@ -207,6 +207,8 @@ export type Meeting = {
   device_id: string | null
   schedule_id: string | null
   device_deleted_at: string | null
+  /** Set by the close sweep: closed with no one scanned in, so not held and no absences recorded. */
+  not_held: boolean
 }
 
 /** Club mode: a recurrence rule materialised into meetings ~8 weeks ahead. */

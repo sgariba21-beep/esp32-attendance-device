@@ -476,6 +476,7 @@ export function SettingsForm({ institution, saveAction }: Props) {
               <p className="text-xs text-muted-foreground">
                 When a meeting closes, mark every expected {form.label_member.toLowerCase()}{' '}who didn&apos;t scan in as absent.
                 Expected means enrolled on the meeting&apos;s device, or everyone for a meeting open to all devices.
+                A meeting no one scans in for counts as not held, and no one is marked absent for it.
                 Turning this on later does not go back and mark past meetings.
               </p>
             </div>

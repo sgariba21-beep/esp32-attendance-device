@@ -14,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { formatZonedDate, formatZonedTime } from '@/lib/zoned-time'
-import { meetingTitle, describeRecurrence, scheduleEndTime } from '@/lib/meetings'
+import { meetingTitle, describeRecurrence, isNotHeld, scheduleEndTime } from '@/lib/meetings'
 import { formatClockTime, pluralize } from '@/lib/utils'
 import { cancelMeeting, closeMeetingNow, deleteMeeting, endSchedule } from '../_actions'
 import { MeetingDialog } from './meeting-dialog'
@@ -84,7 +84,7 @@ export function MeetingsView({ live, upcoming, past, schedules, devices, pinnedD
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const absencesNote = config.track_absences
-    ? ' Absences for it are recorded within about 15 minutes.'
+    ? ' Absences for it are recorded within about 15 minutes. If no one scanned in, it counts as not held and no one is marked absent.'
     : ''
 
   function ask(action: ConfirmState['action'], m: { id: string; title: string | null; origin?: Meeting['origin'] }, isSkip = false) {
@@ -316,18 +316,20 @@ export function MeetingsView({ live, upcoming, past, schedules, devices, pinnedD
               <TableBody>
                 {past.map((m) => {
                   const hasRows = m.present + m.absent > 0
+                  const notHeld = isNotHeld(m)
                   return (
-                    <TableRow key={m.id} className={m.status === 'cancelled' ? 'text-muted-foreground' : undefined}>
+                    <TableRow key={m.id} className={m.status === 'cancelled' || notHeld ? 'text-muted-foreground' : undefined}>
                       <TableCell className="whitespace-nowrap font-medium">{date(m.starts_at)}</TableCell>
                       <TableCell className="whitespace-nowrap tabular-nums">{range(m)}</TableCell>
                       <TableCell>{meetingTitle(m)}</TableCell>
                       <TableCell className="text-muted-foreground">{deviceLabel(m)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-success-foreground font-medium">{m.present}</TableCell>
+                      <TableCell className={`text-right tabular-nums${notHeld ? '' : ' text-success-foreground font-medium'}`}>{m.present}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {config.track_absences ? <span className="text-destructive font-medium">{m.absent}</span> : '—'}
+                        {config.track_absences && !notHeld ? <span className="text-destructive font-medium">{m.absent}</span> : '—'}
                       </TableCell>
                       <TableCell>
                         {m.status === 'cancelled' ? <Badge variant="outline">Cancelled</Badge>
+                          : notHeld ? <Badge variant="outline" title="No one scanned in, so no one was marked absent">Not held</Badge>
                           : m.status === 'closed' ? <Badge variant="secondary">Closed</Badge>
                           : <Badge variant="warning">Closing…</Badge>}
                       </TableCell>
