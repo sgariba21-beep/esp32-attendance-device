@@ -26,7 +26,13 @@ export async function POST(request: NextRequest) {
 
   // Clears the auth cookies via the cookie bridge above. Errors are non-fatal —
   // the expired cookies are still written to the response.
-  await supabase.auth.signOut()
+  //
+  // scope 'local': end THIS browser's session only. supabase-js defaults to
+  // 'global', which revokes every session the account has. The session
+  // manager calls this route automatically (a fresh browser session, the
+  // inactivity timeout), so global scope meant opening the dashboard on a new
+  // device, or idling on one, signed the user out on all of them.
+  await supabase.auth.signOut({ scope: 'local' })
 
   return response
 }
