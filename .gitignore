@@ -9,3 +9,12 @@ backend/supabase/functions/.env
 # Python bytecode (docs/source build script)
 __pycache__/
 *.pyc
+
+# Supabase CLI state (also created at the repo root by `supabase link`)
+supabase/.temp/
+.branches/
+
+# Editor / CAD / EDA by-products
+*.lck
+*.FCBak
+fp-info-cache
